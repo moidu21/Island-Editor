@@ -32,7 +32,7 @@ env:
   CONFIGURATION: Release
   PLATFORM: x64
   DOTNET_VERSION: "8.0.x"
-  APP_PROJECT: src/Anno1800IslandTool.App/Anno1800IslandTool.App.csproj
+  APP_PROJECT: src/Anno1800IslandTool.UI/Anno1800IslandTool.UI.csproj
   TEST_PROJECT: tests/Anno1800IslandTool.Tests/Anno1800IslandTool.Tests.csproj
   APP_FOLDER_NAME: Anno1800IslandTool
   ARTIFACTS_DIR: artifacts
@@ -54,11 +54,15 @@ jobs:
 
       - name: Restore
         shell: pwsh
-        run: dotnet restore -p:Platform=$env:PLATFORM
+        run: dotnet restore Anno1800IslandTool.sln -p:Platform=$env:PLATFORM
 
       - name: Build
         shell: pwsh
-        run: dotnet build --configuration $env:CONFIGURATION --no-restore -p:Platform=$env:PLATFORM
+        run: >
+          dotnet build Anno1800IslandTool.sln
+          --configuration $env:CONFIGURATION
+          --no-restore
+          -p:Platform=$env:PLATFORM
 
       - name: Test
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_tests == 'true'
@@ -100,7 +104,7 @@ jobs:
 
           Copy-Item -Path "$env:PUBLISH_DIR\*" -Destination $appFolder -Recurse -Force
 
-      - name: Create release ZIP files
+      - name: Create ZIP files
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -122,10 +126,12 @@ jobs:
             Remove-Item $sourcesZip -Force
           }
 
-          # Important :
-          # On compresse le contenu du dossier parent release-package.
-          # Le ZIP contiendra donc le dossier Anno1800IslandTool/
-          # puis les fichiers buildés à l'intérieur.
+          # ZIP final :
+          # Anno1800IslandTool-vX.X.X-win-x64.zip
+          # └── Anno1800IslandTool/
+          #     ├── Anno1800IslandTool.UI.exe
+          #     ├── *.dll
+          #     └── fichiers nécessaires
           $releaseRoot = Join-Path $env:ARTIFACTS_DIR "release-package"
 
           Compress-Archive `
@@ -133,6 +139,10 @@ jobs:
             -DestinationPath $appZip `
             -Force
 
+          # Sources :
+          # Anno1800IslandTool-vX.X.X-sources.zip
+          # └── Anno1800IslandTool-sources/
+          #     └── contenu du dépôt
           $sourceTemp = Join-Path $env:ARTIFACTS_DIR "source-package"
           $sourceFolder = Join-Path $sourceTemp "Anno1800IslandTool-sources"
 
