@@ -43,6 +43,7 @@ public partial class TerrainHeightmapWindow : Window
         _project = project;
         _editor = editor;
         InitializeComponent();
+        Loaded += (_, _) => UiLocalizationManager.ApplyTo(this);
         Loaded += TerrainHeightmapWindow_Loaded;
     }
 

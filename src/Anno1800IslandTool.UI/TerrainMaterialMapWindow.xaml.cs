@@ -33,6 +33,7 @@ public partial class TerrainMaterialMapWindow : Window
     public TerrainMaterialMapWindow(IslandProject project, IslandProjectEditor editor)
     {
         InitializeComponent();
+        Loaded += (_, _) => UiLocalizationManager.ApplyTo(this);
         _project = project ?? throw new ArgumentNullException(nameof(project));
         _editor = editor ?? throw new ArgumentNullException(nameof(editor));
         _workingMap = _project.Rd3d.MaterialMap.Clone();

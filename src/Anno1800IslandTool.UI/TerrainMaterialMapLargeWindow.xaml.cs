@@ -34,6 +34,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
     public TerrainMaterialMapLargeWindow(TerrainMaterialMapWindow ownerWindow)
     {
         InitializeComponent();
+        Loaded += (_, _) => UiLocalizationManager.ApplyTo(this);
         _ownerWindow = ownerWindow ?? throw new ArgumentNullException(nameof(ownerWindow));
 
         ViewModeComboBox.ItemsSource = new[]

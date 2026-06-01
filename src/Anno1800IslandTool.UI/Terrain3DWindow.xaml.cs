@@ -113,6 +113,7 @@ public partial class Terrain3DWindow : Window
     {
         _project = project ?? throw new ArgumentNullException(nameof(project));
         InitializeComponent();
+        Loaded += (_, _) => UiLocalizationManager.ApplyTo(this);
 
         _sceneVisual.Content = _sceneRoot;
         _overlayVisual.Content = new Model3DGroup();

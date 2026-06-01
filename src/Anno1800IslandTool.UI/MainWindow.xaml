@@ -1,7 +1,7 @@
 <Window x:Class="Anno1800IslandTool.UI.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Anno1800IslandTool v44.8 global tintbase édition"
+        Title="Anno1800IslandTool v45.1 localisation"
         Height="980"
         Width="1760"
         WindowStartupLocation="CenterScreen">
@@ -27,7 +27,8 @@
                       Margin="16,8,0,0"
                       Content="Lire le détail des pages (plus lent)"
                       ToolTip="Charge mesh/normalmaps en mémoire pour l'édition 3D complète."
-                      VerticalAlignment="Center"/>
+                      VerticalAlignment="Center"
+                      IsChecked="True"/>
             <CheckBox x:Name="MemorySaverCheckBox"
                       Margin="12,8,0,0"
                       IsChecked="True"
@@ -35,8 +36,17 @@
                       ToolTip="v41.2 : lit les pages par lots et ne conserve pas le XML brut des pages mesh/normalmap. Décoche pour privilégier la vitesse/préservation brute."
                       VerticalAlignment="Center"/>
             <TextBlock Margin="16,8,0,0"
-                       Text="v44.8 : BaseTextureData végétation éditable + anti-rouge ; export préserve les teintes manuelles."
+                       Text="v45.1 : localisation FR/EN/DE + lecture détail des pages activée par défaut."
                        FontWeight="SemiBold"/>
+            <TextBlock Margin="16,8,0,0"
+                       Text="Langue"
+                       VerticalAlignment="Center"/>
+            <ComboBox x:Name="LanguageSelectorComboBox"
+                      Width="125"
+                      Height="26"
+                      Margin="6,4,0,0"
+                      VerticalAlignment="Center"
+                      SelectionChanged="LanguageSelectorComboBox_SelectionChanged"/>
         </StackPanel>
 
         <Border Grid.Row="1" BorderBrush="#DDD" BorderThickness="1" Padding="8" Margin="0,0,0,0">

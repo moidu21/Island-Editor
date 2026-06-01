@@ -28,6 +28,7 @@ public partial class GlobalTintBaseMapWindow : Window
     {
         _project = project;
         InitializeComponent();
+        Loaded += (_, _) => UiLocalizationManager.ApplyTo(this);
         UpdateSliderLabels();
         LoadFromProject();
     }

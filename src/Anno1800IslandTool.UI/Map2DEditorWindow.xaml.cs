@@ -41,6 +41,7 @@ public partial class Map2DEditorWindow : Window
         _project = project;
         _editor = editor;
         InitializeComponent();
+        Loaded += (_, _) => UiLocalizationManager.ApplyTo(this);
         _isUiReady = true;
         MapCanvas.LayoutTransform = new ScaleTransform(_zoom, _zoom);
 

@@ -27,5 +27,34 @@ public partial class App : Application
         }
 
         base.OnStartup(e);
+
+        // v45.2 : pendant la boîte de choix de langue, il n'existe pas encore de fenêtre principale.
+        // Avec le ShutdownMode WPF par défaut (OnLastWindowClose), fermer cette boîte déclenche
+        // l'arrêt de l'application avant l'affichage de MainWindow. On désactive donc l'arrêt
+        // automatique pendant le bootstrap, puis on repasse en mode normal une fois MainWindow créée.
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
+        try
+        {
+            var languageWindow = new LanguageSelectionWindow(UiLocalizationManager.StartupPreference);
+            if (languageWindow.ShowDialog() == true)
+            {
+                UiLocalizationManager.SetStartupPreference(languageWindow.SelectedLanguage);
+            }
+            else
+            {
+                UiLocalizationManager.SetStartupPreference(UiLocalizationManager.StartupPreference, save: false);
+            }
+
+            var mainWindow = new MainWindow();
+            MainWindow = mainWindow;
+            ShutdownMode = ShutdownMode.OnMainWindowClose;
+            mainWindow.Show();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.ToString(), "Anno1800IslandTool - startup error", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown();
+        }
     }
 }

@@ -44,13 +44,17 @@ public partial class MainWindow : Window
     private BitmapSource? _currentPreviewBitmap;
     private string? _effectivePreviewPath;
     private MapEditMode _mapEditMode = MapEditMode.Select;
+    private bool _updatingLanguageSelector;
 
     public MainWindow()
     {
         InitializeComponent();
-        SummaryTextBox.Text = "Aucune archive chargée.";
-        AdvancedGameplayRenderTextBox.Text = "Aucun projet chargé.";
-        SelectionDetailsTextBox.Text = "Aucune sélection.";
+        _updatingLanguageSelector = true;
+        UiLocalizationManager.FillLanguageCombo(LanguageSelectorComboBox);
+        _updatingLanguageSelector = false;
+        SummaryTextBox.Text = UiLocalizationManager.T("Aucune archive chargée.");
+        AdvancedGameplayRenderTextBox.Text = UiLocalizationManager.T("Aucun projet chargé.");
+        SelectionDetailsTextBox.Text = UiLocalizationManager.T("Aucune sélection.");
         SlotsDataGrid.ItemsSource = _slotRows;
         AreasDataGrid.ItemsSource = _areaRows;
         SpawnsDataGrid.ItemsSource = _spawnRows;
@@ -61,14 +65,26 @@ public partial class MainWindow : Window
         RawTextSelector.ItemsSource = new[] { "Root", "RD3D", "GameData", "MaterialSet" };
         RawTextSelector.SelectedIndex = 0;
         UpdateMapModeText();
+        Loaded += (_, _) => UiLocalizationManager.ApplyTo(this);
+    }
+
+    private void LanguageSelectorComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingLanguageSelector || LanguageSelectorComboBox.SelectedItem is not ComboBoxItem item || item.Tag is not UiLanguage language)
+        {
+            return;
+        }
+
+        UiLocalizationManager.SetStartupPreference(language);
+        UiLocalizationManager.ApplyToOpenWindows();
     }
 
     private void OpenArchiveButton_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFileDialog
         {
-            Filter = "Archives ZIP (*.zip)|*.zip|Tous les fichiers (*.*)|*.*",
-            Title = "Sélectionner une archive d'île interprétée"
+            Filter = UiLocalizationManager.T("Archives ZIP (*.zip)|*.zip|Tous les fichiers (*.*)|*.*"),
+            Title = UiLocalizationManager.T("Sélectionner une archive d'île interprétée")
         };
 
         if (dialog.ShowDialog(this) != true)
@@ -91,7 +107,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.ToString(), "Erreur d'import", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.ToString(), UiLocalizationManager.T("Erreur d'import"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -99,7 +115,7 @@ public partial class MainWindow : Window
     {
         if (_currentProject is null)
         {
-            MessageBox.Show(this, "Aucun projet chargé.", "Validation", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, UiLocalizationManager.T("Aucun projet chargé."), UiLocalizationManager.T("Validation"), MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -112,16 +128,16 @@ public partial class MainWindow : Window
     {
         if (_currentProject is null)
         {
-            MessageBox.Show(this, "Aucun projet chargé.", "Export", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, UiLocalizationManager.T("Aucun projet chargé."), UiLocalizationManager.T("Export"), MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
         var defaultName = IOPath.GetFileNameWithoutExtension(_currentProject.Metadata.SourceArchivePath) + "_edited.zip";
         var dialog = new SaveFileDialog
         {
-            Filter = "Archives ZIP (*.zip)|*.zip",
+            Filter = UiLocalizationManager.T("Archives ZIP (*.zip)|*.zip"),
             FileName = defaultName,
-            Title = "Exporter l'archive modifiée"
+            Title = UiLocalizationManager.T("Exporter l'archive modifiée")
         };
 
         if (dialog.ShowDialog(this) != true)
@@ -132,11 +148,11 @@ public partial class MainWindow : Window
         try
         {
             var report = _exporter.Export(_currentProject, dialog.FileName, new ExportOptions());
-            MessageBox.Show(this, report.Summary, "Export terminé", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, report.Summary, UiLocalizationManager.T("Export terminé"), MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.ToString(), "Erreur d'export", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.ToString(), UiLocalizationManager.T("Erreur d'export"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -144,7 +160,7 @@ public partial class MainWindow : Window
     {
         if (_currentProject is null)
         {
-            MessageBox.Show(this, "Aucun projet chargé.", "Sauvegarde", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, UiLocalizationManager.T("Aucun projet chargé."), UiLocalizationManager.T("Sauvegarde"), MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -166,7 +182,7 @@ public partial class MainWindow : Window
             + Environment.NewLine + Environment.NewLine
             + _currentProject.ValidationReport.ToDisplayText();
         File.WriteAllText(dialog.FileName, text, Encoding.UTF8);
-        MessageBox.Show(this, "Rapport sauvegardé.", "Sauvegarde", MessageBoxButton.OK, MessageBoxImage.Information);
+        MessageBox.Show(this, UiLocalizationManager.T("Rapport sauvegardé."), UiLocalizationManager.T("Sauvegarde"), MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private void RegenerateTextsButton_Click(object sender, RoutedEventArgs e)
@@ -178,14 +194,14 @@ public partial class MainWindow : Window
 
         _editor.RegenerateAllTexts(_currentProject);
         RefreshProjectDisplay();
-        MessageBox.Show(this, "Les textes pivots ont été régénérés depuis le modèle.", "Régénération", MessageBoxButton.OK, MessageBoxImage.Information);
+        MessageBox.Show(this, UiLocalizationManager.T("Les textes pivots ont été régénérés depuis le modèle."), UiLocalizationManager.T("Régénération"), MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private void OpenMap2DWindowButton_Click(object sender, RoutedEventArgs e)
     {
         if (_currentProject is null)
         {
-            MessageBox.Show(this, "Aucun projet chargé.", "Vue 2D", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, UiLocalizationManager.T("Aucun projet chargé."), UiLocalizationManager.T("Vue 2D"), MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
