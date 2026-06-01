@@ -57,7 +57,18 @@ jobs:
       - name: Build
         shell: pwsh
         run: dotnet build --configuration $env:CONFIGURATION --no-restore -p:Platform=$env:PLATFORM
-      
+
+      - name: Test
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_tests == 'true'
+        shell: pwsh
+        run: >
+          dotnet test $env:TEST_PROJECT
+          --configuration $env:CONFIGURATION
+          --no-build
+          --no-restore
+          -p:Platform=$env:PLATFORM
+          --logger "trx;LogFileName=test-results.trx"
+
       - name: Publish application
         shell: pwsh
         run: >
