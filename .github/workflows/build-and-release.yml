@@ -1,0 +1,113 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+      - 'V*'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: Anno1800IslandTool
+  DOTNET_VERSION: '8.0.x'
+  CONFIGURATION: Release
+  PLATFORM: x64
+  RUNTIME: win-x64
+  PROJECT_PATH: src/Anno1800IslandTool.UI/Anno1800IslandTool.UI.csproj
+  PUBLISH_DIR: publish/win-x64
+  ARTIFACTS_DIR: artifacts
+
+jobs:
+  build:
+    name: Build Windows x64 package
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore dependencies
+        run: dotnet restore Anno1800IslandTool.sln -p:Platform=$env:PLATFORM
+
+      - name: Build solution
+        run: dotnet build Anno1800IslandTool.sln --configuration $env:CONFIGURATION --no-restore -p:Platform=$env:PLATFORM
+
+      - name: Run tests
+        run: dotnet test tests/Anno1800IslandTool.Tests/Anno1800IslandTool.Tests.csproj --configuration $env:CONFIGURATION --no-build --no-restore -p:Platform=$env:PLATFORM --logger "trx;LogFileName=test-results.trx"
+
+      - name: Publish self-contained Windows x64 app
+        run: >-
+          dotnet publish $env:PROJECT_PATH
+          --configuration $env:CONFIGURATION
+          --runtime $env:RUNTIME
+          --self-contained true
+          --output $env:PUBLISH_DIR
+          -p:Platform=$env:PLATFORM
+          -p:PublishSingleFile=false
+          -p:DebugType=None
+          -p:DebugSymbols=false
+
+      - name: Create release archives
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          New-Item -ItemType Directory -Force -Path $env:ARTIFACTS_DIR | Out-Null
+
+          if ('${{ github.ref_type }}' -eq 'tag') {
+            $version = '${{ github.ref_name }}'
+          } else {
+            $version = 'run-${{ github.run_number }}'
+          }
+
+          $safeVersion = $version -replace '[^A-Za-z0-9._-]', '-'
+          $appArchive = Join-Path $env:ARTIFACTS_DIR "$env:APP_NAME-$safeVersion-win-x64.zip"
+          $sourceArchive = Join-Path $env:ARTIFACTS_DIR "$env:APP_NAME-$safeVersion-sources.zip"
+
+          Compress-Archive -Path "$env:PUBLISH_DIR/*" -DestinationPath $appArchive -Force
+
+          $sourceRoot = Join-Path $env:RUNNER_TEMP "source-package/$env:APP_NAME-$safeVersion"
+          New-Item -ItemType Directory -Force -Path $sourceRoot | Out-Null
+
+          $excludedRoots = @('.git', '.vs', 'bin', 'obj', 'publish', 'artifacts', 'TestResults')
+          Get-ChildItem -Force | Where-Object { $excludedRoots -notcontains $_.Name } | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination $sourceRoot -Recurse -Force
+          }
+
+          Get-ChildItem -LiteralPath $sourceRoot -Directory -Recurse -Force |
+            Where-Object { $excludedRoots -contains $_.Name } |
+            Sort-Object { $_.FullName.Length } -Descending |
+            Remove-Item -Recurse -Force
+
+          Compress-Archive -Path "$sourceRoot/*" -DestinationPath $sourceArchive -Force
+
+          Write-Host "Created archives:"
+          Get-ChildItem -Path $env:ARTIFACTS_DIR -Filter '*.zip' | ForEach-Object { Write-Host "- $($_.FullName)" }
+
+      - name: Upload build archives
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-archives
+          path: artifacts/*.zip
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v3
+        with:
+          files: artifacts/*.zip
+          generate_release_notes: true

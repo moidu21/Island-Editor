@@ -1,0 +1,1635 @@
+
+using System.IO.Compression;
+using System.Text.RegularExpressions;
+using Anno1800IslandTool.Core.Common;
+using Anno1800IslandTool.Core.Enums;
+using Anno1800IslandTool.Core.Models;
+using Anno1800IslandTool.Core.Terrain;
+using Anno1800IslandTool.Core.Validation;
+using Anno1800IslandTool.Formats.Archive;
+using Anno1800IslandTool.Formats.Discovery;
+using Anno1800IslandTool.Formats.Readers;
+using Anno1800IslandTool.Formats.Writers;
+using Anno1800IslandTool.Pipeline.Editing;
+using Anno1800IslandTool.Pipeline.Export;
+using Anno1800IslandTool.Pipeline.Services;
+using Anno1800IslandTool.Pipeline.Validation;
+using Xunit;
+
+namespace Anno1800IslandTool.Tests;
+
+public sealed class SmokeTests
+{
+    [Fact]
+    public void ZipArchiveReader_ReadEntriesBytes_Uses_Single_Bulk_Call_Semantics()
+    {
+        var temp = Path.Combine(Path.GetTempPath(), $"anno-v40-{Guid.NewGuid():N}.zip");
+        try
+        {
+            using (var archive = ZipFile.Open(temp, ZipArchiveMode.Create))
+            {
+                var first = archive.CreateEntry("a/one.txt");
+                using (var writer = new StreamWriter(first.Open())) writer.Write("one");
+                var second = archive.CreateEntry("b/two.txt");
+                using (var writer = new StreamWriter(second.Open())) writer.Write("two");
+            }
+
+            var reader = new ZipArchiveReader();
+            var payloads = reader.ReadEntriesBytes(temp, new[] { "a/one.txt", "b/two.txt" });
+
+            Assert.Equal("one", System.Text.Encoding.UTF8.GetString(payloads["a/one.txt"]));
+            Assert.Equal("two", System.Text.Encoding.UTF8.GetString(payloads["b/two.txt"]));
+        }
+        finally
+        {
+            if (File.Exists(temp))
+            {
+                File.Delete(temp);
+            }
+        }
+    }
+
+    [Fact]
+    public void TerrainBrushSpatialIndex_Returns_Only_Vertices_In_Radius()
+    {
+        var page = new MeshPage { Key = new TerrainPageKey(0, 0, 0), DecodeStatus = "Décodée", HasEditablePayload = true };
+        var cluster = new MeshCluster();
+        cluster.Vertices.Add(new MeshVertex { Raw0 = 10, Raw1 = MeshVertex.EncodeDecodedHeight(5), Raw2 = 10 });
+        cluster.Vertices.Add(new MeshVertex { Raw0 = 100, Raw1 = MeshVertex.EncodeDecodedHeight(7), Raw2 = 100 });
+        page.Clusters.Add(cluster);
+
+        var index = TerrainBrushSpatialIndex.Build(new[] { page }, 0, preferredCellSize: 16);
+        var hits = index.QueryCircle(10, 10, 12);
+
+        Assert.Single(hits);
+        Assert.Equal(5, hits[0].OriginalDecoded);
+    }
+
+    [Fact]
+    public void DimensionInferenceService_Computes_Known_Values()
+    {
+        var service = new DimensionInferenceService();
+
+        Assert.Equal(6144, service.ComputeGridWidth(192));
+        Assert.Equal(385, service.ComputeHeightMapSize(192));
+        Assert.Equal(768, service.ComputeTintMapSize(192));
+        Assert.Equal(24, service.ComputeActiveMapGrid(192));
+    }
+
+    [Fact]
+    public void IslandRootReader_Reads_MapSize_Grid_And_SlotObjects()
+    {
+        const string sample = """
+<Content>
+  <MapSize>192 192</MapSize>
+  <ActiveMapGrid>
+    <x>24</x>
+    <y>24</y>
+  </ActiveMapGrid>
+  <ActiveMapRect>24 16 176 168</ActiveMapRect>
+  <ObjectMetaInfo>
+    <SlotObjects>
+      <None>
+        <value>
+          <id>1</id>
+        </value>
+      </None>
+      <None>
+        <None>
+          <ObjectId>-9218868437227405268</ObjectId>
+          <ObjectGuid>1000253</ObjectGuid>
+          <Position>98,711365 7,274233 120,144775</Position>
+        </None>
+      </None>
+    </SlotObjects>
+  </ObjectMetaInfo>
+</Content>
+""";
+
+        var root = new IslandRootReader().Read(sample);
+
+        Assert.Equal(192, root.MapSize);
+        Assert.Equal(24, root.ActiveMapGrid.X);
+        Assert.Equal(24, root.ActiveMapGrid.Y);
+        Assert.Single(root.SlotObjects);
+        Assert.Equal(1000253.ToString(), root.SlotObjects[0].ObjectGuid);
+    }
+
+
+
+
+    [Fact]
+    public void ActiveMapGridMaskCodec_Roundtrips_Rect_To_Bits()
+    {
+        var grid = new Int2(40, 40);
+        var rect = new RectI(24, 40, 296, 312);
+
+        var bits = ActiveMapGridMaskCodec.EncodeRect(grid, rect);
+        var mask = ActiveMapGridMaskCodec.Decode(grid, bits, default);
+        var decodedRect = ActiveMapGridMaskCodec.ComputeActiveRect(grid, mask, default);
+
+        Assert.Equal(80, bits.Count);
+        Assert.Equal(rect.Left, decodedRect.Left);
+        Assert.Equal(rect.Top, decodedRect.Top);
+        Assert.Equal(rect.Right, decodedRect.Right);
+        Assert.Equal(rect.Bottom, decodedRect.Bottom);
+    }
+
+
+    [Fact]
+    public void ActiveMapGridMaskCodec_Expands_Only_Outer_Edge_Without_Filling_Rectangle()
+    {
+        var grid = new Int2(5, 5);
+        var mask = new bool[25];
+        mask[(1 * 5) + 2] = true;
+        mask[(2 * 5) + 2] = true;
+        mask[(3 * 5) + 2] = true;
+
+        var expanded = ActiveMapGridMaskCodec.ExpandDirectionalOuterEdges(mask, grid, leftCells: 1, topCells: 0, rightCells: 0, bottomCells: 0);
+
+        Assert.True(expanded[(1 * 5) + 1]);
+        Assert.True(expanded[(2 * 5) + 1]);
+        Assert.True(expanded[(3 * 5) + 1]);
+        Assert.False(expanded[(0 * 5) + 1]);
+        Assert.False(expanded[(4 * 5) + 1]);
+        Assert.Equal(6, ActiveMapGridMaskCodec.CountActiveCells(expanded));
+    }
+
+    [Fact]
+    public void IslandRootReader_Reads_And_Preserves_ActiveMapGridBits()
+    {
+        const string sample = """
+<Content>
+  <MapSize>64 64</MapSize>
+  <ActiveMapGrid>
+    <x>8</x>
+    <y>8</y>
+    <bits>0 24 60 126 126 60 24 0</bits>
+  </ActiveMapGrid>
+  <ActiveMapRect>8 8 56 56</ActiveMapRect>
+</Content>
+""";
+
+        var root = new IslandRootReader().Read(sample);
+        var text = new IslandRootWriter().Write(root);
+
+        Assert.Equal(8, root.ActiveMapGrid.X);
+        Assert.Equal(8, root.ActiveMapGrid.Y);
+        Assert.Equal(8, root.ActiveMapGridBits.Count);
+        Assert.Contains("<bits>0 24 60 126 126 60 24 0</bits>", text);
+    }
+
+    [Fact]
+    public void GameDataReader_Reads_Coarse_Samples_PlayableArea_And_Spawns()
+    {
+        const string sample = """
+<GameData>
+  <TerrainManager>
+    <HeightMap>
+      <Width>3</Width>
+      <Height>2</Height>
+      <HeightMap>10 20 30 40 50 60</HeightMap>
+    </HeightMap>
+  </TerrainManager>
+  <PlayableArea>0 1 2 3</PlayableArea>
+  <AreaIDs>
+    <None>A1</None>
+  </AreaIDs>
+  <SpawnAreaPoints>
+    <None><Position>1,5 2,5 3,5</Position></None>
+  </SpawnAreaPoints>
+</GameData>
+""";
+
+        var gameData = new GameDataReader().Read(sample);
+
+        Assert.Equal(3, gameData.TerrainHeightMap.Width);
+        Assert.Equal(6, gameData.TerrainHeightMap.Samples.Length);
+        Assert.Equal(1, gameData.PlayableArea.Top);
+        Assert.Single(gameData.Areas);
+        Assert.Single(gameData.SpawnAreaPoints);
+    }
+
+    [Fact]
+    public void Discovery_Finds_Root_And_Page_Files()
+    {
+        var discovery = new IslandFileDiscovery();
+
+        var entries = new List<ArchiveEntryIndex>
+        {
+            new() { RelativePath = "moderate_s_02__interpreted/moderate_s_02.xml" },
+            new() { RelativePath = "moderate_s_02__interpreted/moderate_s_02/rd3d.xml" },
+            new() { RelativePath = "moderate_s_02__interpreted/moderate_s_02/gamedata.xml" },
+            new() { RelativePath = "moderate_s_02__interpreted/_gamedata/moderate_s_02/meshes/0/2x3.xml" },
+            new() { RelativePath = "moderate_s_02__interpreted/_gamedata/moderate_s_02/normalmaps/0/2x3.xml" },
+            new() { RelativePath = "moderate_s_02__interpreted/_gamedata/moderate_s_02/tintmaps/0/0x0.dds" }
+        };
+
+        var discovered = discovery.Discover(entries);
+
+        Assert.Equal("moderate_s_02__interpreted/moderate_s_02.xml", discovered.RootIslandXmlPath);
+        Assert.Single(discovered.MeshPagePaths);
+        Assert.Single(discovered.NormalMapPagePaths);
+        Assert.Single(discovered.TintMapPagePaths);
+    }
+
+    [Fact]
+    public void DimensionValidator_Returns_No_Errors_For_Consistent_Minimal_Project()
+    {
+        var project = new IslandProject
+        {
+            Root = new IslandRootDefinition
+            {
+                MapSize = 192,
+                ActiveMapGrid = new(24, 24)
+            },
+            Metadata = new IslandMetadata
+            {
+                MapSize = 192
+            },
+            Rd3d = new Rd3dDefinition
+            {
+                GridWidth = 6144,
+                GridHeight = 6144,
+                MaterialMapWidth = 384,
+                MaterialMapHeight = 384,
+                TintMapWidth = 768,
+                TintMapHeight = 768
+            },
+            GameData = new GameDataDefinition
+            {
+                TerrainHeightMap = new() { Width = 385, Height = 385 }
+            }
+        };
+
+        var report = new IslandValidator().Validate(project);
+
+        Assert.False(report.HasErrors);
+    }
+
+    [Fact]
+    public void Editor_Updates_Metadata_Syncs_Dimensions_And_Regenerates_Texts()
+    {
+        var project = new IslandProject
+        {
+            Metadata = new IslandMetadata { IslandInternalName = "old", MapSize = 192, ActiveMapGrid = new Int2(24, 24), ActiveMapRect = new RectI(24, 16, 176, 168) },
+            Root = new IslandRootDefinition { MapSize = 192, ActiveMapGrid = new Int2(24, 24), ActiveMapRect = new RectI(24, 16, 176, 168) },
+            Rd3d = new Rd3dDefinition { GridWidth = 6144, GridHeight = 6144, MaterialMapWidth = 384, MaterialMapHeight = 384, TintMapWidth = 768, TintMapHeight = 768 },
+            GameData = new GameDataDefinition { TerrainHeightMap = new() { Width = 385, Height = 385 } },
+            RawContent = new RawProjectContent
+            {
+                RootText = "<Content><MapSize>192 192</MapSize><ActiveMapGrid><x>24</x><y>24</y></ActiveMapGrid><ActiveMapRect>24 16 176 168</ActiveMapRect><ObjectMetaInfo><SlotObjects></SlotObjects></ObjectMetaInfo></Content>",
+                Rd3dText = "<Content><GridWidth>6144</GridWidth><GridHeight>6144</GridHeight><MaterialMapWidth>384</MaterialMapWidth><MaterialMapHeight>384</MaterialMapHeight><TintMapWidth>768</TintMapWidth><TintMapHeight>768</TintMapHeight></Content>",
+                GameDataText = "<Content><TerrainManager><WorldSize>192 192</WorldSize><HeightMap><Width>385</Width><Height>385</Height></HeightMap></TerrainManager></Content>"
+            }
+        };
+
+        var editor = new IslandProjectEditor();
+        editor.ApplyMetadataEdits(project, new MetadataEditModel
+        {
+            IslandInternalName = "new_name",
+            MapSize = 320,
+            ActiveMapGrid = new Int2(40, 40),
+            ActiveMapRect = new RectI(0, 8, 312, 304),
+            MaterialSetFileName = "terra_01_st.xml"
+        }, syncDerivedDimensions: true);
+
+        Assert.Equal(320, project.Root.MapSize);
+        Assert.Equal(10240, project.Rd3d.GridWidth);
+        Assert.Equal(641, project.GameData.TerrainHeightMap.Width);
+        Assert.Contains("terra_01_st.xml", project.RawContent.Rd3dText);
+        Assert.True(project.IsModified);
+    }
+
+    [Fact]
+    public void Editor_Replaces_Slots_Into_Raw_Root_Text()
+    {
+        var project = new IslandProject
+        {
+            Root = new IslandRootDefinition(),
+            RawContent = new RawProjectContent
+            {
+                RootText = "<Content><MapSize>192 192</MapSize><ActiveMapGrid><x>24</x><y>24</y></ActiveMapGrid><ActiveMapRect>24 16 176 168</ActiveMapRect><ObjectMetaInfo><SlotObjects></SlotObjects></ObjectMetaInfo></Content>"
+            }
+        };
+
+        var editor = new IslandProjectEditor();
+        editor.ReplaceSlotObjects(project, new List<SlotObjectDefinition>
+        {
+            new() { ObjectId = 1, ObjectGuid = "1001", Position = new Float3(1, 2, 3) }
+        });
+
+        Assert.Single(project.Root.SlotObjects);
+        Assert.Contains("<ObjectGuid>1001</ObjectGuid>", project.RawContent.RootText);
+    }
+
+
+    [Fact]
+    public void Editor_Replaces_Slots_Removes_Deleted_None_Nodes_From_Raw_Root_Text()
+    {
+        const string rawRoot = """
+<Content>
+  <MapSize>192 192</MapSize>
+  <ActiveMapGrid><x>24</x><y>24</y></ActiveMapGrid>
+  <ActiveMapRect>24 16 176 168</ActiveMapRect>
+  <ObjectMetaInfo>
+    <SlotObjects>
+      <None>
+        <value>
+          <id>2</id>
+        </value>
+      </None>
+      <None>
+        <None>
+          <ObjectId>-9199693229316898788</ObjectId>
+          <ObjectGuid>1000253</ObjectGuid>
+          <Position>249,2297 11,17881 207,5638</Position>
+        </None>
+        <None>
+          <ObjectId>42</ObjectId>
+          <ObjectGuid>2000001</ObjectGuid>
+          <Position>1,0 2,0 3,0</Position>
+        </None>
+      </None>
+    </SlotObjects>
+  </ObjectMetaInfo>
+</Content>
+""";
+
+        var project = new IslandProject
+        {
+            Root = new IslandRootDefinition(),
+            RawContent = new RawProjectContent
+            {
+                RootText = rawRoot
+            }
+        };
+
+        var editor = new IslandProjectEditor();
+        editor.ReplaceSlotObjects(project, new List<SlotObjectDefinition>
+        {
+            new() { ObjectId = 42, ObjectGuid = "2000001", Position = new Float3(1, 2, 3) }
+        });
+
+        Assert.DoesNotContain("-9199693229316898788", project.RawContent.RootText);
+        Assert.Contains("<ObjectId>42</ObjectId>", project.RawContent.RootText);
+        Assert.Contains("<id>1</id>", project.RawContent.RootText);
+        Assert.Equal(1, Regex.Matches(project.RawContent.RootText, @"<ObjectId>").Count);
+    }
+
+    [Fact]
+    public void ConservativeExporter_Copies_Source_Archive_And_Adds_Report()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "Anno1800IslandToolTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        var sourceZip = Path.Combine(tempDir, "source.zip");
+        using (var archive = ZipFile.Open(sourceZip, ZipArchiveMode.Create))
+        {
+            var entry = archive.CreateEntry("test.txt");
+            using var writer = new StreamWriter(entry.Open());
+            writer.Write("hello");
+        }
+
+        var project = new IslandProject
+        {
+            Metadata = new IslandMetadata { SourceArchivePath = sourceZip, ProjectName = "test" },
+            Root = new IslandRootDefinition(),
+            ValidationReport = new()
+        };
+
+        var outputZip = Path.Combine(tempDir, "export.zip");
+        var report = new IslandExporter().Export(project, outputZip, new ExportOptions());
+
+        Assert.True(report.Succeeded);
+        Assert.True(File.Exists(outputZip));
+        using var exported = ZipFile.OpenRead(outputZip);
+        Assert.NotNull(exported.GetEntry("test.txt"));
+        Assert.NotNull(exported.GetEntry("_anno1800islandtool/validation-report.txt"));
+    }
+    [Fact]
+    public void LocalTerrainDerivativeRegenerator_Builds_Synthetic_Previews_And_Affected_Pages()
+    {
+        var map = new CoarseHeightMap
+        {
+            Width = 9,
+            Height = 9,
+            Samples = Enumerable.Range(0, 81).Select(i => (float)i).ToArray()
+        };
+
+        var project = new IslandProject
+        {
+            GameData = new GameDataDefinition { TerrainHeightMap = map },
+            MeshPages = new Dictionary<TerrainPageKey, MeshPage>
+            {
+                [new TerrainPageKey(0, 0, 0)] = new MeshPage { Key = new TerrainPageKey(0, 0, 0), OriginalRelativePath = "mesh/0/0x0.xml" },
+                [new TerrainPageKey(0, 1, 0)] = new MeshPage { Key = new TerrainPageKey(0, 1, 0), OriginalRelativePath = "mesh/0/1x0.xml" },
+                [new TerrainPageKey(0, 0, 1)] = new MeshPage { Key = new TerrainPageKey(0, 0, 1), OriginalRelativePath = "mesh/0/0x1.xml" },
+                [new TerrainPageKey(0, 1, 1)] = new MeshPage { Key = new TerrainPageKey(0, 1, 1), OriginalRelativePath = "mesh/0/1x1.xml" }
+            },
+            NormalMapPages = new Dictionary<TerrainPageKey, NormalMapPage>
+            {
+                [new TerrainPageKey(0, 0, 0)] = new NormalMapPage { Key = new TerrainPageKey(0, 0, 0), OriginalRelativePath = "normal/0/0x0.xml" }
+            },
+            TintMapPages = new Dictionary<TerrainPageKey, TintMapPage>
+            {
+                [new TerrainPageKey(0, 0, 0)] = new TintMapPage { Key = new TerrainPageKey(0, 0, 0), OriginalRelativePath = "tint/0/0x0.dds", Width = 64, Height = 64 }
+            }
+        };
+
+        var regenerator = new LocalTerrainDerivativeRegenerator();
+        var state = regenerator.RegenerateAroundPage(project, map, "Mesh", new TerrainPageKey(0, 0, 0), 1);
+
+        Assert.True(state.HasData);
+        Assert.True(state.HeightPreview.HasPixels);
+        Assert.True(state.NormalPreview.HasPixels);
+        Assert.True(state.TintPreview.HasPixels);
+        Assert.NotEmpty(state.AffectedPages);
+    }
+
+
+
+    [Fact]
+    public void Exporter_Adds_Generated_Terrain_Entries_When_Missing_From_Source()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "Anno1800IslandToolTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        var sourceZip = Path.Combine(tempDir, "source.zip");
+        using (var archive = ZipFile.Open(sourceZip, ZipArchiveMode.Create))
+        {
+            var entry = archive.CreateEntry("root/test.txt");
+            using var writer = new StreamWriter(entry.Open());
+            writer.Write("hello");
+        }
+
+        var project = new IslandProject
+        {
+            Metadata = new IslandMetadata { SourceArchivePath = sourceZip, ProjectName = "test", IslandInternalName = "island_a", OriginalIslandInternalName = "island_a" },
+            ValidationReport = new(),
+            LocalRegeneration = new TerrainLocalRegenerationState
+            {
+                Summary = "regen",
+                GeneratedMeshPageWrites =
+                {
+                    new RegeneratedMeshPageWrite
+                    {
+                        Key = new TerrainPageKey(4, 1, 2),
+                        TargetPath = "_gamedata/island_a/meshes/4/1x2.xml",
+                        XmlText = "<MeshPage/>",
+                        Summary = "mesh"
+                    }
+                },
+                GeneratedNormalMapWrites =
+                {
+                    new RegeneratedNormalMapWrite
+                    {
+                        Key = new TerrainPageKey(4, 1, 2),
+                        TargetPath = "_gamedata/island_a/normalmaps/4/1x2.xml",
+                        XmlText = "<NormalMapPage/>",
+                        Summary = "normal"
+                    }
+                }
+            }
+        };
+
+        var outputZip = Path.Combine(tempDir, "export.zip");
+        var report = new IslandExporter().Export(project, outputZip, new ExportOptions());
+
+        Assert.True(report.Succeeded);
+        using var exported = ZipFile.OpenRead(outputZip);
+        Assert.NotNull(exported.GetEntry("_gamedata/island_a/meshes/4/1x2.xml"));
+        Assert.NotNull(exported.GetEntry("_gamedata/island_a/normalmaps/4/1x2.xml"));
+        Assert.NotNull(exported.GetEntry("_anno1800islandtool/export-manifest.txt"));
+    }
+
+
+    [Fact]
+    public void Exporter_Writes_Generated_TintMaps_In_Full_Export()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "Anno1800IslandToolTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        var sourceZip = Path.Combine(tempDir, "source.zip");
+        using (var archive = ZipFile.Open(sourceZip, ZipArchiveMode.Create))
+        {
+            var sourceEntry = archive.CreateEntry("_gamedata/island_a/tintmaps/4/1x2.dds");
+            using var sourceStream = sourceEntry.Open();
+            sourceStream.Write(new byte[] { 0x01, 0x02, 0x03 }, 0, 3);
+        }
+
+        var project = new IslandProject
+        {
+            Metadata = new IslandMetadata { SourceArchivePath = sourceZip, ProjectName = "test", IslandInternalName = "island_a", OriginalIslandInternalName = "island_a" },
+            ValidationReport = new(),
+            LocalRegeneration = new TerrainLocalRegenerationState
+            {
+                GeneratedTintMapWrites =
+                {
+                    new RegeneratedTintMapWrite
+                    {
+                        Key = new TerrainPageKey(4, 1, 2),
+                        TargetPath = "_gamedata/island_a/tintmaps/4/1x2.dds",
+                        DdsBytes = new byte[] { 0x44, 0x44, 0x53, 0x20 },
+                        Width = 1,
+                        Height = 1,
+                        Summary = "tint"
+                    }
+                }
+            }
+        };
+
+        var outputZip = Path.Combine(tempDir, "export.zip");
+        var report = new IslandExporter().Export(project, outputZip, new ExportOptions());
+
+        Assert.True(report.Succeeded);
+        using var exported = ZipFile.OpenRead(outputZip);
+        var exportedEntry = exported.GetEntry("_gamedata/island_a/tintmaps/4/1x2.dds");
+        Assert.NotNull(exportedEntry);
+        using var exportedStream = exportedEntry!.Open();
+        using var memory = new MemoryStream();
+        exportedStream.CopyTo(memory);
+        Assert.Equal(new byte[] { 0x44, 0x44, 0x53, 0x20 }, memory.ToArray());
+    }
+
+    [Fact]
+    public void Validator_Flags_Xml_Declaration_And_Missing_Gameplay_Blocks()
+    {
+        var project = new IslandProject
+        {
+            Metadata = new IslandMetadata { RootIslandFileName = "island.xml" },
+            RootFilePath = "island.xml",
+            Rd3dFilePath = "rd3d.xml",
+            GameDataFilePath = "gamedata.xml",
+            SourceFiles = new List<FileReference>
+            {
+                new() { RelativePath = "island.xml", Kind = FileKind.RootIslandXml },
+                new() { RelativePath = "rd3d.xml", Kind = FileKind.Rd3dXml },
+                new() { RelativePath = "gamedata.xml", Kind = FileKind.GameDataXml }
+            },
+            Root = new IslandRootDefinition { MapSize = 192, ActiveMapGrid = new Int2(24, 24) },
+            Rd3d = new Rd3dDefinition { GridWidth = 6144, GridHeight = 6144, MaterialMapWidth = 384, MaterialMapHeight = 384, TintMapWidth = 768, TintMapHeight = 768, NodeSize = 32, UnitScale = 0.03125f, PageSize = 512, TintPageSize = 512, NodesPerMeshCluster = 32, MinMeshLevel = 2, UsingSplitImageHeightMaps = true, HeightPageBorderTexels = 8 },
+            GameData = new GameDataDefinition { TerrainHeightMap = new CoarseHeightMap { Width = 385, Height = 385 } },
+            RawContent = new RawProjectContent
+            {
+                RootText = "<?xml version=\"1.0\"?><Content></Content>",
+                Rd3dText = "<Content></Content>",
+                GameDataText = "<GameData><TerrainManager><HeightMap><Width>385</Width><Height>385</Height></HeightMap></TerrainManager></GameData>"
+            }
+        };
+
+        var report = new IslandValidator().Validate(project);
+
+        Assert.Contains(report.Messages, m => m.Code == ValidationCode.XmlDeclarationNotSupported);
+        Assert.Contains(report.Messages, m => m.Code == ValidationCode.MissingGameplayManager);
+    }
+
+    [Fact]
+    public void GameDataReader_Reads_Advanced_Gameplay_Block_Summaries()
+    {
+        const string text = @"<GameData>
+  <TerrainManager><HeightMap><Width>385</Width><Height>385</Height><HeightMap>1 2 3</HeightMap></HeightMap></TerrainManager>
+  <PlayableArea>0 1 10 20</PlayableArea>
+  <RegrowManager><TreeMap><x>384</x><y>384</y><bits>0 1 0 2</bits></TreeMap></RegrowManager>
+  <AreaIDs><x>384</x><y>384</y><val>0 1 2 2 0</val></AreaIDs>
+  <SpawnAreaPoints><None><Position>1 2 3</Position></None></SpawnAreaPoints>
+</GameData>";
+
+        var data = new GameDataReader().Read(text);
+
+        Assert.True(data.GameplayBlocks["RegrowManager"].IsPresent);
+        Assert.Equal(4, data.GameplayBlocks["RegrowManager"].BitCount);
+        Assert.Equal(2, data.Areas.Count);
+        Assert.Single(data.SpawnAreaPoints);
+    }
+
+    [Fact]
+    public void ProjectEditor_ReplaceZones_Updates_Model_And_Simple_GameData_Text()
+    {
+        var project = new IslandProject
+        {
+            Metadata = new IslandMetadata { MapSize = 192 },
+            GameData = new GameDataDefinition
+            {
+                TerrainHeightMap = new CoarseHeightMap { Width = 385, Height = 385, Samples = new float[] { 1, 2, 3 } },
+                PlayableArea = new RectI(0, 0, 1, 1)
+            },
+            RawContent = new RawProjectContent
+            {
+                GameDataText = "<GameData><TerrainManager><HeightMap><Width>385</Width><Height>385</Height><HeightMap>1 2 3</HeightMap></HeightMap></TerrainManager><PlayableArea>0 0 1 1</PlayableArea></GameData>"
+            },
+            Rd3d = new Rd3dDefinition { MaterialMapWidth = 384, MaterialMapHeight = 384 },
+            ValidationReport = new()
+        };
+
+        new IslandProjectEditor().ReplaceZones(
+            project,
+            new RectI(1, 2, 3, 4),
+            new[] { new AreaDefinition { Id = "7" } },
+            new[] { new SpawnAreaPointDefinition { Position = new Float3(10, 11, 12), Tag = "test" } });
+
+        Assert.Equal(1, project.GameData.Areas.Count);
+        Assert.Single(project.GameData.SpawnAreaPoints);
+        Assert.Contains("<AreaIDs>", project.RawContent.GameDataText);
+        Assert.Contains("<SpawnAreaPoints>", project.RawContent.GameDataText);
+    }
+
+    [Fact]
+    public void TerrainHeightEncoding_Separates_GameData_Mesh_And_Normal_Raw_Heights()
+    {
+        Assert.True(Math.Abs(TerrainHeightEncoding.GameDataRawToWorldHeight(64512) - (-8f)) < 0.001f);
+        Assert.Equal(64512, TerrainHeightEncoding.WorldHeightToGameDataRaw(-8f));
+
+        Assert.True(Math.Abs(TerrainHeightEncoding.MeshRawToWorldHeight(30720) - (-8f)) < 0.001f);
+        Assert.Equal(30720, TerrainHeightEncoding.WorldHeightToMeshRaw(-8f));
+
+        Assert.True(Math.Abs(TerrainHeightEncoding.MeshRawToWorldHeight(30720) - TerrainHeightEncoding.NormalPageRawToWorldHeight(30720)) < 0.001f);
+    }
+
+
+    [Fact]
+    public void TerrainConsistencyValidator_Produces_V21_2_Diagnostic_Messages()
+    {
+        var project = new IslandProject
+        {
+            Metadata = new IslandMetadata
+            {
+                ProjectName = "diagnostic_test",
+                IslandInternalName = "moderate_s_02",
+                SourceArchivePath = "moderate_s_02__interpreted.zip"
+            },
+            Root = new IslandRootDefinition
+            {
+                MapSize = 192,
+                ActiveMapGrid = new Int2(24, 24),
+                ActiveMapRect = new RectI(24, 16, 176, 168)
+            },
+            Rd3d = new Rd3dDefinition
+            {
+                GridWidth = 6144,
+                GridHeight = 6144,
+                MaterialMapWidth = 384,
+                MaterialMapHeight = 384,
+                TintMapWidth = 768,
+                TintMapHeight = 768,
+                TintPageSize = 512
+            },
+            GameData = new GameDataDefinition
+            {
+                TerrainHeightMap = new CoarseHeightMap
+                {
+                    Width = 385,
+                    Height = 385,
+                    Samples = Enumerable.Repeat(64512f, 385 * 385).ToArray(),
+                    SampleEncoding = TerrainHeightSampleEncoding.GameDataRawUInt16
+                },
+                PlayableArea = new RectI(24, 16, 176, 168)
+            },
+            MaterialSet = new MaterialSetDefinition
+            {
+                FileName = "terra_01.xml",
+                Materials = new List<MaterialDefinition>
+                {
+                    new() { Id = 1, Type = "0", FileName = "data/graphics/terrain/beach.prp" },
+                    new() { Id = 32, Type = "1", ObjectFileName = "data/graphics/props/grass.prp" }
+                }
+            },
+            EffectiveMaterialSetName = "terra_01.xml"
+        };
+
+        project.MeshPages[new TerrainPageKey(0, 0, 0)] = new MeshPage { Key = new TerrainPageKey(0, 0, 0), OriginalRelativePath = "_gamedata/moderate_s_02/meshes/0/0x0.xml" };
+        project.MeshPages[new TerrainPageKey(2, 0, 0)] = new MeshPage
+        {
+            Key = new TerrainPageKey(2, 0, 0),
+            OriginalRelativePath = "_gamedata/moderate_s_02/meshes/2/0x0.xml",
+            HasEditablePayload = true,
+            Clusters = new List<MeshCluster>
+            {
+                new() { Vertices = new List<MeshVertex> { new() { Raw1 = TerrainHeightEncoding.WorldHeightToMeshRaw(-8f) } } }
+            }
+        };
+        project.NormalMapPages[new TerrainPageKey(2, 0, 0)] = new NormalMapPage
+        {
+            Key = new TerrainPageKey(2, 0, 0),
+            OriginalRelativePath = "_gamedata/moderate_s_02/normalmaps/2/0x0.xml",
+            DownsampledWidth = 17,
+            DownsampledHeight = 17,
+            DownsampledSamples = new[] { TerrainHeightEncoding.WorldHeightToNormalPageRaw(-8f) }
+        };
+        project.TintMapPages[new TerrainPageKey(0, 0, 0)] = new TintMapPage
+        {
+            Key = new TerrainPageKey(0, 0, 0),
+            OriginalRelativePath = "_gamedata/moderate_s_02/tintmaps/0/0x0.dds",
+            Width = 512,
+            Height = 512
+        };
+
+        var report = new TerrainConsistencyValidator().Validate(project);
+
+        Assert.Contains(report.Messages, m => m.Code == ValidationCode.TerrainDiagnostic && m.Message.Contains("Diagnostic terrain v30"));
+        Assert.Contains(report.Messages, m => m.Code == ValidationCode.TerrainHeightEncoding && m.Message.Contains("[OK] HeightMap GameData"));
+        Assert.Contains(report.Messages, m => m.Code == ValidationCode.TerrainDiagnostic && m.Message.Contains("LOD0/LOD1 protég"));
+        Assert.Contains(report.Messages, m => m.Code == ValidationCode.TerrainDiagnostic && m.Message.Contains("MaterialSet chargé"));
+    }
+
+
+    [Fact]
+    public void TerrainPageCoverage_Uses_Relative_Grid_For_Cropped_Normalmaps()
+    {
+        var project = new IslandProject
+        {
+            Root = new IslandRootDefinition { MapSize = 64 },
+            GameData = new GameDataDefinition
+            {
+                TerrainHeightMap = new CoarseHeightMap { Width = 129, Height = 129 }
+            }
+        };
+
+        project.MeshPages[new TerrainPageKey(2, 0, 0)] = new MeshPage { Key = new TerrainPageKey(2, 0, 0), HasEditablePayload = true };
+        project.MeshPages[new TerrainPageKey(2, 1, 0)] = new MeshPage { Key = new TerrainPageKey(2, 1, 0), HasEditablePayload = true };
+        project.NormalMapPages[new TerrainPageKey(2, 1, 0)] = new NormalMapPage { Key = new TerrainPageKey(2, 1, 0) };
+        project.NormalMapPages[new TerrainPageKey(2, 2, 0)] = new NormalMapPage { Key = new TerrainPageKey(2, 2, 0) };
+
+        var coverage = TerrainPageCoverage.BuildProjectCoverage(project);
+        var mesh00 = TerrainPageCoverage.Find(coverage, TerrainPageCoverage.MeshFamily, new TerrainPageKey(2, 0, 0));
+        var normal10 = TerrainPageCoverage.Find(coverage, TerrainPageCoverage.NormalMapFamily, new TerrainPageKey(2, 1, 0));
+
+        Assert.NotNull(mesh00);
+        Assert.NotNull(normal10);
+        Assert.Equal(mesh00!.SampleBounds, normal10!.SampleBounds);
+        Assert.True(TerrainPageCoverage.FindOverlapping(coverage, TerrainPageCoverage.NormalMapFamily, mesh00.SampleBounds, 2).Any());
+    }
+
+    [Fact]
+    public void TerrainCoverageValidator_Does_Not_Require_Identical_Page_Keys()
+    {
+        var project = new IslandProject
+        {
+            Root = new IslandRootDefinition { MapSize = 64 },
+            GameData = new GameDataDefinition
+            {
+                TerrainHeightMap = new CoarseHeightMap { Width = 129, Height = 129 }
+            }
+        };
+
+        project.MeshPages[new TerrainPageKey(2, 0, 0)] = new MeshPage { Key = new TerrainPageKey(2, 0, 0), HasEditablePayload = true };
+        project.MeshPages[new TerrainPageKey(2, 1, 0)] = new MeshPage { Key = new TerrainPageKey(2, 1, 0), HasEditablePayload = true };
+        project.NormalMapPages[new TerrainPageKey(2, 1, 0)] = new NormalMapPage { Key = new TerrainPageKey(2, 1, 0) };
+        project.NormalMapPages[new TerrainPageKey(2, 2, 0)] = new NormalMapPage { Key = new TerrainPageKey(2, 2, 0) };
+
+        var report = new TerrainCoverageValidator().Validate(project);
+
+        Assert.Contains(report.Messages, m => m.Code == ValidationCode.TerrainCoverageDiagnostic && m.Message.Contains("recouvrement spatial"));
+        Assert.False(report.Messages.Any(m => m.Severity == ValidationSeverity.Warning && m.Code == ValidationCode.MissingTerrainCounterpart));
+    }
+
+
+    [Fact]
+    public void TerrainMaterialPackEncoding_Decodes_And_Reencodes_Shader_Observed_Value()
+    {
+        var ids = TerrainMaterialPackEncoding.DecodeMaterialIds(936311777u);
+
+        Assert.Equal(new[] { 1, 31, 30, 29, 28, 27 }, ids);
+        Assert.Equal(936311777u, TerrainMaterialPackEncoding.EncodeMaterialIds(ids));
+        Assert.Equal(1073741823u, TerrainMaterialPackEncoding.EncodeAlphaWeights(new[] { 31, 31, 31, 31, 31, 31 }));
+        Assert.Equal(new[] { 31, 31, 31, 31, 31, 31 }, TerrainMaterialPackEncoding.DecodeAlphaWeights(1073741823u));
+    }
+
+    [Fact]
+    public void Rd3dReader_Reads_MaterialIDs2_And_MaterialAlphas2()
+    {
+        const string rd3dText = """
+<RD3D>
+  <MaterialMapWidth>4</MaterialMapWidth>
+  <MaterialMapHeight>2</MaterialMapHeight>
+  <MaterialIDBlockSize>2</MaterialIDBlockSize>
+  <MaterialIDs2>936311777 970948225</MaterialIDs2>
+  <MaterialAlphas2>31 1023 32767 1048575 1073741823 31 31 31</MaterialAlphas2>
+</RD3D>
+""";
+
+        var rd3d = new Rd3dReader().Read(rd3dText);
+
+        Assert.Equal(4, rd3d.MaterialMapWidth);
+        Assert.Equal(2, rd3d.MaterialMapHeight);
+        Assert.Equal(2, rd3d.MaterialIDBlockSize);
+        Assert.Equal(2, rd3d.MaterialMap.PackedMaterialIds.Length);
+        Assert.Equal(8, rd3d.MaterialMap.PackedMaterialAlphas.Length);
+        Assert.Equal(new[] { 1, 31, 30, 29, 28, 27 }, TerrainMaterialPackEncoding.DecodeMaterialIds(rd3d.MaterialMap.PackedMaterialIds[0]));
+        Assert.Equal(new[] { 31, 31, 31, 31, 31, 31 }, TerrainMaterialPackEncoding.DecodeAlphaWeights(rd3d.MaterialMap.PackedMaterialAlphas[4]));
+    }
+
+    [Fact]
+    public void TerrainMaterialMap_Returns_Dominant_Material_For_Cell()
+    {
+        var map = new TerrainMaterialMap
+        {
+            Width = 2,
+            Height = 2,
+            MaterialIdBlockSize = 2,
+            PackedMaterialIds = new[] { TerrainMaterialPackEncoding.EncodeMaterialIds(new[] { 1, 2, 3, 4, 5, 6 }) },
+            PackedMaterialAlphas = new[]
+            {
+                TerrainMaterialPackEncoding.EncodeAlphaWeights(new[] { 0, 31, 0, 0, 0, 0 }),
+                TerrainMaterialPackEncoding.EncodeAlphaWeights(new[] { 0, 0, 31, 0, 0, 0 }),
+                TerrainMaterialPackEncoding.EncodeAlphaWeights(new[] { 0, 0, 0, 31, 0, 0 }),
+                TerrainMaterialPackEncoding.EncodeAlphaWeights(new[] { 0, 0, 0, 0, 31, 0 })
+            }
+        };
+
+        Assert.Equal(2, map.GetDominantMaterialId(0, 0));
+        Assert.Equal(3, map.GetDominantMaterialId(1, 0));
+        Assert.Equal(4, map.GetDominantMaterialId(0, 1));
+        Assert.Equal(5, map.GetDominantMaterialId(1, 1));
+    }
+
+    [Fact]
+    public void TerrainMaterialMapValidator_Checks_Packed_Array_Counts()
+    {
+        var project = new IslandProject
+        {
+            Rd3dFilePath = "rd3d.xml",
+            Rd3d = new Rd3dDefinition
+            {
+                MaterialMapWidth = 4,
+                MaterialMapHeight = 2,
+                MaterialIDBlockSize = 2,
+                MaterialMap = new TerrainMaterialMap
+                {
+                    Width = 4,
+                    Height = 2,
+                    MaterialIdBlockSize = 2,
+                    PackedMaterialIds = new[] { 936311777u, 970948225u },
+                    PackedMaterialAlphas = new[] { 31u, 1023u, 32767u, 1048575u, 1073741823u, 31u, 31u, 31u }
+                }
+            },
+            MaterialSet = new MaterialSetDefinition
+            {
+                Materials = new List<MaterialDefinition>
+                {
+                    new() { Id = 1 },
+                    new() { Id = 28 },
+                    new() { Id = 29 },
+                    new() { Id = 30 }
+                }
+            }
+        };
+
+        var report = new TerrainMaterialMapValidator().Validate(project);
+
+        Assert.Contains(report.Messages, m => m.Code == ValidationCode.MaterialMapEncoding && m.Message.Contains("[OK] MaterialIDs2"));
+        Assert.Contains(report.Messages, m => m.Code == ValidationCode.MaterialMapEncoding && m.Message.Contains("[OK] MaterialAlphas2"));
+    }
+
+    [Fact]
+    public void MaterialSetWriter_WritePreserving_Keeps_PseudoXml_Unknown_Fields()
+    {
+        const string original = """
+<MaterialSet><ShaderType>0</>
+<Material><ID>1</>
+<Type>0</>
+<FileName>old.xml</>
+<Repetition>4.000000</>
+<AlphaSharpness>5.000000</>
+<GroundType>None</>
+<ObjectFileName></>
+<GritEnabled>1</>
+</>
+<Material><ID>2</>
+<Type>0</>
+<FileName>other.xml</>
+<GritEnabled>0</>
+</>
+</>
+""";
+
+        var set = new MaterialSetDefinition
+        {
+            FileName = "terra_01.xml",
+            Materials =
+            {
+                new()
+                {
+                    Id = 1,
+                    Type = "0",
+                    FileName = "new.xml",
+                    Repetition = 12.5f,
+                    AlphaSharpness = 5f,
+                    GroundType = "None",
+                    ObjectFileName = string.Empty
+                },
+                new() { Id = 2, Type = "0", FileName = "other.xml" }
+            }
+        };
+
+        var written = new MaterialSetWriter().WritePreserving(set, original);
+
+        Assert.Contains("<ShaderType>0</>", written);
+        Assert.Contains("<FileName>new.xml</>", written);
+        Assert.Contains("<Repetition>12.5</>", written);
+        Assert.Contains("<GritEnabled>1</>", written);
+        Assert.Contains("<FileName>other.xml</>", written);
+        Assert.DoesNotContain("<Materials>", written);
+    }
+
+    [Fact]
+    public void ProjectTextRegenerator_Regenerates_MaterialSet_Without_Destroying_PseudoXml()
+    {
+        var project = new IslandProject
+        {
+            MaterialSet = new MaterialSetDefinition
+            {
+                FileName = "terra_01.xml",
+                Materials =
+                {
+                    new()
+                    {
+                        Id = 1,
+                        Type = "0",
+                        FileName = "data/new.xml",
+                        Repetition = 4f,
+                        AlphaSharpness = 5f,
+                        GroundType = "None",
+                        ObjectFileName = string.Empty
+                    }
+                }
+            },
+            RawContent = new RawProjectContent
+            {
+                MaterialSetText = "<MaterialSet><ShaderType>0</><Material><ID>1</><Type>0</><FileName>data/old.xml</><GritEnabled>1</></></>"
+            }
+        };
+
+        new ProjectTextRegenerator().RegenerateMaterialSetText(project);
+
+        Assert.Contains("<ShaderType>0</>", project.RawContent.MaterialSetText);
+        Assert.Contains("<FileName>data/new.xml</>", project.RawContent.MaterialSetText);
+        Assert.Contains("<GritEnabled>1</>", project.RawContent.MaterialSetText);
+        Assert.DoesNotContain("<Materials>", project.RawContent.MaterialSetText);
+    }
+
+    [Fact]
+    public void NormalMapPageWriter_WritePreserving_Replaces_Only_Map_Values()
+    {
+        const string original = """
+<Content>
+  <HeightMap>
+    <Downsampled><width>2</width><height>1</height><map>1 2</map></Downsampled>
+    <Deltas>
+      <None><Data><width>2</width><height>1</height><map>3 4</map></Data><ScaleFactor>1</ScaleFactor><QuantBits>8</QuantBits><Extra>keep</Extra></None>
+    </Deltas>
+  </HeightMap>
+</Content>
+""";
+
+        var page = new NormalMapPage
+        {
+            DownsampledWidth = 2,
+            DownsampledHeight = 1,
+            RawUnknownFields = { ["__raw"] = original },
+            DeltaLevels =
+            {
+                new QuantizedDeltaLevel { Width = 2, Height = 1, ScaleFactor = 1, QuantBits = 8 }
+            }
+        };
+
+        var written = new NormalMapPageWriter().WritePreserving(page, "10 20", new[] { "30 40" });
+
+        Assert.Contains("<map>10 20</map>", written);
+        Assert.Contains("<map>30 40</map>", written);
+        Assert.Contains("<Extra>keep</Extra>", written);
+    }
+
+    [Fact]
+    public void MeshPageClassifier_Protects_Lod0_Lod1_As_Metadata()
+    {
+        var page = new MeshPage
+        {
+            Key = new TerrainPageKey(1, 0, 0),
+            HasEditablePayload = true,
+            HasDecodedPayload = true
+        };
+        page.Clusters.Add(new MeshCluster
+        {
+            Vertices = { new MeshVertex { RawValues = new[] { 0, 32767, 0, 0, 0, 0, 0, 0 } } },
+            GroundObjects = { new GroundObjectInstance { ObjectFileName = "data/ground/test.cfg" } }
+        });
+
+        Assert.Equal(MeshPageRole.MetadataCoverage, MeshPageClassifier.Classify(page.Key, page));
+        Assert.False(MeshPageClassifier.CanEditGeometry(page));
+        Assert.Contains("protégé", MeshPageClassifier.BuildReason(page.Key, page));
+    }
+
+    [Fact]
+    public void TerrainCoverageValidator_Does_Not_Require_Normalmap_For_Protected_Low_Lods()
+    {
+        var project = new IslandProject
+        {
+            Root = new IslandRootDefinition { MapSize = 64 },
+            GameData = new GameDataDefinition
+            {
+                TerrainHeightMap = new CoarseHeightMap { Width = 129, Height = 129 }
+            }
+        };
+
+        var lowLod = new MeshPage
+        {
+            Key = new TerrainPageKey(1, 0, 0),
+            HasEditablePayload = true,
+            HasDecodedPayload = true
+        };
+        lowLod.Clusters.Add(new MeshCluster
+        {
+            Vertices = { new MeshVertex { RawValues = new[] { 0, 32767, 0, 0, 0, 0, 0, 0 } } }
+        });
+        project.MeshPages[lowLod.Key] = lowLod;
+
+        var report = new TerrainCoverageValidator().Validate(project);
+
+        Assert.Contains(report.Messages, m => m.Code == ValidationCode.TerrainCoverageDiagnostic && m.Message.Contains("LOD0/LOD1"));
+        Assert.DoesNotContain(report.Messages, m => m.Severity == ValidationSeverity.Warning && m.Code == ValidationCode.MissingTerrainCounterpart);
+    }
+
+    [Fact]
+    public void TerrainMaterialMapCodec_Decodes_And_Encodes_Full_Map_Cells()
+    {
+        var map = new TerrainMaterialMap
+        {
+            Width = 2,
+            Height = 2,
+            MaterialIdBlockSize = 2,
+            PackedMaterialIds = new[] { TerrainMaterialPackEncoding.EncodeMaterialIds(new[] { 1, 2, 3, 4, 5, 6 }) },
+            PackedMaterialAlphas = new[]
+            {
+                TerrainMaterialPackEncoding.EncodeMaterialAlphas(new[] { 31, 0, 0, 0, 0, 0 }),
+                TerrainMaterialPackEncoding.EncodeMaterialAlphas(new[] { 0, 31, 0, 0, 0, 0 }),
+                TerrainMaterialPackEncoding.EncodeMaterialAlphas(new[] { 0, 0, 31, 0, 0, 0 }),
+                TerrainMaterialPackEncoding.EncodeMaterialAlphas(new[] { 0, 0, 0, 31, 0, 0 })
+            }
+        };
+
+        var cells = TerrainMaterialMapCodec.DecodeCells(map);
+        var encoded = TerrainMaterialMapCodec.EncodeFromCells(2, 2, 2, cells);
+
+        Assert.True(TerrainMaterialMapCodec.HasExpectedArraySizes(encoded));
+        Assert.Equal(map.PackedMaterialIds[0], encoded.PackedMaterialIds[0]);
+        Assert.Equal(map.PackedMaterialAlphas, encoded.PackedMaterialAlphas);
+        Assert.Equal(4, encoded.GetDominantMaterialId(1, 1));
+    }
+
+    [Fact]
+    public void TerrainMaterialMap_SetDominantMaterial_Updates_Block_And_Texel_Alpha()
+    {
+        var map = new TerrainMaterialMap
+        {
+            Width = 2,
+            Height = 2,
+            MaterialIdBlockSize = 2
+        };
+
+        map.SetDominantMaterial(1, 1, 12);
+
+        Assert.Equal(12, map.GetDominantMaterialId(1, 1));
+        Assert.Equal(TerrainMaterialPackEncoding.MaxPackedSlotValue, map.GetCell(1, 1).DominantWeight);
+        Assert.Equal(map.ExpectedPackedMaterialIdCount, map.PackedMaterialIds.Length);
+        Assert.Equal(map.ExpectedPackedAlphaCount, map.PackedMaterialAlphas.Length);
+    }
+
+
+    [Fact]
+    public void TerrainMaterialPainter_Blend_Adds_Material_And_Keeps_Exportable_Packing()
+    {
+        var map = new TerrainMaterialMap
+        {
+            Width = 4,
+            Height = 4,
+            MaterialIdBlockSize = 2,
+            PackedMaterialIds = Enumerable.Repeat(TerrainMaterialPackEncoding.EncodeMaterialIds(new[] { 1, 2, 3, 4, 5, 6 }), 4).ToArray(),
+            PackedMaterialAlphas = Enumerable.Repeat(TerrainMaterialPackEncoding.EncodeMaterialAlphas(new[] { 31, 0, 0, 0, 0, 0 }), 16).ToArray()
+        };
+
+        var result = TerrainMaterialPainter.PaintBrush(map, 1, 1, new TerrainMaterialBrushOptions
+        {
+            MaterialId = 8,
+            Radius = 1,
+            Strength = 31,
+            Mode = TerrainMaterialBrushMode.Blend,
+            UseFalloff = false
+        });
+
+        Assert.True(result.HasChanges);
+        Assert.Equal(8, map.GetDominantMaterialId(1, 1));
+        Assert.Equal(map.ExpectedPackedMaterialIdCount, map.PackedMaterialIds.Length);
+        Assert.Equal(map.ExpectedPackedAlphaCount, map.PackedMaterialAlphas.Length);
+        Assert.All(map.PackedMaterialIds, packed => Assert.True(TerrainMaterialPackEncoding.IsValidPackedSix5Bit(packed)));
+        Assert.All(map.PackedMaterialAlphas, packed => Assert.True(TerrainMaterialPackEncoding.IsValidPackedSix5Bit(packed)));
+    }
+
+    [Fact]
+    public void Editor_ReplaceTerrainMaterialMap_Regenerates_Rd3d_Material_Blocks()
+    {
+        var map = new TerrainMaterialMap
+        {
+            Width = 2,
+            Height = 2,
+            MaterialIdBlockSize = 2,
+            PackedMaterialIds = new[] { TerrainMaterialPackEncoding.EncodeMaterialIds(new[] { 1, 2, 3, 4, 5, 6 }) },
+            PackedMaterialAlphas = new[]
+            {
+                TerrainMaterialPackEncoding.EncodeMaterialAlphas(new[] { 31, 0, 0, 0, 0, 0 }),
+                TerrainMaterialPackEncoding.EncodeMaterialAlphas(new[] { 31, 0, 0, 0, 0, 0 }),
+                TerrainMaterialPackEncoding.EncodeMaterialAlphas(new[] { 31, 0, 0, 0, 0, 0 }),
+                TerrainMaterialPackEncoding.EncodeMaterialAlphas(new[] { 31, 0, 0, 0, 0, 0 })
+            }
+        };
+
+        var project = new IslandProject
+        {
+            Rd3dFilePath = "rd3d.xml",
+            Rd3d = new Rd3dDefinition
+            {
+                MaterialMapWidth = 2,
+                MaterialMapHeight = 2,
+                MaterialIDBlockSize = 2,
+                MaterialMap = map.Clone()
+            },
+            RawContent = new RawProjectContent
+            {
+                Rd3dText = "<Content><MaterialMapWidth>2</MaterialMapWidth><MaterialMapHeight>2</MaterialMapHeight><MaterialIDBlockSize>2</MaterialIDBlockSize><MaterialIDs2>0</MaterialIDs2><MaterialAlphas2>0 0 0 0</MaterialAlphas2></Content>"
+            }
+        };
+
+        map.SetDominantMaterialSafe(0, 0, 8);
+        var state = new TerrainMaterialEditState();
+        state.Add(new TerrainMaterialPaintResult { CellsChanged = 1, BlocksChanged = 1 }, new TerrainMaterialBrushOptions { MaterialId = 8 });
+
+        new IslandProjectEditor().ReplaceTerrainMaterialMap(project, map, state);
+
+        Assert.Contains("MaterialPainting", project.ModifiedSections);
+        Assert.Contains("<MaterialIDs2>", project.RawContent.Rd3dText);
+        Assert.DoesNotContain("<MaterialIDs2>0</MaterialIDs2>", project.RawContent.Rd3dText);
+        Assert.True(project.MaterialEditState.HasEdits);
+    }
+
+
+    [Fact]
+    public void TerrainMaterialPainter_StampPickedCell_Repaints_All_Captured_Slots()
+    {
+        var map = new TerrainMaterialMap
+        {
+            Width = 4,
+            Height = 4,
+            MaterialIdBlockSize = 2,
+            PackedMaterialIds = Enumerable.Repeat(TerrainMaterialPackEncoding.EncodeMaterialIds(new[] { 1, 2, 3, 4, 5, 6 }), 4).ToArray(),
+            PackedMaterialAlphas = Enumerable.Repeat(TerrainMaterialPackEncoding.EncodeMaterialAlphas(new[] { 31, 0, 0, 0, 0, 0 }), 16).ToArray()
+        };
+
+        map.SetCell(0, 0, new[] { 1, 7, 8, 9, 10, 11 }, new[] { 4, 8, 10, 6, 3, 0 });
+        var pattern = TerrainMaterialCellPattern.FromCell(map.GetCell(0, 0));
+
+        var result = TerrainMaterialPainter.PaintBrush(map, 3, 3, new TerrainMaterialBrushOptions
+        {
+            Radius = 1,
+            Strength = 31,
+            Mode = TerrainMaterialBrushMode.StampPickedCell,
+            UseFalloff = false,
+            CellPattern = pattern
+        });
+
+        var painted = map.GetCell(3, 3);
+        Assert.True(result.HasChanges);
+        Assert.Equal(new[] { 1, 7, 8, 9, 10, 11 }, painted.MaterialIds);
+        Assert.Equal(TerrainMaterialPackEncoding.NormalizeAlphaWeights(new[] { 4, 8, 10, 6, 3, 0 }), painted.AlphaWeights);
+        Assert.Equal(8, painted.DominantMaterialId);
+        Assert.All(map.PackedMaterialIds, packed => Assert.True(TerrainMaterialPackEncoding.IsValidPackedSix5Bit(packed)));
+        Assert.All(map.PackedMaterialAlphas, packed => Assert.True(TerrainMaterialPackEncoding.IsValidPackedSix5Bit(packed)));
+    }
+
+    [Fact]
+    public void ProjectTextRegenerator_Rd3d_Keeps_Only_One_PropGrid()
+    {
+        var project = new IslandProject
+        {
+            Rd3d = new Rd3dDefinition
+            {
+                PropGrid = new PropGridDefinition
+                {
+                    FileNames = { "data/graphics/props/new.cfg" },
+                    Instances =
+                    {
+                        new PropGridInstanceDefinition
+                        {
+                            RawNoneXml = "<None><FileNameIndex>0</FileNameIndex><Position>1 2 3</Position></None>"
+                        }
+                    }
+                }
+            },
+            RawContent = new RawProjectContent
+            {
+                Rd3dText = """
+<Content>
+  <GridWidth>1</GridWidth>
+  <GridHeight>1</GridHeight>
+  <MaterialMapWidth>0</MaterialMapWidth>
+  <MaterialMapHeight>0</MaterialMapHeight>
+  <MaterialIDBlockSize>2</MaterialIDBlockSize>
+  <TintMapWidth>0</TintMapWidth>
+  <TintMapHeight>0</TintMapHeight>
+  <NodeSize>0</NodeSize>
+  <UnitScale>0.03125</UnitScale>
+  <PageSize>0</PageSize>
+  <TintPageSize>0</TintPageSize>
+  <MinMeshLevel>0</MinMeshLevel>
+  <NodesPerMeshCluster>0</NodesPerMeshCluster>
+  <UsingSplitImageHeightMaps>False</UsingSplitImageHeightMaps>
+  <HeightPageBorderTexels>0</HeightPageBorderTexels>
+  <PropGrid><FileNames><None>old_a.cfg</None></FileNames><Instances></Instances></PropGrid>
+  <PropGrid><FileNames><None>old_b.cfg</None></FileNames><Instances></Instances></PropGrid>
+</Content>
+"""
+            }
+        };
+
+        new ProjectTextRegenerator().RegenerateRd3dText(project);
+
+        Assert.Equal(1, Regex.Matches(project.RawContent.Rd3dText!, "<PropGrid>", RegexOptions.IgnoreCase).Count);
+        Assert.Contains("data/graphics/props/new.cfg", project.RawContent.Rd3dText);
+        Assert.DoesNotContain("old_b.cfg", project.RawContent.Rd3dText);
+    }
+
+    [Fact]
+    public void ProjectTextRegenerator_Rd3d_Does_Not_Add_Empty_MaterialSetFileName_At_Content_End()
+    {
+        var project = new IslandProject
+        {
+            Rd3d = new Rd3dDefinition
+            {
+                MaterialSetFileName = null,
+                PropGrid = new PropGridDefinition()
+            },
+            RawContent = new RawProjectContent
+            {
+                Rd3dText = """
+<Content>
+  <GridWidth>1</GridWidth>
+  <GridHeight>1</GridHeight>
+  <MaterialMapWidth>0</MaterialMapWidth>
+  <MaterialMapHeight>0</MaterialMapHeight>
+  <MaterialIDBlockSize>2</MaterialIDBlockSize>
+  <TintMapWidth>0</TintMapWidth>
+  <TintMapHeight>0</TintMapHeight>
+  <NodeSize>0</NodeSize>
+  <UnitScale>0.03125</UnitScale>
+  <PageSize>0</PageSize>
+  <TintPageSize>0</TintPageSize>
+  <MinMeshLevel>0</MinMeshLevel>
+  <NodesPerMeshCluster>0</NodesPerMeshCluster>
+  <UsingSplitImageHeightMaps>False</UsingSplitImageHeightMaps>
+  <HeightPageBorderTexels>0</HeightPageBorderTexels>
+</Content>
+"""
+            }
+        };
+
+        new ProjectTextRegenerator().RegenerateRd3dText(project);
+
+        Assert.DoesNotContain("<MaterialSetFileName>", project.RawContent.Rd3dText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotMatch(@"<MaterialSetFileName>\s*</MaterialSetFileName>\s*</Content>", project.RawContent.Rd3dText!);
+    }
+
+    [Fact]
+    public void ProjectTextRegenerator_Rd3d_Inserts_MaterialSetFileName_Near_Terrain_Params_Not_At_Content_End()
+    {
+        var project = new IslandProject
+        {
+            Rd3d = new Rd3dDefinition
+            {
+                MaterialSetFileName = "data/config/materials/custom_terrain.xml",
+                PropGrid = new PropGridDefinition()
+            },
+            RawContent = new RawProjectContent
+            {
+                Rd3dText = """
+<Content>
+  <GridWidth>1</GridWidth>
+  <GridHeight>1</GridHeight>
+  <MaterialMapWidth>0</MaterialMapWidth>
+  <MaterialMapHeight>0</MaterialMapHeight>
+  <MaterialIDBlockSize>2</MaterialIDBlockSize>
+  <TintMapWidth>0</TintMapWidth>
+  <TintMapHeight>0</TintMapHeight>
+  <NodeSize>0</NodeSize>
+  <UnitScale>0.03125</UnitScale>
+  <PageSize>0</PageSize>
+  <TintPageSize>0</TintPageSize>
+  <MinMeshLevel>0</MinMeshLevel>
+  <NodesPerMeshCluster>0</NodesPerMeshCluster>
+  <UsingSplitImageHeightMaps>False</UsingSplitImageHeightMaps>
+  <HeightPageBorderTexels>0</HeightPageBorderTexels>
+  <MaterialIDs2>1</MaterialIDs2>
+  <MaterialAlphas2>1</MaterialAlphas2>
+</Content>
+"""
+            }
+        };
+
+        new ProjectTextRegenerator().RegenerateRd3dText(project);
+
+        var text = project.RawContent.Rd3dText!;
+        Assert.Equal(1, Regex.Matches(text, "<MaterialSetFileName>", RegexOptions.IgnoreCase).Count);
+        Assert.True(text.IndexOf("<HeightPageBorderTexels>", StringComparison.OrdinalIgnoreCase)
+            < text.IndexOf("<MaterialSetFileName>", StringComparison.OrdinalIgnoreCase));
+        Assert.True(text.IndexOf("<MaterialSetFileName>", StringComparison.OrdinalIgnoreCase)
+            < text.IndexOf("<MaterialIDs2>", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotMatch(@"<MaterialSetFileName>.*?</MaterialSetFileName>\s*</Content>", text);
+    }
+
+
+
+    [Fact]
+    public void CoastTransitionPainter_Classifies_HeightMap_Into_Water_Beach_And_Land()
+    {
+        var map = new TerrainMaterialMap
+        {
+            Width = 4,
+            Height = 1,
+            MaterialIdBlockSize = 2,
+            PackedMaterialIds = new uint[2],
+            PackedMaterialAlphas = new uint[4]
+        };
+        var heightMap = new CoarseHeightMap
+        {
+            Width = 5,
+            Height = 2,
+            SampleEncoding = TerrainHeightSampleEncoding.WorldUnits,
+            Samples = new float[]
+            {
+                -4f, -1f, 0.2f, 1.0f, 3.0f,
+                -4f, -1f, 0.6f, 3f, 7f
+            }
+        };
+        var options = new TerrainCoastTransitionOptions
+        {
+            DeepWaterMaterialId = 3,
+            ShallowWaterMaterialId = 4,
+            BeachMaterialId = 1,
+            LowLandMaterialId = 2,
+            DeepWaterMaxHeight = -2f,
+            WaterLineHeight = -0.2f,
+            BeachMaxHeight = 1.5f,
+            LowLandMaxHeight = 4f
+        };
+
+        var result = TerrainCoastTransitionPainter.ApplyHeightToMaterialTransition(map, heightMap, options, out var stats);
+
+        Assert.True(result.HasChanges);
+        Assert.True(stats.DeepWaterCells > 0);
+        Assert.True(stats.ShallowWaterCells > 0);
+        Assert.True(stats.BeachCells > 0);
+        Assert.True(stats.LowLandCells > 0);
+        Assert.Equal(3, map.GetDominantMaterialId(0, 0));
+        Assert.Equal(4, map.GetDominantMaterialId(1, 0));
+        Assert.Equal(1, map.GetDominantMaterialId(2, 0));
+        Assert.Equal(2, map.GetDominantMaterialId(3, 0));
+    }
+    [Fact]
+    public void Editor_Replaces_GroundObjects_And_Generates_Mesh_Page_Write()
+    {
+        var key = new TerrainPageKey(0, 0, 0);
+        var page = new MeshPage
+        {
+            Key = key,
+            OriginalRelativePath = "_gamedata/test/meshes/0/0x0.xml",
+            DeclaredWidth = 1,
+            DeclaredHeight = 1,
+            Clusters =
+            {
+                new MeshCluster
+                {
+                    UsedMaterialBits = 0,
+                    GroundObjects =
+                    {
+                        new GroundObjectInstance
+                        {
+                            Id = 1,
+                            ObjectFileName = "old.cfg",
+                            Kind = GroundObjectKind.Decoration,
+                            PositionXZ = new Float2(1, 2),
+                            RotationY = 0,
+                            Coverage = 1
+                        }
+                    }
+                }
+            },
+            RawUnknownFields =
+            {
+                ["__raw"] = "<Content><Meshes><width>1</width><height>1</height><map><None><Indices></Indices><Vertices></Vertices><UsedMaterialBits>0</UsedMaterialBits><GroundObjects><None><ID>1</ID><FileName>old.cfg</FileName><PositionsXZ>1 2</PositionsXZ><RotationsY>0</RotationsY><Coverages>1</Coverages></None></GroundObjects></None></map></Meshes></Content>"
+            }
+        };
+
+        var project = new IslandProject
+        {
+            Metadata = new IslandMetadata { MapSize = 64 },
+            MeshPages = { [key] = page }
+        };
+
+        new IslandProjectEditor().ReplaceGroundObjects(project, new[]
+        {
+            new GroundObjectPlacement
+            {
+                PageKey = key,
+                ClusterIndex = 0,
+                Object = new GroundObjectInstance
+                {
+                    Id = 7,
+                    ObjectFileName = "data/graphics/props/vegetation/tree.cfg",
+                    Kind = GroundObjectKind.Vegetation,
+                    PositionXZ = new Float2(3, 4),
+                    RotationY = 1.5f,
+                    Coverage = 0.75f
+                }
+            }
+        });
+
+        Assert.True(project.GroundObjectEditState.HasEdits);
+        Assert.Single(project.LocalRegeneration!.GeneratedMeshPageWrites);
+        Assert.Contains("tree.cfg", project.LocalRegeneration.GeneratedMeshPageWrites[0].XmlText);
+        Assert.DoesNotContain("old.cfg", project.LocalRegeneration.GeneratedMeshPageWrites[0].XmlText);
+        Assert.Contains("GroundObjects", project.ModifiedSections);
+    }
+
+
+    [Fact]
+    public void TerrainVertexAttributeCodec_Decodes_Shader_Vertex_Layout()
+    {
+        var vertex = new MeshVertex
+        {
+            RawValues = new[] { 610, 31856, 327, -15169, -386, 8046, 28288, -29183 }
+        };
+
+        var attributes = TerrainVertexAttributeCodec.Decode(vertex);
+
+        Assert.True(Math.Abs(attributes.TexCoord.X - 0.76855f) < 0.001f);
+        Assert.True(Math.Abs(attributes.TexCoord.Y - 0.55517f) < 0.001f);
+        Assert.True(Math.Abs(attributes.Normal.X - (-0.137f)) < 0.02f);
+        Assert.True(attributes.Normal.Y > 0.98f);
+        Assert.True(Math.Abs(attributes.Tangent.X - (-0.992f)) < 0.02f);
+        Assert.False(attributes.IsSkirtVertex);
+    }
+
+    [Fact]
+    public void TerrainVertexAttributeCodec_Rebuilds_Normal_Tangent_And_Preserves_Uv_Bytes()
+    {
+        var raw = new[] { 16, MeshVertex.EncodeWorldHeight(0f), 16, -15169, -386, 8046, 28288, -29183 };
+        var originalU = raw[3];
+        var originalVLow = (TerrainVertexAttributeCodec.ToUInt16Bits(raw[5]) >> 8) & 0xFF;
+        var originalVHigh = (TerrainVertexAttributeCodec.ToUInt16Bits(raw[7]) >> 8) & 0xFF;
+
+        TerrainVertexAttributeCodec.RebuildSurfaceAttributes(
+            raw,
+            (x, z) => 0f,
+            16,
+            16,
+            TerrainVertexAttributeCodec.DefaultRawUnitScale);
+
+        var rebuilt = TerrainVertexAttributeCodec.Decode(raw);
+        Assert.Equal(originalU, raw[3]);
+        Assert.Equal(originalVLow, (TerrainVertexAttributeCodec.ToUInt16Bits(raw[5]) >> 8) & 0xFF);
+        Assert.Equal(originalVHigh, (TerrainVertexAttributeCodec.ToUInt16Bits(raw[7]) >> 8) & 0xFF);
+        Assert.True(rebuilt.Normal.Y > 0.99f);
+        Assert.True(Math.Abs(rebuilt.Normal.X) < 0.02f);
+        Assert.True(Math.Abs(rebuilt.Normal.Z) < 0.02f);
+    }
+
+
+    [Fact]
+    public void TerrainMaterialPackEncoding_V30_Does_Not_Normalize_Alpha_Sums()
+    {
+        var blended = TerrainMaterialPackEncoding.BlendAlphaSlot(new[] { 20, 15, 0, 0, 0, 0 }, 2, 10);
+
+        Assert.Equal(new[] { 20, 15, 10, 0, 0, 0 }, blended);
+        Assert.True(blended.Sum() > TerrainMaterialPackEncoding.MaxPackedSlotValue);
+
+        var clamped = TerrainMaterialPackEncoding.NormalizeAlphaWeights(new[] { 40, 8, 10, 6, 3, 0 });
+        Assert.Equal(new[] { 31, 8, 10, 6, 3, 0 }, clamped);
+    }
+
+    [Fact]
+    public void TerrainMaterialMapValidator_V30_Unknown_MaterialIds_Are_Warnings_Not_Errors()
+    {
+        var project = new IslandProject
+        {
+            Rd3dFilePath = "rd3d.xml",
+            Rd3d = new Rd3dDefinition
+            {
+                MaterialMapWidth = 2,
+                MaterialMapHeight = 2,
+                MaterialMap = new TerrainMaterialMap
+                {
+                    Width = 2,
+                    Height = 2,
+                    MaterialIdBlockSize = 2,
+                    PackedMaterialIds = new[] { TerrainMaterialPackEncoding.EncodeMaterialIds(new[] { 1, 27, 0, 0, 0, 0 }) },
+                    PackedMaterialAlphas = Enumerable.Repeat(TerrainMaterialPackEncoding.EncodeMaterialAlphas(new[] { 31, 8, 0, 0, 0, 0 }), 4).ToArray()
+                }
+            },
+            MaterialSet = new MaterialSetDefinition
+            {
+                FileName = "terra_01.xml",
+                Materials = { new MaterialDefinition { Id = 1, Type = "0", FileName = "known.xml" } }
+            }
+        };
+
+        var report = new TerrainMaterialMapValidator().Validate(project);
+
+        Assert.False(report.HasErrors);
+        Assert.Contains(report.Messages, m => m.Severity == ValidationSeverity.Warning && m.Code == ValidationCode.MaterialMapEncoding && m.Message.Contains("27"));
+        Assert.Contains(report.Messages, m => m.Code == ValidationCode.MaterialMapEncoding && m.Message.Contains("ne normalise pas destructivement"));
+    }
+
+    [Fact]
+    public void TerrainConsistencyValidator_V30_Blocks_Unsupported_Protected_Lod_Writes()
+    {
+        var project = new IslandProject
+        {
+            LocalRegeneration = new TerrainLocalRegenerationState
+            {
+                GeneratedMeshPageWrites =
+                {
+                    new RegeneratedMeshPageWrite
+                    {
+                        Key = new TerrainPageKey(1, 0, 0),
+                        TargetPath = "_gamedata/test/meshes/1/0x0.xml",
+                        XmlText = "<Content />",
+                        Summary = "réécriture mesh terrain"
+                    }
+                }
+            }
+        };
+
+        var report = new TerrainConsistencyValidator().Validate(project);
+
+        Assert.Contains(report.Messages, m => m.Severity == ValidationSeverity.Error && m.Message.Contains("LOD0/LOD1 non supportées"));
+    }
+
+    [Fact]
+    public void TerrainBrushSpatialIndex_QueryRectangle_Uses_Box_Not_Circle()
+    {
+        var page = new MeshPage
+        {
+            Key = new TerrainPageKey(2, 0, 0),
+            HasEditablePayload = true,
+            Clusters =
+            {
+                new MeshCluster
+                {
+                    Vertices =
+                    {
+                        new MeshVertex { Raw0 = 0, Raw1 = MeshVertex.EncodeDecodedHeight(10), Raw2 = 0 },
+                        new MeshVertex { Raw0 = 9, Raw1 = MeshVertex.EncodeDecodedHeight(20), Raw2 = 1 },
+                        new MeshVertex { Raw0 = 11, Raw1 = MeshVertex.EncodeDecodedHeight(30), Raw2 = 1 },
+                        new MeshVertex { Raw0 = 0, Raw1 = MeshVertex.EncodeDecodedHeight(40), Raw2 = 6 },
+                    }
+                }
+            }
+        };
+
+        var index = TerrainBrushSpatialIndex.Build(new[] { page }, 2, 4);
+        var hits = index.QueryRectangle(0, 0, halfWidth: 10, halfLength: 2, influenceRadius: 10);
+
+        Assert.Equal(2, hits.Count);
+        Assert.Contains(hits, hit => hit.Vertex.X == 0 && hit.Vertex.Z == 0);
+        Assert.Contains(hits, hit => hit.Vertex.X == 9 && hit.Vertex.Z == 1);
+        Assert.DoesNotContain(hits, hit => hit.Vertex.X == 11);
+        Assert.DoesNotContain(hits, hit => hit.Vertex.Z == 6);
+    }
+
+    [Fact]
+    public void TerrainBrushSpatialIndex_RectangleAverage_Returns_Weighted_Height()
+    {
+        var page = new MeshPage
+        {
+            Key = new TerrainPageKey(2, 0, 0),
+            HasEditablePayload = true,
+            Clusters =
+            {
+                new MeshCluster
+                {
+                    Vertices =
+                    {
+                        new MeshVertex { Raw0 = 0, Raw1 = MeshVertex.EncodeDecodedHeight(10), Raw2 = 0 },
+                        new MeshVertex { Raw0 = 5, Raw1 = MeshVertex.EncodeDecodedHeight(20), Raw2 = 0 },
+                    }
+                }
+            }
+        };
+
+        var index = TerrainBrushSpatialIndex.Build(new[] { page }, 2, 4);
+        var average = index.ComputeWeightedDecodedAverageRectangle(0, 0, halfWidth: 10, halfLength: 2, fallback: -1);
+
+        Assert.True(average > 10);
+        Assert.True(average < 20);
+    }
+
+
+}

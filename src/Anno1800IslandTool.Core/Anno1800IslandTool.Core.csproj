@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Anno1800IslandTool.Core</RootNamespace>
+    <AssemblyName>Anno1800IslandTool.Core</AssemblyName>
+  </PropertyGroup>
+</Project>

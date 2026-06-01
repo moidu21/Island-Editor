@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>Anno1800IslandTool.UI</RootNamespace>
+    <AssemblyName>Anno1800IslandTool.UI</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Anno1800IslandTool.Core\Anno1800IslandTool.Core.csproj" />
+    <ProjectReference Include="..\Anno1800IslandTool.Pipeline\Anno1800IslandTool.Pipeline.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Anno1800IslandTool.UI": {
+      "commandName": "Project",
+      "nativeDebugging": false
+    }
+  }
+}

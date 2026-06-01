@@ -1,0 +1,195 @@
+<Window x:Class="Anno1800IslandTool.UI.TerrainHeightmapWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Terrain / Heightmap / Pages réelles v22"
+        Height="980"
+        Width="1760"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+            <Button Width="140" Height="30" Click="ApplyButton_Click">Appliquer hauteur</Button>
+            <Button Width="120" Height="30" Margin="8,0,0,0" Click="ResetButton_Click">Réinitialiser</Button>
+            <TextBlock Text="Mode" VerticalAlignment="Center" Margin="16,0,0,0"/>
+            <ComboBox x:Name="BrushModeComboBox" Width="120" Margin="8,0,0,0" SelectedIndex="0">
+                <ComboBoxItem Content="Raise"/>
+                <ComboBoxItem Content="Lower"/>
+                <ComboBoxItem Content="Smooth"/>
+                <ComboBoxItem Content="Flatten"/>
+            </ComboBox>
+            <TextBlock Text="Rayon" VerticalAlignment="Center" Margin="16,0,0,0"/>
+            <Slider x:Name="BrushRadiusSlider" Width="140" Minimum="1" Maximum="30" Value="8" TickFrequency="1" IsSnapToTickEnabled="True"/>
+            <TextBlock Text="Force" VerticalAlignment="Center" Margin="16,0,0,0"/>
+            <Slider x:Name="BrushStrengthSlider" Width="140" Minimum="0.05" Maximum="5" Value="0.8" TickFrequency="0.05"/>
+            <CheckBox x:Name="ShowPageGridCheckBox" Content="Afficher grille pages" IsChecked="True" Margin="16,6,0,0" Checked="AnyRefreshCheckBox_Changed" Unchecked="AnyRefreshCheckBox_Changed"/>
+            <CheckBox x:Name="ShowBrushCheckBox" Content="Afficher pinceau" IsChecked="True" Margin="12,6,0,0" Checked="AnyRefreshCheckBox_Changed" Unchecked="AnyRefreshCheckBox_Changed"/>
+            <CheckBox x:Name="ShowDirtyMaskCheckBox" Content="Afficher dirty mask" IsChecked="True" Margin="12,6,0,0" Checked="AnyRefreshCheckBox_Changed" Unchecked="AnyRefreshCheckBox_Changed"/>
+            <CheckBox x:Name="LimitBrushToSelectedPageCheckBox" Content="Limiter le pinceau à la page sélectionnée" IsChecked="False" Margin="12,6,0,0" Checked="AnyRefreshCheckBox_Changed" Unchecked="AnyRefreshCheckBox_Changed"/>
+            <CheckBox x:Name="AutoSelectPageCheckBox" Content="Auto-sélection de page" IsChecked="True" Margin="12,6,0,0"/>
+            <TextBlock Text="Seuil Y" VerticalAlignment="Center" Margin="16,0,0,0"/>
+            <TextBox x:Name="DirtyHeightThresholdTextBox" Width="58" Height="24" Margin="6,0,0,0" Text="0"/>
+            <Button Width="120" Height="28" Margin="6,0,0,0" Click="ValidateDirtyHeightButton_Click">Vérif dirty</Button>
+            <TextBlock x:Name="MouseCoordinateTextBlock" Margin="16,0,0,0" Width="420" VerticalAlignment="Center" FontFamily="Consolas" Text="RD3D : hors heightmap"/>
+        </StackPanel>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.1*"/>
+                <ColumnDefinition Width="1.9*"/>
+            </Grid.ColumnDefinitions>
+
+            <TabControl Grid.Column="0" Margin="0,0,12,0">
+                <TabItem Header="Pages terrain">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="180"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <TextBlock Text="Famille" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="FamilyComboBox" Width="130" Margin="8,0,0,0" SelectionChanged="PageFilter_Changed">
+                                <ComboBoxItem Content="Mesh"/>
+                                <ComboBoxItem Content="NormalMap"/>
+                                <ComboBoxItem Content="TintMap"/>
+                            </ComboBox>
+                            <TextBlock Text="LOD" VerticalAlignment="Center" Margin="12,0,0,0"/>
+                            <ComboBox x:Name="LodComboBox" Width="80" Margin="8,0,0,0" SelectionChanged="PageFilter_Changed"/>
+                            <CheckBox x:Name="EditableOnlyCheckBox" Content="Seulement éditables" Margin="14,4,0,0" Checked="PageFilter_Changed" Unchecked="PageFilter_Changed"/>
+                        </StackPanel>
+                        <DataGrid x:Name="PagesDataGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False" IsReadOnly="True" SelectionChanged="PagesDataGrid_SelectionChanged">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Famille" Binding="{Binding Family}" Width="90"/>
+                                <DataGridTextColumn Header="LOD" Binding="{Binding Lod}" Width="60"/>
+                                <DataGridTextColumn Header="X" Binding="{Binding X}" Width="60"/>
+                                <DataGridTextColumn Header="Y" Binding="{Binding Y}" Width="60"/>
+                                <DataGridTextColumn Header="Statut" Binding="{Binding Status}" Width="110"/>
+                                <DataGridTextColumn Header="Résumé" Binding="{Binding Details}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,8">
+                            <Button Width="150" Height="28" Click="RaisePageButton_Click">Relever la page</Button>
+                            <Button Width="150" Height="28" Margin="8,0,0,0" Click="LowerPageButton_Click">Abaisser la page</Button>
+                            <Button Width="150" Height="28" Margin="8,0,0,0" Click="SmoothPageButton_Click">Lisser la page</Button>
+                            <Button Width="160" Height="28" Margin="8,0,0,0" Click="FlattenPageButton_Click">Aplatir la page</Button>
+                        </StackPanel>
+                        <Grid Grid.Row="3">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1.2*"/>
+                                <ColumnDefinition Width="1.4*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border BorderBrush="#BBB" BorderThickness="1" Background="#202020" Margin="0,0,8,0">
+                                <Viewbox Stretch="Uniform">
+                                    <Image x:Name="SelectedPagePreviewImage" Stretch="Uniform"/>
+                                </Viewbox>
+                            </Border>
+                            <TextBox x:Name="PageDetailsTextBox" Grid.Column="1" FontFamily="Consolas" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+                        </Grid>
+                    </Grid>
+                </TabItem>
+                <TabItem Header="Stats">
+                    <TextBox x:Name="StatsTextBox" FontFamily="Consolas" IsReadOnly="True" BorderThickness="0" Background="Transparent" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+                </TabItem>
+                <TabItem Header="Régénération locale">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="220"/>
+                            <RowDefinition Height="180"/>
+                            <RowDefinition Height="140"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <TextBlock Text="Expansion pages" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="RegenerationRadiusComboBox" Width="70" Margin="8,0,0,0" SelectedIndex="1">
+                                <ComboBoxItem Content="0"/>
+                                <ComboBoxItem Content="1"/>
+                                <ComboBoxItem Content="2"/>
+                                <ComboBoxItem Content="3"/>
+                            </ComboBox>
+                            <Button Width="210" Height="28" Margin="12,0,0,0" Click="RegenerateLocalButton_Click">Régénérer dérivés locaux</Button>
+                            <Button Width="250" Height="28" Margin="8,0,0,0" Click="WriteInterpretedNormalMapsButton_Click">Écrire NormalMaps interprétés</Button>
+                            <CheckBox x:Name="UseDirtyBoundsCheckBox" Content="Utiliser dirty bounds si disponibles" IsChecked="True" Margin="12,4,0,0"/>
+                        </StackPanel>
+                        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,8" HorizontalAlignment="Left">
+                            <Button Width="220" Height="28" Click="WriteLocalMeshPagesButton_Click">Écrire Mesh pages locales</Button>
+                            <Button Width="180" Height="28" Margin="8,0,0,0" Click="ExportTargetedPatchButton_Click">Exporter patch ciblé</Button>
+                            <CheckBox x:Name="ExportSelectedPageOnlyCheckBox" Content="Seulement la page sélectionnée" IsChecked="False" Margin="12,5,0,0"/>
+                            <CheckBox x:Name="SyncAllMeshLodsCheckBox" Content="Synchroniser tous les LOD mesh éditables" IsChecked="True" Margin="12,5,0,0"/>
+                        </StackPanel>
+                        <Grid Grid.Row="2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <GroupBox Header="Height synthétique" Margin="0,0,8,0">
+                                <Viewbox Stretch="Uniform"><Image x:Name="RegeneratedHeightPreviewImage" Stretch="Uniform"/></Viewbox>
+                            </GroupBox>
+                            <GroupBox Header="Normal synthétique" Grid.Column="1" Margin="0,0,8,0">
+                                <Viewbox Stretch="Uniform"><Image x:Name="RegeneratedNormalPreviewImage" Stretch="Uniform"/></Viewbox>
+                            </GroupBox>
+                            <GroupBox Header="Tint synthétique" Grid.Column="2">
+                                <Viewbox Stretch="Uniform"><Image x:Name="RegeneratedTintPreviewImage" Stretch="Uniform"/></Viewbox>
+                            </GroupBox>
+                        </Grid>
+                        <TextBox x:Name="RegenerationSummaryTextBox" Grid.Row="3" FontFamily="Consolas" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+                        <GroupBox Header="Comparaison mesh avant / après" Grid.Row="4" Margin="0,8,0,8">
+                            <TextBox x:Name="MeshComparisonTextBox" FontFamily="Consolas" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+                        </GroupBox>
+                        <DataGrid x:Name="RegeneratedPagesDataGrid" Grid.Row="5" AutoGenerateColumns="False" CanUserAddRows="False" IsReadOnly="True">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Famille" Binding="{Binding Family}" Width="90"/>
+                                <DataGridTextColumn Header="LOD" Binding="{Binding Key.Lod}" Width="60"/>
+                                <DataGridTextColumn Header="X" Binding="{Binding Key.X}" Width="60"/>
+                                <DataGridTextColumn Header="Y" Binding="{Binding Key.Y}" Width="60"/>
+                                <DataGridTextColumn Header="Bounds" Binding="{Binding SampleBounds}" Width="150"/>
+                                <DataGridTextColumn Header="Résumé" Binding="{Binding Summary}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+                </TabItem>
+            </TabControl>
+
+            <Grid Grid.Column="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <TextBlock x:Name="BrushHintTextBlock" Margin="0,0,0,8" Text="Peinture 2D sur la coarse heightmap. Les opérations peuvent être limitées à la page réelle sélectionnée. La sélection d'une page affiche une prévisualisation du contenu réel de la page."/>
+                <Grid Grid.Row="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="2.2*"/>
+                        <ColumnDefinition Width="1.1*"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" BorderBrush="#BBB" BorderThickness="1" Background="#222" Margin="0,0,8,0">
+                        <Grid x:Name="HeightSurfaceHost"/>
+                    </Border>
+                    <GroupBox Grid.Column="1" Header="Page réelle sélectionnée">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="140"/>
+                            </Grid.RowDefinitions>
+                            <Border BorderBrush="#444" BorderThickness="1" Background="#202020" Margin="0,0,0,8">
+                                <Viewbox Stretch="Uniform">
+                                    <Image x:Name="SelectedPagePreviewLargeImage" Stretch="Uniform"/>
+                                </Viewbox>
+                            </Border>
+                            <TextBox x:Name="SelectedPagePreviewTextBox" Grid.Row="1" FontFamily="Consolas" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+                        </Grid>
+                    </GroupBox>
+                </Grid>
+            </Grid>
+        </Grid>
+
+        <TextBlock Grid.Row="2" Margin="0,8,0,0" Text="v25.2 : mesh height signé, échantillonnage global X/Z et synchro tous LOD mesh éditables." Foreground="#555"/>
+    </Grid>
+</Window>

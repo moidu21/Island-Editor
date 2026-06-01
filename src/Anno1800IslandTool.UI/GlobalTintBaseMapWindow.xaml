@@ -1,0 +1,79 @@
+<Window x:Class="Anno1800IslandTool.UI.GlobalTintBaseMapWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Anno1800IslandTool v44.8 - Éditeur teinte végétation / BaseTextureData"
+        Height="940"
+        Width="1450"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="10">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="360"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0" BorderBrush="#CCC" BorderThickness="1" Padding="10" Margin="0,0,10,0">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <TextBlock Text="TintMapLevels/BaseTextureData" FontWeight="SemiBold" FontSize="15" Margin="0,0,0,8"/>
+                    <TextBlock Text="Cette map globale est échantillonnée par les props/végétation via cTerrainTintTex. Elle influence la luminosité/couleur des buissons et herbes." TextWrapping="Wrap" Foreground="#555"/>
+
+                    <Separator Margin="0,12,0,12"/>
+
+                    <TextBlock Text="Outil pinceau" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                    <ComboBox x:Name="ToolComboBox" Height="28" SelectedIndex="0">
+                        <ComboBoxItem Content="Anti-rouge / garder orange max" Tag="anti-red"/>
+                        <ComboBoxItem Content="Verdir" Tag="green"/>
+                        <ComboBoxItem Content="Oranger doux" Tag="orange"/>
+                        <ComboBoxItem Content="Éclaircir" Tag="lighten"/>
+                        <ComboBoxItem Content="Assombrir" Tag="darken"/>
+                        <ComboBoxItem Content="Désaturer" Tag="desaturate"/>
+                        <ComboBoxItem Content="Neutraliser chroma" Tag="neutral"/>
+                    </ComboBox>
+
+                    <DockPanel Margin="0,10,0,0">
+                        <TextBlock DockPanel.Dock="Left" Text="Rayon" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="RadiusTextBlock" DockPanel.Dock="Right" Text="16 px"/>
+                    </DockPanel>
+                    <Slider x:Name="RadiusSlider" Minimum="1" Maximum="96" Value="16" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="RadiusSlider_ValueChanged"/>
+
+                    <DockPanel Margin="0,10,0,0">
+                        <TextBlock DockPanel.Dock="Left" Text="Force" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="StrengthTextBlock" DockPanel.Dock="Right" Text="35 %"/>
+                    </DockPanel>
+                    <Slider x:Name="StrengthSlider" Minimum="1" Maximum="100" Value="35" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="StrengthSlider_ValueChanged"/>
+                    <CheckBox x:Name="SoftFalloffCheckBox" Content="Falloff doux" IsChecked="True" Margin="0,8,0,0"/>
+
+                    <Separator Margin="0,12,0,12"/>
+
+                    <Button Height="30" Margin="0,0,0,6" Click="ApplyGlobalAntiRedButton_Click">Appliquer anti-rouge global</Button>
+                    <Button Height="30" Margin="0,0,0,6" Click="ReloadFromProjectButton_Click">Recharger depuis le projet</Button>
+                    <Button Height="30" Margin="0,0,0,6" Click="ApplyToProjectButton_Click" FontWeight="SemiBold">Appliquer au projet</Button>
+
+                    <TextBlock Text="Important : après application, l'export préservera cette BaseTextureData manuelle au lieu de la régénérer automatiquement." TextWrapping="Wrap" Foreground="#555" Margin="0,4,0,0"/>
+
+                    <Separator Margin="0,12,0,12"/>
+
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Left" Text="Zoom" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="ZoomTextBlock" DockPanel.Dock="Right" Text="200 %"/>
+                    </DockPanel>
+                    <Slider x:Name="ZoomSlider" Minimum="50" Maximum="800" Value="200" TickFrequency="25" IsSnapToTickEnabled="True" ValueChanged="ZoomSlider_ValueChanged"/>
+
+                    <Separator Margin="0,12,0,12"/>
+                    <TextBlock x:Name="StatusTextBlock" Text="Aucune map chargée." TextWrapping="Wrap" FontFamily="Consolas"/>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <Border Grid.Column="1" BorderBrush="#CCC" BorderThickness="1" Background="#111" Padding="8">
+            <ScrollViewer x:Name="PreviewScrollViewer" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                <Image x:Name="TintPreviewImage"
+                       Stretch="Fill"
+                       RenderOptions.BitmapScalingMode="NearestNeighbor"
+                       MouseDown="TintPreviewImage_MouseDown"
+                       MouseMove="TintPreviewImage_MouseMove"
+                       MouseUp="TintPreviewImage_MouseUp"/>
+            </ScrollViewer>
+        </Border>
+    </Grid>
+</Window>

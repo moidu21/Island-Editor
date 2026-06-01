@@ -1,0 +1,11 @@
+[
+  {
+    "Name": "Anno1800IslandTool.UI",
+    "Projects": [
+      {
+        "Path": "src\\Anno1800IslandTool.UI\\Anno1800IslandTool.UI.csproj",
+        "Action": "Start"
+      }
+    ]
+  }
+]

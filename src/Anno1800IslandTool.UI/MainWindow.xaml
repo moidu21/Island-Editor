@@ -1,0 +1,514 @@
+<Window x:Class="Anno1800IslandTool.UI.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Anno1800IslandTool v44.8 global tintbase édition"
+        Height="980"
+        Width="1760"
+        WindowStartupLocation="CenterScreen">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="260" MinHeight="120"/>
+            <RowDefinition Height="6"/>
+            <RowDefinition Height="*" MinHeight="260"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+            <Button Width="180" Height="34" Click="OpenArchiveButton_Click">Ouvrir une archive ZIP</Button>
+            <Button Width="120" Height="34" Margin="8,0,0,0" Click="ValidateButton_Click">Revalider</Button>
+            <Button Width="120" Height="34" Margin="8,0,0,0" Click="ExportArchiveButton_Click">Exporter ZIP</Button>
+            <Button Width="120" Height="34" Margin="8,0,0,0" Click="SaveLogButton_Click">Sauver rapport</Button>
+            <Button Width="150" Height="34" Margin="8,0,0,0" Click="RegenerateTextsButton_Click">Régénérer textes</Button>
+            <Button Width="160" Height="34" Margin="8,0,0,0" Click="OpenMap2DWindowButton_Click">Fenêtre vue 2D</Button>
+            <Button Width="170" Height="34" Margin="8,0,0,0" Click="OpenTerrain3DWindowButton_Click">Fenêtre terrain 3D</Button>
+            <Button Width="175" Height="34" Margin="8,0,0,0" Click="OpenMaterialMapWindowButton_Click">Éditeur matériaux</Button>
+            <Button Width="195" Height="34" Margin="8,0,0,0" Click="OpenGlobalTintBaseWindowButton_Click">Teinte végétation</Button>
+            <CheckBox x:Name="ReadPayloadsCheckBox"
+                      Margin="16,8,0,0"
+                      Content="Lire le détail des pages (plus lent)"
+                      ToolTip="Charge mesh/normalmaps en mémoire pour l'édition 3D complète."
+                      VerticalAlignment="Center"/>
+            <CheckBox x:Name="MemorySaverCheckBox"
+                      Margin="12,8,0,0"
+                      IsChecked="True"
+                      Content="RAM économe"
+                      ToolTip="v41.2 : lit les pages par lots et ne conserve pas le XML brut des pages mesh/normalmap. Décoche pour privilégier la vitesse/préservation brute."
+                      VerticalAlignment="Center"/>
+            <TextBlock Margin="16,8,0,0"
+                       Text="v44.8 : BaseTextureData végétation éditable + anti-rouge ; export préserve les teintes manuelles."
+                       FontWeight="SemiBold"/>
+        </StackPanel>
+
+        <Border Grid.Row="1" BorderBrush="#DDD" BorderThickness="1" Padding="8" Margin="0,0,0,0">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Top"
+                           Text="Résumé / log projet (zone redimensionnable)"
+                           FontWeight="SemiBold"
+                           Margin="0,0,0,6"/>
+                <TextBox x:Name="SummaryTextBox"
+                         FontFamily="Consolas"
+                         IsReadOnly="True"
+                         AcceptsReturn="True"
+                         BorderThickness="0"
+                         Background="Transparent"
+                         TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto"
+                         HorizontalScrollBarVisibility="Auto"/>
+            </DockPanel>
+        </Border>
+
+        <GridSplitter Grid.Row="2"
+                      Height="6"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch"
+                      ResizeDirection="Rows"
+                      ResizeBehavior="PreviousAndNext"
+                      ShowsPreview="True"
+                      Background="#D8D8D8"
+                      Margin="0,6,0,6"/>
+
+        <Grid Grid.Row="3">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2.7*"/>
+                <ColumnDefinition Width="3.3*"/>
+            </Grid.ColumnDefinitions>
+
+            <TabControl Margin="0,0,12,0">
+                <TabItem Header="Fichiers">
+                    <DataGrid x:Name="FilesDataGrid"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              CanUserAddRows="False"
+                              SelectionChanged="FilesDataGrid_SelectionChanged">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Type" Binding="{Binding Kind}" Width="150"/>
+                            <DataGridTextColumn Header="Taille" Binding="{Binding SizeInBytes}" Width="120"/>
+                            <DataGridTextColumn Header="Chemin" Binding="{Binding RelativePath}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </TabItem>
+
+                <TabItem Header="Pages terrain">
+                    <DataGrid x:Name="PagesDataGrid"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              CanUserAddRows="False"
+                              SelectionChanged="PagesDataGrid_SelectionChanged">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Famille" Binding="{Binding Family}" Width="120"/>
+                            <DataGridTextColumn Header="LOD" Binding="{Binding Lod}" Width="70"/>
+                            <DataGridTextColumn Header="X" Binding="{Binding X}" Width="70"/>
+                            <DataGridTextColumn Header="Y" Binding="{Binding Y}" Width="70"/>
+                            <DataGridTextColumn Header="Résumé" Binding="{Binding Details}" Width="240"/>
+                            <DataGridTextColumn Header="Chemin" Binding="{Binding Path}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </TabItem>
+
+                <TabItem Header="Matériaux">
+                    <Grid Margin="6">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <Button Width="210" Height="30" Click="OpenMaterialMapWindowButton_Click">Ouvrir l’éditeur material map</Button>
+                            <TextBlock Margin="12,7,0,0" Text="v30 : peinture terrain + transition hauteur, compatible GroundObjects et alphas vanilla."/>
+                        </StackPanel>
+                        <DataGrid x:Name="MaterialsDataGrid"
+                                  Grid.Row="1"
+                                  AutoGenerateColumns="False"
+                                  IsReadOnly="True"
+                                  CanUserAddRows="False"
+                                  SelectionChanged="MaterialsDataGrid_SelectionChanged">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="ID" Binding="{Binding Id}" Width="80"/>
+                                <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="140"/>
+                                <DataGridTextColumn Header="Texture" Binding="{Binding FileName}" Width="260"/>
+                                <DataGridTextColumn Header="GroundType" Binding="{Binding GroundType}" Width="140"/>
+                                <DataGridTextColumn Header="Objet" Binding="{Binding ObjectFileName}" Width="220"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+                </TabItem>
+                <TabItem Header="PropGrid (RD3D)">
+                    <Grid Margin="6">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="180"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="FileNames" VerticalAlignment="Center" FontWeight="SemiBold"/>
+                            <Button Width="90" Height="28" Margin="12,0,0,0" Click="AddPropFileNameButton_Click">Ajouter</Button>
+                            <Button Width="100" Height="28" Margin="8,0,0,0" Click="RemovePropFileNameButton_Click">Supprimer</Button>
+                        </StackPanel>
+
+                        <DataGrid x:Name="PropGridFileNamesDataGrid"
+                                  Grid.Row="1"
+                                  Margin="0,8,0,8"
+                                  AutoGenerateColumns="False"
+                                  CanUserAddRows="False"
+                                  SelectionUnit="FullRow">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="FileName" Binding="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+
+                        <StackPanel Grid.Row="2" Orientation="Horizontal">
+                            <TextBlock Text="Instances (&lt;None&gt;...&lt;/None&gt;)" VerticalAlignment="Center" FontWeight="SemiBold"/>
+                            <Button Width="90" Height="28" Margin="12,0,0,0" Click="AddPropInstanceButton_Click">Ajouter</Button>
+                            <Button Width="100" Height="28" Margin="8,0,0,0" Click="RemovePropInstanceButton_Click">Supprimer</Button>
+                            <Button Width="150" Height="28" Margin="8,0,0,0" Click="ClearPropInstancesButton_Click">Vider instances</Button>
+                            <Button Width="150" Height="28" Margin="16,0,0,0" Click="ApplyPropGridButton_Click">Appliquer PropGrid</Button>
+                        </StackPanel>
+
+                        <DataGrid x:Name="PropGridInstancesDataGrid"
+                                  Grid.Row="3"
+                                  Margin="0,8,0,0"
+                                  AutoGenerateColumns="False"
+                                  CanUserAddRows="False"
+                                  SelectionUnit="FullRow"
+                                  RowHeight="66">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Résumé" Binding="{Binding Summary}" Width="220" IsReadOnly="True"/>
+                                <DataGridTextColumn Header="Raw &lt;None&gt; XML" Binding="{Binding RawXml, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+                </TabItem>
+
+                <TabItem Header="GroundObjects / végétation">
+                    <Grid Margin="6">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <WrapPanel Margin="0,0,0,8">
+                            <Button Width="100" Height="28" Margin="0,0,8,8" Click="ReloadGroundObjectsButton_Click">Recharger</Button>
+                            <Button Width="100" Height="28" Margin="0,0,8,8" Click="AddGroundObjectButton_Click">Ajouter</Button>
+                            <Button Width="100" Height="28" Margin="0,0,8,8" Click="DuplicateGroundObjectButton_Click">Dupliquer</Button>
+                            <Button Width="100" Height="28" Margin="0,0,8,8" Click="RemoveGroundObjectButton_Click">Supprimer</Button>
+                            <Button Width="150" Height="28" Margin="0,0,8,8" Click="ClearGroundObjectsButton_Click">Tout supprimer</Button>
+                            <Button Width="170" Height="28" Margin="0,0,8,8" Click="ApplyGroundObjectsButton_Click">Appliquer GroundObjects</Button>
+                            <Button Width="150" Height="28" Margin="0,0,8,8" Click="GroundObjectsSummaryButton_Click">Résumé</Button>
+                        </WrapPanel>
+
+                        <TextBlock Grid.Row="1" Margin="0,0,0,6" TextWrapping="Wrap"
+                                   Text="Édition des objets de sol stockés dans les pages mesh : végétation, props et décorations. Attention : ce ne sont pas les SlotObjects. Pour retirer toute la végétation/props, vider aussi les instances PropGrid RD3D si nécessaire. LOD0/LOD1 restent des pages metadata/coverage : seuls les GroundObjects sont réécrits, jamais les vertices."/>
+
+                        <DataGrid x:Name="GroundObjectsDataGrid"
+                                  Grid.Row="2"
+                                  AutoGenerateColumns="False"
+                                  CanUserAddRows="False"
+                                  SelectionUnit="FullRow"
+                                  SelectionChanged="GroundObjectsDataGrid_SelectionChanged">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="LOD" Binding="{Binding LodText, UpdateSourceTrigger=PropertyChanged}" Width="55"/>
+                                <DataGridTextColumn Header="Page X" Binding="{Binding PageXText, UpdateSourceTrigger=PropertyChanged}" Width="65"/>
+                                <DataGridTextColumn Header="Page Y" Binding="{Binding PageYText, UpdateSourceTrigger=PropertyChanged}" Width="65"/>
+                                <DataGridTextColumn Header="Cluster" Binding="{Binding ClusterIndexText, UpdateSourceTrigger=PropertyChanged}" Width="70"/>
+                                <DataGridTextColumn Header="ID" Binding="{Binding IdText, UpdateSourceTrigger=PropertyChanged}" Width="55"/>
+                                <DataGridTextColumn Header="Kind" Binding="{Binding Kind, UpdateSourceTrigger=PropertyChanged}" Width="100"/>
+                                <DataGridTextColumn Header="FileName" Binding="{Binding FileName, UpdateSourceTrigger=PropertyChanged}" Width="300"/>
+                                <DataGridTextColumn Header="Pos X" Binding="{Binding PosXText, UpdateSourceTrigger=PropertyChanged}" Width="85"/>
+                                <DataGridTextColumn Header="Pos Z" Binding="{Binding PosZText, UpdateSourceTrigger=PropertyChanged}" Width="85"/>
+                                <DataGridTextColumn Header="Rotation Y" Binding="{Binding RotationYText, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
+                                <DataGridTextColumn Header="Coverage" Binding="{Binding CoverageText, UpdateSourceTrigger=PropertyChanged}" Width="85"/>
+                                <DataGridTextColumn Header="Page path" Binding="{Binding PagePath}" Width="*" IsReadOnly="True"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+                </TabItem>
+
+
+                <TabItem Header="GameData objects">
+                    <Grid Margin="6">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock TextWrapping="Wrap" Margin="0,0,0,8"
+                                   Text="Édition des &lt;objects&gt; dans GameData : AreaManagerData -&gt; None -&gt; Data -&gt; AreaObjectManager -&gt; GameObject -&gt; objects. Chaque ligne correspond à un bloc top-level &lt;None&gt;...&lt;/None&gt;. Les &lt;None&gt; internes sont préservés."/>
+
+                        <WrapPanel Grid.Row="1" Margin="0,0,0,8">
+                            <Button Width="100" Height="28" Margin="0,0,8,8" Click="ReloadGameDataObjectsButton_Click">Recharger</Button>
+                            <TextBlock Text="Container" VerticalAlignment="Center" Margin="0,0,6,8"/>
+                            <ComboBox x:Name="GameDataObjectContainerComboBox" Width="260" Height="28" Margin="0,0,8,8"/>
+                            <Button Width="100" Height="28" Margin="0,0,8,8" Click="AddGameDataObjectButton_Click">Ajouter</Button>
+                            <Button Width="100" Height="28" Margin="0,0,8,8" Click="DuplicateGameDataObjectButton_Click">Dupliquer</Button>
+                            <Button Width="100" Height="28" Margin="0,0,8,8" Click="RemoveGameDataObjectButton_Click">Supprimer</Button>
+                            <Button Width="170" Height="28" Margin="0,0,8,8" Click="ApplyGameDataObjectsButton_Click">Appliquer GameData</Button>
+                            <TextBlock x:Name="GameDataObjectsStatusTextBlock" VerticalAlignment="Center" Margin="8,4,0,8" Text="Aucun projet chargé."/>
+                        </WrapPanel>
+
+                        <DataGrid x:Name="GameDataObjectsDataGrid"
+                                  Grid.Row="2"
+                                  AutoGenerateColumns="False"
+                                  CanUserAddRows="False"
+                                  SelectionUnit="FullRow"
+                                  RowHeight="94"
+                                  SelectionChanged="GameDataObjectsDataGrid_SelectionChanged">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Container" Binding="{Binding ContainerIndexText, UpdateSourceTrigger=PropertyChanged}" Width="80"/>
+                                <DataGridTextColumn Header="#" Binding="{Binding ObjectIndexText}" Width="48" IsReadOnly="True"/>
+                                <DataGridTextColumn Header="guid" Binding="{Binding Guid}" Width="90" IsReadOnly="True"/>
+                                <DataGridTextColumn Header="ID" Binding="{Binding ObjectId}" Width="150" IsReadOnly="True"/>
+                                <DataGridTextColumn Header="Folder" Binding="{Binding FolderId}" Width="70" IsReadOnly="True"/>
+                                <DataGridTextColumn Header="Position" Binding="{Binding Position}" Width="180" IsReadOnly="True"/>
+                                <DataGridTextColumn Header="Résumé" Binding="{Binding Summary}" Width="220" IsReadOnly="True"/>
+                                <DataGridTemplateColumn Header="Raw &lt;None&gt; XML" Width="*">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBox Text="{Binding RawXml, UpdateSourceTrigger=PropertyChanged}"
+                                                     FontFamily="Consolas"
+                                                     AcceptsReturn="True"
+                                                     TextWrapping="NoWrap"
+                                                     VerticalScrollBarVisibility="Auto"
+                                                     HorizontalScrollBarVisibility="Auto"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+                </TabItem>
+
+                <TabItem Header="Slots (édition)">
+                    <Grid Margin="6">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel Orientation="Horizontal">
+                            <Button Width="110" Height="30" Click="AddSlotButton_Click">Ajouter slot</Button>
+                            <Button Width="120" Height="30" Margin="8,0,0,0" Click="RemoveSlotButton_Click">Supprimer slot</Button>
+                            <Button Width="130" Height="30" Margin="8,0,0,0" Click="ApplySlotsButton_Click">Appliquer slots</Button>
+                        </StackPanel>
+                        <DataGrid x:Name="SlotsDataGrid"
+                                  Grid.Row="1"
+                                  Margin="0,8,0,0"
+                                  AutoGenerateColumns="False"
+                                  CanUserAddRows="False"
+                                  SelectionUnit="FullRow"
+                                  SelectionChanged="SlotsDataGrid_SelectionChanged">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="ObjectId" Binding="{Binding ObjectIdText, UpdateSourceTrigger=PropertyChanged}" Width="180"/>
+                                <DataGridTextColumn Header="Guid" Binding="{Binding ObjectGuid, UpdateSourceTrigger=PropertyChanged}" Width="120"/>
+                                <DataGridTextColumn Header="Pos X" Binding="{Binding PosXText, UpdateSourceTrigger=PropertyChanged}" Width="100"/>
+                                <DataGridTextColumn Header="Pos Y" Binding="{Binding PosYText, UpdateSourceTrigger=PropertyChanged}" Width="100"/>
+                                <DataGridTextColumn Header="Pos Z" Binding="{Binding PosZText, UpdateSourceTrigger=PropertyChanged}" Width="100"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+                </TabItem>
+
+                <TabItem Header="Zones (édition)">
+                    <Grid Margin="6">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="PlayableArea L/T/R/B" VerticalAlignment="Center"/>
+                            <TextBox x:Name="PlayableAreaLeftTextBox" Width="60" Margin="8,0,0,0"/>
+                            <TextBox x:Name="PlayableAreaTopTextBox" Width="60" Margin="8,0,0,0"/>
+                            <TextBox x:Name="PlayableAreaRightTextBox" Width="60" Margin="8,0,0,0"/>
+                            <TextBox x:Name="PlayableAreaBottomTextBox" Width="60" Margin="8,0,0,0"/>
+                            <Button Width="160" Height="30" Margin="12,0,0,0" Click="ApplyZonesButton_Click">Appliquer zones</Button>
+                        </StackPanel>
+
+                        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,8,0,6">
+                            <Button Width="120" Height="28" Click="AddAreaButton_Click">Ajouter area</Button>
+                            <Button Width="130" Height="28" Margin="8,0,0,0" Click="RemoveAreaButton_Click">Supprimer area</Button>
+                        </StackPanel>
+                        <DataGrid x:Name="AreasDataGrid" Grid.Row="2" Grid.RowSpan="2" Margin="0,0,0,8" AutoGenerateColumns="False" CanUserAddRows="False">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Area ID" Binding="{Binding Id, UpdateSourceTrigger=PropertyChanged}" Width="180"/>
+                                <DataGridTextColumn Header="Type" Binding="{Binding Type, UpdateSourceTrigger=PropertyChanged}" Width="180"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+
+                        <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,8,0,6">
+                            <Button Width="140" Height="28" Click="AddSpawnButton_Click">Ajouter spawn</Button>
+                            <Button Width="150" Height="28" Margin="8,0,0,0" Click="RemoveSpawnButton_Click">Supprimer spawn</Button>
+                        </StackPanel>
+                        <DataGrid x:Name="SpawnsDataGrid" Grid.Row="5" AutoGenerateColumns="False" CanUserAddRows="False" SelectionChanged="SpawnsDataGrid_SelectionChanged">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Pos X" Binding="{Binding PosXText, UpdateSourceTrigger=PropertyChanged}" Width="100"/>
+                                <DataGridTextColumn Header="Pos Y" Binding="{Binding PosYText, UpdateSourceTrigger=PropertyChanged}" Width="100"/>
+                                <DataGridTextColumn Header="Pos Z" Binding="{Binding PosZText, UpdateSourceTrigger=PropertyChanged}" Width="100"/>
+                                <DataGridTextColumn Header="Tag" Binding="{Binding Tag, UpdateSourceTrigger=PropertyChanged}" Width="180"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+                </TabItem>
+            </TabControl>
+
+            <TabControl Grid.Column="1">
+                <TabItem Header="Édition">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <Grid Margin="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="220"/>
+                                <ColumnDefinition Width="220"/>
+                                <ColumnDefinition Width="220"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Text="Nom interne" VerticalAlignment="Center"/>
+                            <TextBox x:Name="InternalNameTextBox" Grid.Column="1" Margin="8,4,8,4"/>
+
+                            <TextBlock Grid.Row="1" Text="MapSize" VerticalAlignment="Center"/>
+                            <TextBox x:Name="MapSizeTextBox" Grid.Row="1" Grid.Column="1" Margin="8,4,8,4"/>
+                            <CheckBox x:Name="SyncDerivedCheckBox" Grid.Row="1" Grid.Column="2" Content="Synchroniser RD3D/GameData" Margin="8,6,8,4" IsChecked="True"/>
+
+                            <TextBlock Grid.Row="2" Text="ActiveMapGrid X / Y" VerticalAlignment="Center"/>
+                            <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="8,4,8,4">
+                                <TextBox x:Name="ActiveMapGridXTextBox" Width="90"/>
+                                <TextBox x:Name="ActiveMapGridYTextBox" Width="90" Margin="8,0,0,0"/>
+                            </StackPanel>
+
+                            <TextBlock Grid.Row="3" Text="ActiveMapRect L / T / R / B" VerticalAlignment="Center"/>
+                            <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="8,4,8,4">
+                                <TextBox x:Name="ActiveMapRectLeftTextBox" Width="70"/>
+                                <TextBox x:Name="ActiveMapRectTopTextBox" Width="70" Margin="8,0,0,0"/>
+                                <TextBox x:Name="ActiveMapRectRightTextBox" Width="70" Margin="8,0,0,0"/>
+                                <TextBox x:Name="ActiveMapRectBottomTextBox" Width="70" Margin="8,0,0,0"/>
+                            </StackPanel>
+
+                            <TextBlock Grid.Row="4" Text="MaterialSetFileName" VerticalAlignment="Center"/>
+                            <TextBox x:Name="MaterialSetFileNameTextBox" Grid.Row="4" Grid.Column="1" Margin="8,4,8,4"/>
+                            <TextBlock Grid.Row="4" Grid.Column="2" Margin="8,8,0,0" Text="Laisse vide pour utiliser terra_01.xml"/>
+
+                            <StackPanel Grid.Row="5" Grid.ColumnSpan="4" Orientation="Horizontal" Margin="0,12,0,0">
+                                <Button Width="170" Height="32" Click="ApplyMetadataButton_Click">Appliquer métadonnées</Button>
+                                <Button Width="140" Height="32" Margin="8,0,0,0" Click="ResetEditorsButton_Click">Recharger champs</Button>
+                                <TextBlock Margin="16,8,0,0" Text="Changer MapSize ne régénère pas les pages terrain. Utilise-le seulement pour des tests contrôlés."/>
+                            </StackPanel>
+                        </Grid>
+                    </ScrollViewer>
+                </TabItem>
+
+                <TabItem Header="Vue 2D (édition)">
+                    <Grid Margin="8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Preview" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="PreviewSelectorComboBox" Width="380" Margin="8,0,0,0" SelectionChanged="PreviewSelectorComboBox_SelectionChanged"/>
+                            <Button Width="120" Height="28" Margin="8,0,0,0" Click="Refresh2DButton_Click">Rafraîchir vue</Button>
+                            <Button Width="140" Height="28" Margin="8,0,0,0" Click="ApplyMapEditButton_Click">Appliquer vue 2D</Button>
+                            <CheckBox x:Name="AutoRefreshOverlayCheckBox" Margin="12,5,0,0" Content="Rafraîchir overlay auto" IsChecked="True"/>
+                        </StackPanel>
+
+                        <WrapPanel Grid.Row="1" Margin="0,8,0,6">
+                            <Button Width="120" Height="28" Margin="0,0,8,8" Click="SelectModeButton_Click">Mode sélection</Button>
+                            <Button Width="140" Height="28" Margin="0,0,8,8" Click="MoveSlotModeButton_Click">Déplacer slot</Button>
+                            <Button Width="150" Height="28" Margin="0,0,8,8" Click="MoveSpawnModeButton_Click">Déplacer spawn</Button>
+                            <Button Width="130" Height="28" Margin="0,0,8,8" Click="AddSlotModeButton_Click">Ajouter slot</Button>
+                            <Button Width="140" Height="28" Margin="0,0,8,8" Click="AddSpawnModeButton_Click">Ajouter spawn</Button>
+                            <Button Width="165" Height="28" Margin="0,0,8,8" Click="MoveGroundObjectModeButton_Click">Déplacer GroundObject</Button>
+                            <Button Width="165" Height="28" Margin="0,0,8,8" Click="AddGroundObjectModeButton_Click">Ajouter GroundObject</Button>
+                            <Button Width="150" Height="28" Margin="0,0,8,8" Click="SetZoneTopLeftModeButton_Click">Zone coin HG</Button>
+                            <Button Width="150" Height="28" Margin="0,0,8,8" Click="SetZoneBottomRightModeButton_Click">Zone coin BD</Button>
+                            <Button Width="150" Height="28" Margin="0,0,8,8" Click="ClearMapModeButton_Click">Quitter mode</Button>
+                            <TextBlock x:Name="MapModeTextBlock" Margin="8,7,0,0" FontWeight="SemiBold" Text="Mode: Sélection"/>
+                        </WrapPanel>
+
+                        <TextBox x:Name="ImageStatsTextBox" Grid.Row="2" Margin="0,0,0,8" IsReadOnly="True" Background="Transparent" BorderThickness="0" TextWrapping="Wrap" FontFamily="Consolas"/>
+
+                        <Grid Grid.Row="3">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="1.25*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border BorderBrush="#CCC" BorderThickness="1" Margin="0,0,8,0" Padding="6">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Text="Coarse HeightMap" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                                        <Image x:Name="HeightMapImage" Stretch="None"/>
+                                    </ScrollViewer>
+                                </DockPanel>
+                            </Border>
+                            <Border Grid.Column="1" BorderBrush="#CCC" BorderThickness="1" Margin="8,0,0,0" Padding="6">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Text="Image / overlay d'édition" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                    <TextBlock x:Name="MapHintTextBlock" DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,6"
+                                               Text="Sélectionne un slot ou un spawn dans les tableaux, puis utilise les modes ci-dessus. Un clic sur l'image déplace ou ajoute l'élément, ou définit les coins de la PlayableArea."/>
+                                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                                        <Canvas x:Name="MapEditCanvas"
+                                                Background="#222"
+                                                MouseLeftButtonDown="MapEditCanvas_MouseLeftButtonDown"/>
+                                    </ScrollViewer>
+                                </DockPanel>
+                            </Border>
+                        </Grid>
+                    </Grid>
+                </TabItem>
+
+                <TabItem Header="Validation">
+                    <DataGrid x:Name="ValidationDataGrid" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Sévérité" Binding="{Binding Severity}" Width="110"/>
+                            <DataGridTextColumn Header="Code" Binding="{Binding Code}" Width="140"/>
+                            <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="*"/>
+                            <DataGridTextColumn Header="Fichier" Binding="{Binding FilePath}" Width="260"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </TabItem>
+
+                <TabItem Header="Texte brut (édition)">
+                    <Grid Margin="8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <ComboBox x:Name="RawTextSelector" Width="180" SelectionChanged="RawTextSelector_SelectionChanged"/>
+                            <Button Width="120" Height="30" Margin="8,0,0,0" Click="ApplyRawTextButton_Click">Appliquer texte</Button>
+                            <Button Width="130" Height="30" Margin="8,0,0,0" Click="ReloadRawTextButton_Click">Recharger texte</Button>
+                        </StackPanel>
+                        <TextBox x:Name="RawTextBox" Grid.Row="1" FontFamily="Consolas" AcceptsReturn="True" AcceptsTab="True" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+                    </Grid>
+                </TabItem>
+
+
+                <TabItem Header="Gameplay/rendu avancé">
+                    <TextBox x:Name="AdvancedGameplayRenderTextBox" Margin="8" FontFamily="Consolas" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" IsReadOnly="True"/>
+                </TabItem>
+
+                <TabItem Header="Sélection">
+                    <TextBox x:Name="SelectionDetailsTextBox" Margin="8" FontFamily="Consolas" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" IsReadOnly="True"/>
+                </TabItem>
+
+                <TabItem Header="Rapport texte">
+                    <TextBox x:Name="ValidationTextBox" Margin="8" FontFamily="Consolas" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" IsReadOnly="True"/>
+                </TabItem>
+            </TabControl>
+        </Grid>
+    </Grid>
+</Window>

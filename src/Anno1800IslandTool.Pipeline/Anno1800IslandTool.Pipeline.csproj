@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Anno1800IslandTool.Pipeline</RootNamespace>
+    <AssemblyName>Anno1800IslandTool.Pipeline</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Anno1800IslandTool.Core\Anno1800IslandTool.Core.csproj" />
+    <ProjectReference Include="..\Anno1800IslandTool.Formats\Anno1800IslandTool.Formats.csproj" />
+  </ItemGroup>
+</Project>
