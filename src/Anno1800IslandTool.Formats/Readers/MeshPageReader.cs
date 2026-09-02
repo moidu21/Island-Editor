@@ -8,6 +8,14 @@ namespace Anno1800IslandTool.Formats.Readers;
 
 public sealed class MeshPageReader
 {
+    private static readonly Regex ClusterRegex = new(
+        @"<None>\s*<Indices>\s*(?<indices>.*?)\s*</Indices>\s*<Vertices>\s*(?<vertices>.*?)\s*</Vertices>\s*<UsedMaterialBits>\s*(?<bits>-?\d+)\s*</UsedMaterialBits>\s*(?<ground><GroundObjects(?:\s*/>|>.*?</GroundObjects>))\s*</None>",
+        RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex GroundObjectRegex = new(
+        @"<None>\s*<ID>\s*(?<id>-?\d+)\s*</ID>\s*<FileName>\s*(?<file>[^<\r\n]+)\s*</FileName>\s*<PositionsXZ>\s*(?<pos>[^<\r\n]+)\s*</PositionsXZ>\s*<RotationsY>\s*(?<rot>[^<\r\n]+)\s*</RotationsY>\s*<Coverages>\s*(?<cov>[^<\r\n]+)\s*</Coverages>\s*</None>",
+        RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
     public MeshPage Read(string relativePath, TerrainPageKey key, string text, bool retainRawText = true)
     {
         var result = new MeshPage
@@ -25,10 +33,7 @@ public sealed class MeshPageReader
         result.ContainsStructuredMeshPayload = text.Contains("<Meshes>", StringComparison.OrdinalIgnoreCase) ||
                                                text.Contains("<UsedMaterialBits>", StringComparison.OrdinalIgnoreCase);
 
-        foreach (Match match in Regex.Matches(
-                     text,
-                     @"<None>\s*<Indices>\s*(?<indices>.*?)\s*</Indices>\s*<Vertices>\s*(?<vertices>.*?)\s*</Vertices>\s*<UsedMaterialBits>\s*(?<bits>-?\d+)\s*</UsedMaterialBits>\s*(?<ground><GroundObjects(?:\s*/>|>.*?</GroundObjects>))\s*</None>",
-                     RegexOptions.Singleline | RegexOptions.IgnoreCase))
+        foreach (Match match in ClusterRegex.Matches(text))
         {
             var cluster = new MeshCluster
             {
@@ -42,14 +47,18 @@ public sealed class MeshPageReader
             {
                 cluster.Vertices.Add(new MeshVertex
                 {
-                    RawValues = vertexValues.Skip(i).Take(8).ToArray()
+                    Raw0 = vertexValues[i],
+                    Raw1 = vertexValues[i + 1],
+                    Raw2 = vertexValues[i + 2],
+                    Raw3 = vertexValues[i + 3],
+                    Raw4 = vertexValues[i + 4],
+                    Raw5 = vertexValues[i + 5],
+                    Raw6 = vertexValues[i + 6],
+                    Raw7 = vertexValues[i + 7]
                 });
             }
 
-            foreach (Match objectMatch in Regex.Matches(
-                         match.Groups["ground"].Value,
-                         @"<None>\s*<ID>\s*(?<id>-?\d+)\s*</ID>\s*<FileName>\s*(?<file>[^<\r\n]+)\s*</FileName>\s*<PositionsXZ>\s*(?<pos>[^<\r\n]+)\s*</PositionsXZ>\s*<RotationsY>\s*(?<rot>[^<\r\n]+)\s*</RotationsY>\s*<Coverages>\s*(?<cov>[^<\r\n]+)\s*</Coverages>\s*</None>",
-                         RegexOptions.Singleline | RegexOptions.IgnoreCase))
+            foreach (Match objectMatch in GroundObjectRegex.Matches(match.Groups["ground"].Value))
             {
                 var pos = ParseFloats(objectMatch.Groups["pos"].Value);
                 var rot = ParseFloats(objectMatch.Groups["rot"].Value);
@@ -81,11 +90,9 @@ public sealed class MeshPageReader
 
     private static void ApplyDiagnostics(MeshPage page, string text)
     {
-        var allVertices = page.Clusters.SelectMany(c => c.Vertices).ToList();
-        var vertexCount = allVertices.Count;
+        var vertexCount = page.Clusters.Sum(c => c.Vertices.Count);
         var indexCount = page.Clusters.Sum(c => c.Indices.Count);
         var groundCount = page.Clusters.Sum(c => c.GroundObjects.Count);
-        var hasVertexNumbers = Regex.IsMatch(text, @"<Vertices>\s*[-0-9]", RegexOptions.Singleline | RegexOptions.IgnoreCase);
         var hasAnyVerticesTag = text.Contains("<Vertices>", StringComparison.OrdinalIgnoreCase);
 
         page.HasDecodedPayload = page.ParsedClusterCount > 0;
@@ -96,7 +103,7 @@ public sealed class MeshPageReader
 
         if (page.HasEditablePayload)
         {
-            InferVertexLayout(page, allVertices);
+            InferVertexLayout(page);
 
             page.DecodeStatus = "Décodée";
             page.DecodeNotes =
@@ -112,6 +119,7 @@ public sealed class MeshPageReader
             return;
         }
 
+        var hasVertexNumbers = Regex.IsMatch(text, @"<Vertices>\s*[-0-9]", RegexOptions.Singleline | RegexOptions.IgnoreCase);
         if (page.ContainsStructuredMeshPayload || hasVertexNumbers)
         {
             page.DecodeStatus = "Non décodée";
@@ -123,30 +131,36 @@ public sealed class MeshPageReader
         page.DecodeNotes = "Le contenu de page ne ressemble pas à un payload mesh interprété standard, ou le détail des pages n'a pas été chargé.";
     }
 
-    private static void InferVertexLayout(MeshPage page, IReadOnlyList<MeshVertex> vertices)
+    private static void InferVertexLayout(MeshPage page)
     {
         page.VertexStride = 8;
-
-        var xs = vertices.Select(v => (float)v.Raw0).ToArray();
-        var rawHeights = vertices.Select(v => (float)v.Raw1).ToArray();
-        var zs = vertices.Select(v => (float)v.Raw2).ToArray();
-        var decodedHeights = vertices.Select(v => (float)v.DecodedHeight).ToArray();
+        var minX = int.MaxValue;
+        var maxX = int.MinValue;
+        var minRawHeight = int.MaxValue;
+        var maxRawHeight = int.MinValue;
+        var minDecodedHeight = int.MaxValue;
+        var maxDecodedHeight = int.MinValue;
+        var minZ = int.MaxValue;
+        var maxZ = int.MinValue;
+        foreach (var cluster in page.Clusters)
+        {
+            foreach (var vertex in cluster.Vertices)
+            {
+                minX = Math.Min(minX, vertex.Raw0);
+                maxX = Math.Max(maxX, vertex.Raw0);
+                minRawHeight = Math.Min(minRawHeight, vertex.Raw1);
+                maxRawHeight = Math.Max(maxRawHeight, vertex.Raw1);
+                minDecodedHeight = Math.Min(minDecodedHeight, vertex.DecodedHeight);
+                maxDecodedHeight = Math.Max(maxDecodedHeight, vertex.DecodedHeight);
+                minZ = Math.Min(minZ, vertex.Raw2);
+                maxZ = Math.Max(maxZ, vertex.Raw2);
+            }
+        }
 
         page.ProbableHeightComponentIndex = 1;
         page.VertexLayoutHypothesis = "[X, Y, Z, A, B, C, D, E] ; Y brut index 1 ; DecodedHeight=((ushort)Y)-32767 ; A..E attributs packés à préserver";
         page.CoordinateRanges =
-            $"X={FormatRange(xs)}, Yraw={FormatRange(rawHeights)}, Ydecoded={FormatRange(decodedHeights)}, Z={FormatRange(zs)}";
-    }
-
-    private static string FormatRange(IEnumerable<float> values)
-    {
-        var arr = values.ToArray();
-        if (arr.Length == 0)
-        {
-            return "n/a";
-        }
-
-        return $"{arr.Min().ToString("0.###", CultureInfo.InvariantCulture)}..{arr.Max().ToString("0.###", CultureInfo.InvariantCulture)}";
+            $"X={minX}..{maxX}, Yraw={minRawHeight}..{maxRawHeight}, Ydecoded={minDecodedHeight}..{maxDecodedHeight}, Z={minZ}..{maxZ}";
     }
 
     private static int TryReadIntTag(string text, string tag)
@@ -177,9 +191,42 @@ public sealed class MeshPageReader
     }
 
     private static List<int> ParseInts(string value)
-        => Regex.Matches(value, @"-?\d+")
-            .Select(m => int.Parse(m.Value, CultureInfo.InvariantCulture))
-            .ToList();
+    {
+        var result = new List<int>(Math.Max(4, value.Length / 6));
+        var span = value.AsSpan();
+        var index = 0;
+        while (index < span.Length)
+        {
+            while (index < span.Length && span[index] != '-' && !char.IsAsciiDigit(span[index]))
+            {
+                index++;
+            }
+            if (index >= span.Length)
+            {
+                break;
+            }
+
+            var negative = span[index] == '-';
+            if (negative)
+            {
+                index++;
+            }
+            if (index >= span.Length || !char.IsAsciiDigit(span[index]))
+            {
+                continue;
+            }
+
+            var parsed = 0;
+            while (index < span.Length && char.IsAsciiDigit(span[index]))
+            {
+                parsed = unchecked((parsed * 10) + (span[index] - '0'));
+                index++;
+            }
+            result.Add(negative ? -parsed : parsed);
+        }
+
+        return result;
+    }
 
     private static List<float> ParseFloats(string value)
     {

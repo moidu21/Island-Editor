@@ -7,6 +7,10 @@ namespace Anno1800IslandTool.Formats.Readers;
 
 public sealed class NormalMapPageReader
 {
+    private static readonly Regex DeltaLevelRegex = new(
+        @"<None>(?<body>.*?)</None>",
+        RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
     public NormalMapPage Read(string relativePath, TerrainPageKey key, string text, bool retainRawText = true)
     {
         var result = new NormalMapPage
@@ -20,11 +24,11 @@ public sealed class NormalMapPageReader
         result.DownsampledWidth = ReadInt(downsampledBlock, "width") ?? 0;
         result.DownsampledHeight = ReadInt(downsampledBlock, "height") ?? 0;
         var downsampledMap = ReadTagValue(downsampledBlock, "map") ?? string.Empty;
-        result.DownsampledData = Encoding.UTF8.GetBytes(downsampledMap);
         result.DownsampledSamples = ParseIntArray(downsampledMap);
+        result.DownsampledData = retainRawText ? Encoding.UTF8.GetBytes(downsampledMap) : Array.Empty<byte>();
 
         var deltasBlock = ReadBlock(text, "Deltas") ?? string.Empty;
-        foreach (Match match in Regex.Matches(deltasBlock, @"<None>(?<body>.*?)</None>", RegexOptions.Singleline | RegexOptions.IgnoreCase))
+        foreach (Match match in DeltaLevelRegex.Matches(deltasBlock))
         {
             var body = match.Groups["body"].Value;
             var dataBlock = ReadBlock(body, "Data") ?? body;
@@ -36,7 +40,7 @@ public sealed class NormalMapPageReader
                 Height = ReadInt(dataBlock, "height") ?? 0,
                 ScaleFactor = ReadInt(body, "ScaleFactor"),
                 QuantBits = ReadInt(body, "QuantBits"),
-                RawData = Encoding.UTF8.GetBytes(rawMap),
+                RawData = retainRawText ? Encoding.UTF8.GetBytes(rawMap) : Array.Empty<byte>(),
                 QuantizedSamples = ParseIntArray(rawMap)
             });
         }
@@ -55,31 +59,65 @@ public sealed class NormalMapPageReader
             return Array.Empty<int>();
         }
 
-        var matches = Regex.Matches(text, @"-?\d+");
-        if (matches.Count == 0)
+        var values = new List<int>(Math.Max(4, text.Length / 4));
+        var span = text.AsSpan();
+        var index = 0;
+        while (index < span.Length)
         {
-            return Array.Empty<int>();
+            while (index < span.Length && span[index] != '-' && !char.IsAsciiDigit(span[index]))
+            {
+                index++;
+            }
+            if (index >= span.Length)
+            {
+                break;
+            }
+
+            var negative = span[index] == '-';
+            if (negative)
+            {
+                index++;
+            }
+            if (index >= span.Length || !char.IsAsciiDigit(span[index]))
+            {
+                continue;
+            }
+
+            var parsed = 0;
+            while (index < span.Length && char.IsAsciiDigit(span[index]))
+            {
+                parsed = unchecked((parsed * 10) + (span[index] - '0'));
+                index++;
+            }
+            values.Add(negative ? -parsed : parsed);
         }
 
-        var values = new int[matches.Count];
-        for (var i = 0; i < matches.Count; i++)
-        {
-            values[i] = int.Parse(matches[i].Value, CultureInfo.InvariantCulture);
-        }
-
-        return values;
+        return values.ToArray();
     }
 
     private static int? ReadInt(string text, string tag)
     {
-        var match = Regex.Match(text, $@"<{tag}>\s*(-?\d+)", RegexOptions.IgnoreCase);
-        return match.Success ? int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture) : null;
+        var value = ReadTagValue(text, tag);
+        if (value is null)
+        {
+            return null;
+        }
+        var span = value.AsSpan().Trim();
+        return int.TryParse(span, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
     }
 
     private static string? ReadTagValue(string text, string tag)
     {
-        var match = Regex.Match(text, $@"<{tag}>\s*(?<value>.*?)\s*</{tag}>", RegexOptions.Singleline | RegexOptions.IgnoreCase);
-        return match.Success ? match.Groups["value"].Value : null;
+        var opening = $"<{tag}>";
+        var closing = $"</{tag}>";
+        var start = text.IndexOf(opening, StringComparison.OrdinalIgnoreCase);
+        if (start < 0)
+        {
+            return null;
+        }
+        start += opening.Length;
+        var end = text.IndexOf(closing, start, StringComparison.OrdinalIgnoreCase);
+        return end < 0 ? null : text[start..end].Trim();
     }
 
     private static string? ReadBlock(string text, string tag)

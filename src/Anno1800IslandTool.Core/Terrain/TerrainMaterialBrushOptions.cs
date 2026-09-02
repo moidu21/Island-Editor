@@ -8,6 +8,7 @@ public sealed class TerrainMaterialBrushOptions
     public TerrainMaterialBrushMode Mode { get; set; } = TerrainMaterialBrushMode.Blend;
     public bool UseFalloff { get; set; } = true;
     public TerrainMaterialCellPattern? CellPattern { get; set; }
+    public Func<int, int, bool>? CellPredicate { get; set; }
 
     public int ClampedRadius => Math.Clamp(Radius, 1, 512);
     public int ClampedStrength => TerrainMaterialPackEncoding.ClampSlot(Strength);

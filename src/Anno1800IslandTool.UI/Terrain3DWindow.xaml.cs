@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Threading;
@@ -40,6 +42,10 @@ public partial class Terrain3DWindow : Window
     private const int ParallelBrushVertexThreshold = 2048;
     private const int ParallelCoarseUpdateSampleThreshold = 2048;
     private const double ViewportPointMargin = 0.5;
+    private const double OuterOceanSafetyWidthWorld = 256.0;
+    private const double OuterOceanDeepWidthWorld = 64.0;
+    private const float OuterOceanDeepHeightWorld = -8.0f;
+    private const float OuterOceanShoreHeightWorld = -0.25f;
 
     private bool _isOrbiting;
     private bool _isPanning;
@@ -107,6 +113,13 @@ public partial class Terrain3DWindow : Window
     private TimeSpan _lastBrushDuration = TimeSpan.Zero;
     private int _lastBrushAffectedVertices;
     private int _lastBrushSpatialCellsVisited;
+    private bool _pendingInteractiveCoarseSync;
+    private int _pendingInteractiveCoarseSyncLod = -1;
+    private double _pendingInteractiveMinWorldX = double.PositiveInfinity;
+    private double _pendingInteractiveMinWorldZ = double.PositiveInfinity;
+    private double _pendingInteractiveMaxWorldX = double.NegativeInfinity;
+    private double _pendingInteractiveMaxWorldZ = double.NegativeInfinity;
+    private bool _pendingInteractivePageRowsRefresh;
     private readonly TerrainComputeCapabilities _computeCapabilities = TerrainComputeCapabilities.DetectCpuOnly();
 
     public Terrain3DWindow(IslandProject project)
@@ -162,6 +175,7 @@ public partial class Terrain3DWindow : Window
         _sceneBuildCancellation?.Cancel();
         _sceneBuildCancellation?.Dispose();
         _sceneBuildCancellation = null;
+        FlushDeferredInteractiveWork();
         ReleaseSceneResources();
         TerrainMemoryMonitor.CompactIfRequested(TerrainMemoryMode.Balanced, force: true);
         base.OnClosed(e);
@@ -209,8 +223,47 @@ public partial class Terrain3DWindow : Window
 
         if (LodComboBox.Items.Count > 0)
         {
-            LodComboBox.SelectedIndex = 0;
+            var preferredLod = FindMostDetailedEditableLod();
+            var preferredItem = LodComboBox.Items
+                .OfType<ComboBoxItem>()
+                .FirstOrDefault(item => item.Tag is int lod && lod == preferredLod);
+
+            LodComboBox.SelectedItem = preferredItem ?? LodComboBox.Items[0];
         }
+    }
+
+    private int FindMostDetailedEditableLod()
+    {
+        var lodWithDecodedTriangles = _project.MeshPages.Values
+            .Where(page => MeshPageClassifier.IsGeometryCandidateLod(page.Key))
+            .Where(page => page.HasEditablePayload && page.Clusters.Any(cluster => cluster.Vertices.Count > 0 && cluster.Indices.Count >= 3))
+            .Select(page => page.Key.Lod)
+            .Distinct()
+            .OrderBy(lod => lod)
+            .FirstOrDefault(-1);
+
+        if (lodWithDecodedTriangles >= 0)
+        {
+            return lodWithDecodedTriangles;
+        }
+
+        var probableGeometryLod = _project.MeshPages.Keys
+            .Where(key => MeshPageClassifier.IsGeometryCandidateLod(key))
+            .Select(key => key.Lod)
+            .Distinct()
+            .OrderBy(lod => lod)
+            .FirstOrDefault(-1);
+
+        if (probableGeometryLod >= 0)
+        {
+            return probableGeometryLod;
+        }
+
+        return _project.MeshPages.Keys
+            .Select(key => key.Lod)
+            .Distinct()
+            .OrderBy(lod => lod)
+            .FirstOrDefault(0);
     }
 
     private void PopulatePageRows(TerrainPageKey? preferredSelection = null)
@@ -245,6 +298,11 @@ public partial class Terrain3DWindow : Window
 
     private bool ShouldIncludePageInRows(MeshPage page)
     {
+        if (_project.SuppressedTerrainPagePaths.Contains(page.OriginalRelativePath))
+        {
+            return false;
+        }
+
         if (OnlyDecodedPagesCheckBox?.IsChecked == true && !string.Equals(page.DecodeStatus, "Décodée", StringComparison.OrdinalIgnoreCase))
         {
             return false;
@@ -343,6 +401,1264 @@ public partial class Terrain3DWindow : Window
         }
     }
 
+    private void OpenDirect3DGpuEditorButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var gpuWindow = new Terrain3DGpuWindow(
+                _project,
+                GetSelectedLod(),
+                ApplyMaximumExpansionFromGpu,
+                ApplyBeachFromGpu,
+                ApplyFootprintFromGpu,
+                ValidateEntireTerrainFromGpu)
+            {
+                Owner = this
+            };
+            var accepted = gpuWindow.ShowDialog() == true;
+            if (!accepted || !gpuWindow.ProjectWasChanged)
+            {
+                return;
+            }
+
+            foreach (var region in gpuWindow.GetChangedWorldRegions())
+            {
+                UpdateCoarseFromEditedMeshRegion(region.Lod, region.MinX, region.MinZ, region.MaxX, region.MaxZ);
+                MergeDirtyRegionFromWorldBounds(region.MinX, region.MinZ, region.MaxX, region.MaxZ);
+            }
+            InvalidateBrushSpatialIndex();
+            PopulatePageRows(GetSelectedPageRow()?.Page.Key);
+            RequestSceneRebuild(immediate: true);
+            RefreshPropagationInfo();
+            UpdateNormalPreview();
+            MessageBox.Show(
+                this,
+                gpuWindow.MaximumIslandExpansionRequested
+                    ? "L’extension maximale a déjà été créée, appliquée au projet et rechargée dans l’éditeur Direct3D 11. Les éventuelles modifications suivantes ont également été synchronisées."
+                    : "Les hauteurs modifiées par Direct3D 11 sont revenues dans le projet et la zone coarse correspondante a été synchronisée. Utilisez maintenant 'Valider LOD mesh courant' ou 'Valider tout le terrain' pour préparer les écritures d'export.",
+                "Éditeur GPU Direct3D 11",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                this,
+                $"Le viewport Direct3D 11 n'a pas pu démarrer : {ex.Message}\n\nL'éditeur WPF actuel reste disponible.",
+                "Éditeur GPU Direct3D 11",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    private string ApplyMaximumExpansionFromGpu(
+        IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)> changedRegions)
+    {
+        foreach (var region in changedRegions)
+        {
+            UpdateCoarseFromEditedMeshRegion(region.Lod, region.MinX, region.MinZ, region.MaxX, region.MaxZ);
+            MergeDirtyRegionFromWorldBounds(region.MinX, region.MinZ, region.MaxX, region.MaxZ);
+        }
+
+        ExtendIslandToMaximumActiveMask();
+        var oceanRingSamples = EnforceOuterOceanSafetyRing();
+        ApplyActiveMapMaskToProject(regenerateText: true);
+        var workingMap = BuildWorkingMap();
+        if (workingMap.Width <= 0 || workingMap.Height <= 0)
+        {
+            throw new InvalidOperationException("La heightmap du projet est vide.");
+        }
+
+        var fullBounds = new RectI(0, 0, Math.Max(0, workingMap.Width - 1), Math.Max(0, workingMap.Height - 1));
+        var dirtyBounds = GetDirtySampleBoundsFromExactMask();
+        _editor.ReplaceCoarseHeightMap(_project, workingMap);
+        _lastTerrainDependencySyncReport = new TerrainDependencySyncReport
+        {
+            HeightMapWidth = workingMap.Width,
+            HeightMapHeight = workingMap.Height,
+            DirtySampleBounds = dirtyBounds
+        };
+        _lastTerrainDependencySyncReport.Notes.Add("Extension GPU directe : les nouvelles zones sont initialisées en fond marin pour éviter l’écume rectangulaire.");
+        var oceanMaterialSummary = PaintOuterOceanSafetyRingMaterials();
+        var usedMaterialPages = _editor.ResynchronizeMeshUsedMaterialBitsFromMaterialMap(_project);
+
+        var selectedLod = GetSelectedLod();
+        var state = _localRegenerator.RegenerateAroundBounds(
+            _project,
+            workingMap,
+            "Mesh",
+            ResolveAnchorPageKeyForCurrentLod(),
+            fullBounds,
+            fullBounds,
+            0);
+        state.AnchorMeshLod = selectedLod;
+        var meshWrites = _localRegenerator.GenerateExpandedActiveMeshPageWrites(
+            _project,
+            workingMap,
+            state,
+            BuildMeshRegenerationOptions());
+        ApplyGeneratedMeshWrites(meshWrites);
+        var normalWrites = _localRegenerator.GenerateAllInterpretedNormalMapWrites(_project, workingMap, state);
+        var tintWrites = _localRegenerator.GenerateAllTintMapWritesVanillaLike(_project, workingMap, state);
+        CommitTerrainValidationToProject(state, meshWrites, tintWrites);
+
+        InvalidateBrushSpatialIndex();
+        PopulatePageRows(GetSelectedPageRow()?.Page.Key);
+        RequestSceneRebuild(immediate: true);
+        RefreshPropagationInfo();
+        UpdateNormalPreview();
+        return $"Extension maximale appliquée et rechargée : {meshWrites.Count} page(s) mesh, {normalWrites.Count} normalmap(s), {tintWrites.Count} tintmap(s). " +
+               $"Anneau océanique : {oceanRingSamples} hauteur(s) protégée(s). {oceanMaterialSummary} {usedMaterialPages} page(s) matériau resynchronisée(s). Vous pouvez la modifier immédiatement.";
+    }
+
+    private string ApplyFootprintFromGpu(
+        IReadOnlyList<bool> requestedMask,
+        IReadOnlyList<GpuFineTerrainStamp> fineTerrainStamps,
+        IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)> pendingChangedRegions)
+    {
+        foreach (var region in pendingChangedRegions)
+        {
+            UpdateCoarseFromEditedMeshRegion(region.Lod, region.MinX, region.MinZ, region.MaxX, region.MaxZ);
+            MergeDirtyRegionFromWorldBounds(region.MinX, region.MinZ, region.MaxX, region.MaxZ);
+        }
+
+        var grid = _project.Root.ActiveMapGrid;
+        var expectedCellCount = Math.Max(0, grid.X) * Math.Max(0, grid.Y);
+        if (grid.X <= 0 || grid.Y <= 0 || expectedCellCount <= 0)
+        {
+            throw new InvalidOperationException("ActiveMapGrid est absent : l’emprise de l’île ne peut pas être modifiée.");
+        }
+        if (requestedMask.Count < expectedCellCount)
+        {
+            throw new InvalidOperationException($"Le masque dessiné est incomplet ({requestedMask.Count}/{expectedCellCount} cellules).");
+        }
+
+        var next = requestedMask.Take(expectedCellCount).ToArray();
+        if (!next.Any(static active => active))
+        {
+            throw new InvalidOperationException("L’emprise ne peut pas être entièrement vide. Conservez au moins une cellule active.");
+        }
+
+        if (_activeMapMask.Length < expectedCellCount)
+        {
+            InitializeActiveMapMask();
+        }
+        var before = _activeMapMask.Take(expectedCellCount).ToArray();
+        if (before.Length < expectedCellCount)
+        {
+            Array.Resize(ref before, expectedCellCount);
+        }
+
+        var addedCells = 0;
+        var removedCells = 0;
+        for (var i = 0; i < expectedCellCount; i++)
+        {
+            if (!before[i] && next[i])
+            {
+                addedCells++;
+            }
+            else if (before[i] && !next[i])
+            {
+                removedCells++;
+            }
+        }
+        if (addedCells == 0 && removedCells == 0 && fineTerrainStamps.Count == 0)
+        {
+            return "L’emprise dessinée est identique à celle du projet ; aucune cellule n’a été ajoutée ou retirée.";
+        }
+
+        if (addedCells > 0 && !_extensionMaterialFillPending)
+        {
+            _extensionMaterialFillSourceMask = before.ToArray();
+        }
+
+        _activeMapMask = next;
+        _activeMapMaskDirty = true;
+        _extensionMaterialFillPending |= addedCells > 0;
+        IslandExpansionModeCheckBox.IsChecked = true;
+
+        // Une cellule ajoutée commence comme fond marin et une cellule retirée est
+        // également abaissée. Le masque Water régénéré devient ainsi réellement
+        // navigable, sans collision terrestre invisible devant une plage.
+        var initializedSamples = InitializeChangedFootprintSamplesAsDeepWater(before, next, grid);
+        var fineTerrainSamples = ApplyFineTerrainStamps(fineTerrainStamps);
+        // Une page mesh peut recouper à la fois une cellule active et une cellule retirée.
+        // On réapplique donc le masque sur toute la heightmap, pas seulement sur le delta,
+        // afin qu'aucun ancien îlot ne survive dans une page partiellement active.
+        var outsideSamples = EnforceInactiveFootprintSamplesAsDeepWater(next, grid);
+        var oceanRingSamples = EnforceOuterOceanSafetyRing();
+        ApplyActiveMapMaskToProject(regenerateText: true);
+
+        var dirtyRoot = ActiveMapGridMaskCodec.ComputeDifferenceRect(grid, before, next)
+                        ?? ActiveMapGridMaskCodec.ComputeActiveRect(grid, next, _project.Root.ActiveMapRect);
+        MergeDirtyRegionFromWorldBounds(
+            dirtyRoot.Left * 32.0,
+            dirtyRoot.Top * 32.0,
+            dirtyRoot.Right * 32.0,
+            dirtyRoot.Bottom * 32.0);
+        foreach (var stamp in fineTerrainStamps)
+        {
+            MergeDirtyRegionFromWorldBounds(
+                stamp.CenterX - stamp.Radius,
+                stamp.CenterZ - stamp.Radius,
+                stamp.CenterX + stamp.Radius,
+                stamp.CenterZ + stamp.Radius);
+        }
+
+        var workingMap = BuildWorkingMap();
+        if (workingMap.Width <= 0 || workingMap.Height <= 0)
+        {
+            throw new InvalidOperationException("La heightmap du projet est vide.");
+        }
+
+        var fullBounds = new RectI(0, 0, Math.Max(0, workingMap.Width - 1), Math.Max(0, workingMap.Height - 1));
+        var dirtyBounds = oceanRingSamples > 0 || outsideSamples > 0
+            ? fullBounds
+            : WorldBoundsToCoarseBounds(
+            workingMap,
+            dirtyRoot.Left * 32.0,
+            dirtyRoot.Top * 32.0,
+            dirtyRoot.Right * 32.0,
+            dirtyRoot.Bottom * 32.0);
+        _lastTerrainDependencySyncReport = _editor.ReplaceCoarseHeightMapAndSyncTerrainDependencies(
+            _project,
+            workingMap,
+            dirtyBounds);
+        var footprintMaterialSummary = SynchronizeMaterialMapToFootprint(next, grid);
+        var oceanMaterialSummary = PaintOuterOceanSafetyRingMaterials();
+        var usedMaterialPages = _editor.ResynchronizeMeshUsedMaterialBitsFromMaterialMap(_project);
+
+        var selectedLod = GetSelectedLod();
+        var state = _localRegenerator.RegenerateAroundBounds(
+            _project,
+            workingMap,
+            "Mesh",
+            ResolveAnchorPageKeyForCurrentLod(),
+            fullBounds,
+            fullBounds,
+            0);
+        state.AnchorMeshLod = selectedLod;
+        var meshWrites = _localRegenerator.GenerateExpandedActiveMeshPageWrites(
+            _project,
+            workingMap,
+            state,
+            BuildMeshRegenerationOptions());
+        ApplyGeneratedMeshWrites(meshWrites);
+        var normalWrites = _localRegenerator.GenerateAllInterpretedNormalMapWrites(_project, workingMap, state);
+        var tintWrites = _localRegenerator.GenerateAllTintMapWritesVanillaLike(_project, workingMap, state);
+
+        var suppressedPages = SynchronizeSuppressedTerrainPages(next, grid);
+        CommitTerrainValidationToProject(state, meshWrites, tintWrites);
+        var previewSummary = RegenerateFootprintPreviewImages(next, grid, workingMap);
+        var objectSummary = SynchronizePlacementPointsToFootprint(next, grid);
+        _project.IsModified = true;
+        _project.ModifiedSections.Add("DrawableIslandFootprint");
+
+        MarkDirtyOperation(
+            $"Emprise DX11 v46.15 : +{addedCells} / -{removedCells} cellule(s), " +
+            $"{initializedSamples} échantillon(s) fond marin, {fineTerrainSamples} échantillon(s) de terre fine, {outsideSamples} échantillon(s) hors emprise nettoyés, {oceanRingSamples} échantillon(s) de bord protégés, " +
+            $"{suppressedPages} page(s) hors emprise supprimée(s) à l’export");
+        InvalidateBrushSpatialIndex();
+        PopulatePageRows(GetSelectedPageRow()?.Page.Key);
+        RequestSceneRebuild(immediate: true);
+        RefreshPropagationInfo();
+        UpdateNormalPreview();
+
+        return $"Emprise appliquée : +{addedCells} cellule(s), -{removedCells} cellule(s), " +
+               $"{initializedSamples} échantillon(s) converti(s) en fond marin et {fineTerrainSamples} échantillon(s) dessiné(s) finement. " +
+               $"{meshWrites.Count} page(s) mesh, {normalWrites.Count} normalmap(s) et {tintWrites.Count} tintmap(s) ont été recalculées ; " +
+               $"{suppressedPages} page(s) entièrement hors emprise seront absentes de l’export. " +
+               $"Anneau océanique : {oceanRingSamples} hauteur(s) protégée(s). {footprintMaterialSummary} {oceanMaterialSummary} {usedMaterialPages} page(s) matériau resynchronisée(s). " +
+               $"{previewSummary} {objectSummary}";
+    }
+
+    private int ApplyFineTerrainStamps(IReadOnlyList<GpuFineTerrainStamp> stamps)
+    {
+        var map = _project.GameData.TerrainHeightMap;
+        if (stamps.Count == 0 || map.Width <= 0 || map.Height <= 0 || _editedCoarseSamples.Length < map.Width * map.Height)
+        {
+            return 0;
+        }
+
+        var worldWidth = Math.Max(1d, _project.Rd3d.GridWidth > 0 ? _project.Rd3d.GridWidth : _project.Root.MapSize * 32d);
+        var worldHeight = Math.Max(1d, _project.Rd3d.GridHeight > 0 ? _project.Rd3d.GridHeight : _project.Root.MapSize * 32d);
+        var changed = 0;
+        foreach (var stamp in stamps)
+        {
+            var radius = Math.Max(1d, stamp.Radius);
+            var targetWorld = TerrainHeightEncoding.LegacyFineHeightToWorldHeight(stamp.TerrainDecodedHeight);
+            var left = Math.Clamp((int)Math.Floor((stamp.CenterX - radius) / worldWidth * Math.Max(1, map.Width - 1)), 0, map.Width - 1);
+            var right = Math.Clamp((int)Math.Ceiling((stamp.CenterX + radius) / worldWidth * Math.Max(1, map.Width - 1)), left, map.Width - 1);
+            var top = Math.Clamp((int)Math.Floor((stamp.CenterZ - radius) / worldHeight * Math.Max(1, map.Height - 1)), 0, map.Height - 1);
+            var bottom = Math.Clamp((int)Math.Ceiling((stamp.CenterZ + radius) / worldHeight * Math.Max(1, map.Height - 1)), top, map.Height - 1);
+            for (var y = top; y <= bottom; y++)
+            {
+                var worldZ = y / (double)Math.Max(1, map.Height - 1) * worldHeight;
+                for (var x = left; x <= right; x++)
+                {
+                    var worldX = x / (double)Math.Max(1, map.Width - 1) * worldWidth;
+                    var normalized = FineStampNormalizedDistance(worldX - stamp.CenterX, worldZ - stamp.CenterZ, radius, stamp.Pattern);
+                    if (normalized > 1d)
+                    {
+                        continue;
+                    }
+
+                    var sampleIndex = (y * map.Width) + x;
+                    var currentWorld = TerrainHeightEncoding.GameDataRawToWorldHeight((int)Math.Round(_editedCoarseSamples[sampleIndex], MidpointRounding.AwayFromZero));
+                    var edgeLinear = (float)Math.Clamp((1d - normalized) * 3d, 0d, 1d);
+                    var edgeWeight = stamp.SmoothEdge
+                        ? edgeLinear * edgeLinear * (3f - (2f * edgeLinear))
+                        : 1f;
+                    var nextWorld = Lerp(currentWorld, targetWorld, edgeWeight);
+                    // Une extension ajoute de la terre ; elle ne doit jamais creuser
+                    // une hauteur existante plus élevée.
+                    nextWorld = Math.Max(currentWorld, nextWorld);
+                    var nextRaw = TerrainHeightEncoding.WorldHeightToGameDataRaw(nextWorld);
+                    if ((int)Math.Round(_editedCoarseSamples[sampleIndex], MidpointRounding.AwayFromZero) == nextRaw)
+                    {
+                        continue;
+                    }
+                    _editedCoarseSamples[sampleIndex] = nextRaw;
+                    changed++;
+                }
+            }
+        }
+        return changed;
+    }
+
+    private static double FineStampNormalizedDistance(double dx, double dz, double radius, int pattern)
+    {
+        var ax = Math.Abs(dx);
+        var az = Math.Abs(dz);
+        var distance = Math.Sqrt((dx * dx) + (dz * dz));
+        var angle = Math.Atan2(dz, dx);
+        return pattern switch
+        {
+            1 => Math.Max(ax, az) / radius,
+            2 => (ax + az) / radius,
+            3 => distance / Math.Max(1d, radius * (0.70d + (0.30d * Math.Abs(Math.Cos(angle * 5d))))),
+            4 => distance / Math.Max(1d, radius * Math.Clamp(
+                0.84d + (0.09d * Math.Sin(angle * 5d)) + (0.05d * Math.Sin((angle * 11d) + 0.8d)) + (0.02d * Math.Sin((angle * 17d) - 0.4d)),
+                0.68d,
+                1d)),
+            _ => distance / radius
+        };
+    }
+
+    private int InitializeChangedFootprintSamplesAsDeepWater(
+        IReadOnlyList<bool> before,
+        IReadOnlyList<bool> after,
+        Int2 grid)
+    {
+        var map = _project.GameData.TerrainHeightMap;
+        if (map.Width <= 0 || map.Height <= 0 ||
+            _editedCoarseSamples.Length < map.Width * map.Height ||
+            before.Count < grid.X * grid.Y || after.Count < grid.X * grid.Y)
+        {
+            return 0;
+        }
+
+        var worldWidth = Math.Max(1, _project.Rd3d.GridWidth > 0
+            ? _project.Rd3d.GridWidth
+            : _project.Root.MapSize * 32);
+        var worldHeight = Math.Max(1, _project.Rd3d.GridHeight > 0
+            ? _project.Rd3d.GridHeight
+            : _project.Root.MapSize * 32);
+        var deepWaterRaw = TerrainHeightEncoding.WorldHeightToGameDataRaw(-8f);
+        var changed = 0;
+        for (var y = 0; y < map.Height; y++)
+        {
+            var worldZ = map.Height > 1 ? y * (worldHeight / (double)(map.Height - 1)) : 0d;
+            var cellY = Math.Clamp((int)Math.Floor(worldZ / worldHeight * grid.Y), 0, grid.Y - 1);
+            for (var x = 0; x < map.Width; x++)
+            {
+                var worldX = map.Width > 1 ? x * (worldWidth / (double)(map.Width - 1)) : 0d;
+                var cellX = Math.Clamp((int)Math.Floor(worldX / worldWidth * grid.X), 0, grid.X - 1);
+                var cellIndex = (cellY * grid.X) + cellX;
+                if (before[cellIndex] == after[cellIndex])
+                {
+                    continue;
+                }
+
+                var sampleIndex = (y * map.Width) + x;
+                if ((int)Math.Round(_editedCoarseSamples[sampleIndex], MidpointRounding.AwayFromZero) == deepWaterRaw)
+                {
+                    continue;
+                }
+
+                _editedCoarseSamples[sampleIndex] = deepWaterRaw;
+                changed++;
+            }
+        }
+
+        return changed;
+    }
+
+    private int EnforceInactiveFootprintSamplesAsDeepWater(IReadOnlyList<bool> activeMask, Int2 grid)
+    {
+        var map = _project.GameData.TerrainHeightMap;
+        if (grid.X <= 0 || grid.Y <= 0 || activeMask.Count < grid.X * grid.Y ||
+            map.Width <= 0 || map.Height <= 0 || _editedCoarseSamples.Length < map.Width * map.Height)
+        {
+            return 0;
+        }
+
+        var worldWidth = Math.Max(1, _project.Rd3d.GridWidth > 0 ? _project.Rd3d.GridWidth : _project.Root.MapSize * 32);
+        var worldHeight = Math.Max(1, _project.Rd3d.GridHeight > 0 ? _project.Rd3d.GridHeight : _project.Root.MapSize * 32);
+        var deepWaterRaw = TerrainHeightEncoding.WorldHeightToGameDataRaw(-8f);
+        var changed = 0;
+        for (var y = 0; y < map.Height; y++)
+        {
+            var worldZ = map.Height > 1 ? y * (worldHeight / (double)(map.Height - 1)) : 0d;
+            var cellY = Math.Clamp((int)Math.Floor(worldZ / worldHeight * grid.Y), 0, grid.Y - 1);
+            for (var x = 0; x < map.Width; x++)
+            {
+                var worldX = map.Width > 1 ? x * (worldWidth / (double)(map.Width - 1)) : 0d;
+                var cellX = Math.Clamp((int)Math.Floor(worldX / worldWidth * grid.X), 0, grid.X - 1);
+                if (ActiveMapGridMaskCodec.IsCellActive(activeMask, grid, cellX, cellY))
+                {
+                    continue;
+                }
+
+                var sampleIndex = (y * map.Width) + x;
+                if ((int)Math.Round(_editedCoarseSamples[sampleIndex], MidpointRounding.AwayFromZero) != deepWaterRaw)
+                {
+                    _editedCoarseSamples[sampleIndex] = deepWaterRaw;
+                    changed++;
+                }
+            }
+        }
+
+        return changed;
+    }
+
+    private string SynchronizeMaterialMapToFootprint(IReadOnlyList<bool> activeMask, Int2 grid)
+    {
+        var source = _project.Rd3d.MaterialMap;
+        if (grid.X <= 0 || grid.Y <= 0 || activeMask.Count < grid.X * grid.Y ||
+            source.Width <= 0 || source.Height <= 0 || !source.HasAnyData)
+        {
+            return "Matériaux : synchronisation d’emprise ignorée.";
+        }
+
+        var map = source.Clone();
+        var changed = 0;
+        var rootWidth = ResolveRootWidthForActiveMask();
+        var rootHeight = ResolveRootHeightForActiveMask();
+        const int deepWaterMaterialId = 3;
+        for (var y = 0; y < map.Height; y++)
+        {
+            for (var x = 0; x < map.Width; x++)
+            {
+                if (IsMaterialCellActiveInMask(activeMask, grid, rootWidth, rootHeight, map.Width, map.Height, x, y))
+                {
+                    continue;
+                }
+
+                if (map.GetDominantMaterialId(x, y) != deepWaterMaterialId)
+                {
+                    map.SetDominantMaterialSafe(x, y, deepWaterMaterialId, TerrainMaterialPackEncoding.MaxPackedSlotValue);
+                    changed++;
+                }
+            }
+        }
+
+        if (changed > 0)
+        {
+            var result = new TerrainMaterialPaintResult
+            {
+                CellsVisited = map.Width * map.Height,
+                CellsChanged = changed,
+                AffectedBounds = new RectI(0, 0, map.Width, map.Height)
+            };
+            result.AffectedMaterialIds.Add(deepWaterMaterialId);
+            var editState = _project.MaterialEditState ?? new TerrainMaterialEditState();
+            editState.AddGeneratedOperation(result, "v46.15 MaterialMap synchronisée à l’empreinte réelle");
+            _editor.ReplaceTerrainMaterialMap(_project, map, editState);
+        }
+
+        return $"Matériaux : {changed} texel(s) hors emprise remis en eau profonde ; plage protégée pour les pinceaux suivants.";
+    }
+
+    private string RegenerateFootprintPreviewImages(IReadOnlyList<bool> activeMask, Int2 grid, CoarseHeightMap heightMap)
+    {
+        if (grid.X <= 0 || grid.Y <= 0 || activeMask.Count < grid.X * grid.Y || heightMap.Width <= 0 || heightMap.Height <= 0)
+        {
+            return "Aperçus 2D : données insuffisantes.";
+        }
+
+        const int size = 1024;
+        var activePixels = new byte[size * size * 4];
+        var mapPixels = new byte[size * size * 4];
+        var gamePixels = new byte[size * size * 4];
+        for (var y = 0; y < size; y++)
+        {
+            var cellY = Math.Clamp((int)Math.Floor((y + 0.5) / size * grid.Y), 0, grid.Y - 1);
+            var sampleY = Math.Clamp((int)Math.Round(y / (double)(size - 1) * Math.Max(0, heightMap.Height - 1)), 0, Math.Max(0, heightMap.Height - 1));
+            for (var x = 0; x < size; x++)
+            {
+                var cellX = Math.Clamp((int)Math.Floor((x + 0.5) / size * grid.X), 0, grid.X - 1);
+                var active = ActiveMapGridMaskCodec.IsCellActive(activeMask, grid, cellX, cellY);
+                var sampleX = Math.Clamp((int)Math.Round(x / (double)(size - 1) * Math.Max(0, heightMap.Width - 1)), 0, Math.Max(0, heightMap.Width - 1));
+                var sample = heightMap.Samples[(sampleY * heightMap.Width) + sampleX];
+                var worldHeight = TerrainHeightEncoding.CoarseSampleToWorldHeight(heightMap, sample);
+                var pixel = ((y * size) + x) * 4;
+
+                SetPreviewPixel(activePixels, pixel, active ? (byte)245 : (byte)20, active ? (byte)245 : (byte)42, active ? (byte)245 : (byte)66, 255);
+                if (!active)
+                {
+                    SetPreviewPixel(mapPixels, pixel, 78, 48, 22, 255);
+                    SetPreviewPixel(gamePixels, pixel, 92, 58, 28, 255);
+                    continue;
+                }
+
+                var land = Math.Clamp((worldHeight + 1f) / 34f, 0f, 1f);
+                var shore = Math.Clamp((worldHeight + 0.25f) / 2.5f, 0f, 1f);
+                var mapR = (byte)Math.Clamp((int)Math.Round(72 + (land * 92)), 0, 255);
+                var mapG = (byte)Math.Clamp((int)Math.Round(98 + (land * 92)), 0, 255);
+                var mapB = (byte)Math.Clamp((int)Math.Round(52 + (shore * 48)), 0, 255);
+                SetPreviewPixel(mapPixels, pixel, mapB, mapG, mapR, 255);
+                SetPreviewPixel(gamePixels, pixel, (byte)Math.Min(255, mapB + 15), (byte)Math.Min(255, mapG + 18), (byte)Math.Min(255, mapR + 12), 255);
+            }
+        }
+
+        var baseDirectory = ResolvePreviewBaseDirectory();
+        var replacements = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            [$"{baseDirectory}/activemapimage.png"] = EncodePng(size, size, activePixels),
+            [$"{baseDirectory}/activemapimage_0.dds"] = DdsDxt1TextureConverter.EncodeBgra32ToClassicDxt1(size, size, activePixels),
+            [$"{baseDirectory}/mapimage.png"] = EncodePng(size, size, mapPixels),
+            [$"{baseDirectory}/mapimage_0.dds"] = DdsDxt1TextureConverter.EncodeBgra32ToClassicDxt1(size, size, mapPixels),
+            [$"{baseDirectory}/gamemapimage.png"] = EncodePng(size, size, gamePixels),
+            [$"{baseDirectory}/gamemapimage_0.dds"] = DdsDxt1TextureConverter.EncodeBgra32ToClassicDxt1(size, size, gamePixels)
+        };
+
+        foreach (var pair in replacements)
+        {
+            _project.GeneratedBinaryFileReplacements[pair.Key.Replace('\\', '/')] = pair.Value;
+        }
+
+        _project.ModifiedSections.Add("PreviewImages2D");
+        return "Aperçus 2D : activemapimage, mapimage et gamemapimage recalculés en PNG/DDS.";
+    }
+
+    private string ResolvePreviewBaseDirectory()
+    {
+        var existing = _project.SourceFiles
+            .Select(file => file.RelativePath.Replace('\\', '/'))
+            .FirstOrDefault(path => path.EndsWith("/activemapimage.png", StringComparison.OrdinalIgnoreCase) ||
+                                    path.EndsWith("/mapimage.png", StringComparison.OrdinalIgnoreCase) ||
+                                    path.EndsWith("/gamemapimage.png", StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(existing))
+        {
+            var slash = existing.LastIndexOf('/');
+            return slash > 0 ? existing[..slash] : "_gamedata";
+        }
+
+        var islandName = System.IO.Path.GetFileNameWithoutExtension(_project.RootFilePath ?? "island");
+        return $"_gamedata/{islandName}";
+    }
+
+    private static byte[] EncodePng(int width, int height, byte[] pixels)
+    {
+        var bitmap = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, pixels, width * 4);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using var stream = new MemoryStream();
+        encoder.Save(stream);
+        return stream.ToArray();
+    }
+
+    private static void SetPreviewPixel(byte[] pixels, int index, byte b, byte g, byte r, byte a)
+    {
+        pixels[index] = b;
+        pixels[index + 1] = g;
+        pixels[index + 2] = r;
+        pixels[index + 3] = a;
+    }
+
+    private string SynchronizePlacementPointsToFootprint(IReadOnlyList<bool> activeMask, Int2 grid)
+    {
+        if (grid.X <= 0 || grid.Y <= 0 || activeMask.Count < grid.X * grid.Y)
+        {
+            return "Objets : masque actif indisponible.";
+        }
+
+        var movedSlots = 0;
+        foreach (var slot in _project.Root.SlotObjects)
+        {
+            if (ActiveMapGridMaskCodec.IsRootPointActive(activeMask, grid, slot.Position.X, slot.Position.Z))
+            {
+                continue;
+            }
+
+            var nearest = FindNearestActiveRootPoint(activeMask, grid, slot.Position.X, slot.Position.Z);
+            slot.Position = new Float3(nearest.X, slot.Position.Y, nearest.Y);
+            movedSlots++;
+        }
+
+        var retainedGroundObjects = new List<GroundObjectPlacement>();
+        var removedGroundObjects = 0;
+        var worldWidth = Math.Max(1, _project.Rd3d.GridWidth > 0 ? _project.Rd3d.GridWidth : _project.Root.MapSize * 32);
+        var worldHeight = Math.Max(1, _project.Rd3d.GridHeight > 0 ? _project.Rd3d.GridHeight : _project.Root.MapSize * 32);
+        foreach (var page in _project.MeshPages.Values)
+        {
+            for (var clusterIndex = 0; clusterIndex < page.Clusters.Count; clusterIndex++)
+            {
+                foreach (var obj in page.Clusters[clusterIndex].GroundObjects)
+                {
+                    if (ActiveMapGridMaskCodec.IsWorldPointActive(activeMask, grid, obj.PositionXZ.X, obj.PositionXZ.Y, worldWidth, worldHeight))
+                    {
+                        retainedGroundObjects.Add(new GroundObjectPlacement
+                        {
+                            PageKey = page.Key,
+                            PagePath = page.OriginalRelativePath,
+                            ClusterIndex = clusterIndex,
+                            Object = obj
+                        });
+                    }
+                    else
+                    {
+                        removedGroundObjects++;
+                    }
+                }
+            }
+        }
+
+        if (removedGroundObjects > 0)
+        {
+            _editor.ReplaceGroundObjects(_project, retainedGroundObjects);
+        }
+
+        var outsideSpawns = _project.GameData.SpawnAreaPoints.Count(spawn =>
+            !ActiveMapGridMaskCodec.IsRootPointActive(activeMask, grid, spawn.Position.X, spawn.Position.Z));
+        if (movedSlots > 0)
+        {
+            _project.ModifiedSections.Add("ObjectPlacements");
+        }
+
+        return $"Objets : {movedSlots} point(s) d’objet replacé(s), {removedGroundObjects} décoration(s)/végétation hors île retirée(s), {outsideSpawns} point(s) de spawn maritime conservé(s).";
+    }
+
+    private static Float2 FindNearestActiveRootPoint(IReadOnlyList<bool> activeMask, Int2 grid, double rootX, double rootY)
+    {
+        var bestDistance = double.PositiveInfinity;
+        var bestX = (float)Math.Clamp(rootX, 0, grid.X * ActiveMapGridMaskCodec.RootUnitsPerCell);
+        var bestY = (float)Math.Clamp(rootY, 0, grid.Y * ActiveMapGridMaskCodec.RootUnitsPerCell);
+        for (var y = 0; y < grid.Y; y++)
+        {
+            for (var x = 0; x < grid.X; x++)
+            {
+                if (!ActiveMapGridMaskCodec.IsCellActive(activeMask, grid, x, y))
+                {
+                    continue;
+                }
+
+                var candidateX = (x + 0.5) * ActiveMapGridMaskCodec.RootUnitsPerCell;
+                var candidateY = (y + 0.5) * ActiveMapGridMaskCodec.RootUnitsPerCell;
+                var dx = candidateX - rootX;
+                var dy = candidateY - rootY;
+                var distance = (dx * dx) + (dy * dy);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    bestX = (float)candidateX;
+                    bestY = (float)candidateY;
+                }
+            }
+        }
+
+        return new Float2(bestX, bestY);
+    }
+
+    private int SynchronizeSuppressedTerrainPages(IReadOnlyList<bool> activeMask, Int2 grid)
+    {
+        _project.SuppressedTerrainPagePaths.Clear();
+        if (grid.X <= 0 || grid.Y <= 0 || activeMask.Count < grid.X * grid.Y)
+        {
+            return 0;
+        }
+
+        var map = _project.GameData.TerrainHeightMap;
+        var sampleWidth = Math.Max(1, map.Width);
+        var sampleHeight = Math.Max(1, map.Height);
+        var worldWidth = Math.Max(1, _project.Rd3d.GridWidth > 0
+            ? _project.Rd3d.GridWidth
+            : _project.Root.MapSize * 32);
+        var worldHeight = Math.Max(1, _project.Rd3d.GridHeight > 0
+            ? _project.Rd3d.GridHeight
+            : _project.Root.MapSize * 32);
+
+        foreach (var page in TerrainPageCoverage.BuildProjectCoverage(_project))
+        {
+            var minWorldX = page.SampleBounds.Left / (double)Math.Max(1, sampleWidth - 1) * worldWidth;
+            var minWorldZ = page.SampleBounds.Top / (double)Math.Max(1, sampleHeight - 1) * worldHeight;
+            var maxWorldX = page.SampleBounds.Right / (double)Math.Max(1, sampleWidth - 1) * worldWidth;
+            var maxWorldZ = page.SampleBounds.Bottom / (double)Math.Max(1, sampleHeight - 1) * worldHeight;
+            if (FootprintIntersectsWorldBounds(activeMask, grid, minWorldX, minWorldZ, maxWorldX, maxWorldZ, worldWidth, worldHeight))
+            {
+                continue;
+            }
+            if (!string.IsNullOrWhiteSpace(page.SourcePath))
+            {
+                _project.SuppressedTerrainPagePaths.Add(page.SourcePath);
+            }
+        }
+
+        return _project.SuppressedTerrainPagePaths.Count;
+    }
+
+    private static bool FootprintIntersectsWorldBounds(
+        IReadOnlyList<bool> activeMask,
+        Int2 grid,
+        double minWorldX,
+        double minWorldZ,
+        double maxWorldX,
+        double maxWorldZ,
+        int worldWidth,
+        int worldHeight)
+    {
+        var x0 = Math.Clamp((int)Math.Floor(Math.Min(minWorldX, maxWorldX) / Math.Max(1d, worldWidth) * grid.X), 0, grid.X - 1);
+        var z0 = Math.Clamp((int)Math.Floor(Math.Min(minWorldZ, maxWorldZ) / Math.Max(1d, worldHeight) * grid.Y), 0, grid.Y - 1);
+        var x1 = Math.Clamp((int)Math.Ceiling(Math.Max(minWorldX, maxWorldX) / Math.Max(1d, worldWidth) * grid.X) - 1, x0, grid.X - 1);
+        var z1 = Math.Clamp((int)Math.Ceiling(Math.Max(minWorldZ, maxWorldZ) / Math.Max(1d, worldHeight) * grid.Y) - 1, z0, grid.Y - 1);
+        for (var z = z0; z <= z1; z++)
+        {
+            for (var x = x0; x <= x1; x++)
+            {
+                if (ActiveMapGridMaskCodec.IsCellActive(activeMask, grid, x, z))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private string ApplyBeachFromGpu(
+        GpuBeachDefinition beach,
+        IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)> pendingChangedRegions)
+    {
+        var minX = Math.Min(beach.StartX, beach.EndX) - Math.Max(beach.LandWidth, beach.WaterWidth);
+        var minZ = Math.Min(beach.StartZ, beach.EndZ) - Math.Max(beach.LandWidth, beach.WaterWidth);
+        var maxX = Math.Max(beach.StartX, beach.EndX) + Math.Max(beach.LandWidth, beach.WaterWidth);
+        var maxZ = Math.Max(beach.StartZ, beach.EndZ) + Math.Max(beach.LandWidth, beach.WaterWidth);
+        foreach (var region in pendingChangedRegions)
+        {
+            UpdateCoarseFromEditedMeshRegion(region.Lod, region.MinX, region.MinZ, region.MaxX, region.MaxZ);
+            MergeDirtyRegionFromWorldBounds(region.MinX, region.MinZ, region.MaxX, region.MaxZ);
+            minX = Math.Min(minX, region.MinX);
+            minZ = Math.Min(minZ, region.MinZ);
+            maxX = Math.Max(maxX, region.MaxX);
+            maxZ = Math.Max(maxZ, region.MaxZ);
+        }
+        if (pendingChangedRegions.Count == 0)
+        {
+            UpdateCoarseFromEditedMeshRegion(beach.Lod, minX, minZ, maxX, maxZ);
+        }
+        MergeDirtyRegionFromWorldBounds(minX, minZ, maxX, maxZ);
+
+        var oceanRingSamples = EnforceOuterOceanSafetyRing();
+        var workingMap = BuildWorkingMap();
+        if (workingMap.Width <= 0 || workingMap.Height <= 0)
+        {
+            throw new InvalidOperationException("La heightmap du projet est vide.");
+        }
+
+        var fullBounds = new RectI(0, 0, Math.Max(0, workingMap.Width - 1), Math.Max(0, workingMap.Height - 1));
+        var dirty = oceanRingSamples > 0
+            ? fullBounds
+            : WorldBoundsToCoarseBounds(workingMap, minX, minZ, maxX, maxZ);
+        _lastTerrainDependencySyncReport = _editor.ReplaceCoarseHeightMapAndSyncTerrainDependencies(_project, workingMap, dirty);
+
+        var materialResult = PaintClassicBeachMaterial(beach);
+        var oceanMaterialSummary = PaintOuterOceanSafetyRingMaterials();
+        var usedMaterialPages = _editor.ResynchronizeMeshUsedMaterialBitsFromMaterialMap(_project);
+
+        var previousMeshWrites = _project.LocalRegeneration?.GeneratedMeshPageWrites?.Where(write => write.HasContent).ToList()
+            ?? new List<RegeneratedMeshPageWrite>();
+        var previousNormalWrites = _project.LocalRegeneration?.GeneratedNormalMapWrites?.Where(write => write.HasContent).ToList()
+            ?? new List<RegeneratedNormalMapWrite>();
+        var previousTintWrites = _project.LocalRegeneration?.GeneratedTintMapWrites?.Where(write => write.HasContent).ToList()
+            ?? new List<RegeneratedTintMapWrite>();
+        var state = _localRegenerator.RegenerateAroundBounds(
+            _project,
+            workingMap,
+            "Mesh",
+            ResolveAnchorPageKeyForCurrentLod(),
+            dirty,
+            dirty,
+            1);
+        var baseEditableLod = FindMostDetailedEditableLod();
+        state.AnchorMeshLod = baseEditableLod;
+        // v46.10 : sur une île étendue, les LOD lointains possèdent leur propre
+        // topologie extrapolée. Une régénération conservative pouvait ne garder que
+        // les sommets terrestres au bord et faire réapparaître l'herbe au dézoom.
+        var freshMeshWrites = (IsIslandExpansionModeEnabled() || _activeMapMaskDirty
+            ? _localRegenerator.GenerateExpandedActiveMeshPageWrites(
+                _project,
+                workingMap,
+                state,
+                BuildMeshRegenerationOptions())
+            : _localRegenerator.GenerateMeshPageWrites(
+                _project,
+                workingMap,
+                state,
+                includeHigherLods: true,
+                maxHigherLods: 99,
+                options: BuildMeshRegenerationOptions())).ToList();
+        ApplyGeneratedMeshWrites(freshMeshWrites);
+        var freshNormalWrites = _localRegenerator.GenerateInterpretedNormalMapWrites(_project, workingMap, state).ToList();
+        var freshTintWrites = _localRegenerator.GenerateTintMapWrites(_project, workingMap, state).ToList();
+        state.GeneratedMeshPageWrites = previousMeshWrites
+            .Concat(freshMeshWrites)
+            .Where(write => write.HasContent)
+            .GroupBy(write => write.TargetPath, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Last())
+            .ToList();
+        state.GeneratedNormalMapWrites = previousNormalWrites
+            .Concat(freshNormalWrites)
+            .Where(write => write.HasContent)
+            .GroupBy(write => write.TargetPath, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Last())
+            .ToList();
+        state.GeneratedTintMapWrites = previousTintWrites
+            .Concat(freshTintWrites)
+            .Where(write => write.HasContent)
+            .GroupBy(write => write.TargetPath, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Last())
+            .ToList();
+        state.GeneratedEditableMeshPageWrites = state.GeneratedMeshPageWrites.Count;
+        state.GeneratedMeshPagesByLod = state.GeneratedMeshPageWrites.GroupBy(write => write.Key.Lod).ToDictionary(group => group.Key, group => group.Count());
+        state.BaseLodMeshPagesGenerated = state.GeneratedMeshPageWrites.Count(write => write.Key.Lod == baseEditableLod);
+        state.IncludesHigherLods = state.GeneratedMeshPageWrites.Any(write => write.Key.Lod > baseEditableLod);
+        _editor.ApplyLocalRegeneration(_project, state);
+        _editor.ApplyGeneratedMeshPageWrites(_project, state);
+        _editor.ApplyGeneratedNormalMapWrites(_project, state);
+        if (state.GeneratedTintMapWrites.Count > 0)
+        {
+            _editor.ApplyGeneratedTintMapWrites(_project, state);
+            ApplyGeneratedTintWrites(freshTintWrites);
+        }
+
+        var coastAnchorCount = AddPlayableCoastLineToGameData(beach);
+        _editor.RegenerateAllTexts(_project);
+        _project.IsModified = true;
+        _project.ModifiedSections.Add("GpuBeachClassicMaterials");
+        _project.ModifiedSections.Add("GameDataPlayableCoastLine");
+
+        InvalidateBrushSpatialIndex();
+        RefreshPropagationInfo();
+        UpdateNormalPreview();
+        var lodText = string.Join(", ", freshMeshWrites.GroupBy(write => write.Key.Lod).OrderBy(group => group.Key).Select(group => $"LOD {group.Key}={group.Count()}"));
+        return $"Plage classique appliquée sans perdre les éditions précédentes : {materialResult.CellsChanged} texel(s) sable forcé(s), {coastAnchorCount} emplacement(s) de comptoir réparti(s) sur toute la côte, tous les LOD concernés resynchronisés ({lodText}), {freshNormalWrites.Count} normalmap(s) et {freshTintWrites.Count} tintmap(s) actualisées ({usedMaterialPages} page(s) matériau). " +
+               $"Anneau océanique : {oceanRingSamples} hauteur(s) protégée(s). {oceanMaterialSummary}";
+    }
+
+    private RectI WorldBoundsToCoarseBounds(CoarseHeightMap map, double minX, double minZ, double maxX, double maxZ)
+    {
+        var gridWidth = Math.Max(1d, _project.Rd3d.GridWidth > 0 ? _project.Rd3d.GridWidth : map.Width - 1);
+        var gridHeight = Math.Max(1d, _project.Rd3d.GridHeight > 0 ? _project.Rd3d.GridHeight : map.Height - 1);
+        var left = Math.Clamp((int)Math.Floor((minX / gridWidth) * Math.Max(1, map.Width - 1)), 0, map.Width - 1);
+        var top = Math.Clamp((int)Math.Floor((minZ / gridHeight) * Math.Max(1, map.Height - 1)), 0, map.Height - 1);
+        var right = Math.Clamp((int)Math.Ceiling((maxX / gridWidth) * Math.Max(1, map.Width - 1)), left, map.Width - 1);
+        var bottom = Math.Clamp((int)Math.Ceiling((maxZ / gridHeight) * Math.Max(1, map.Height - 1)), top, map.Height - 1);
+        return new RectI(left, top, right, bottom);
+    }
+
+    private TerrainMaterialPaintResult PaintClassicBeachMaterial(GpuBeachDefinition beach)
+    {
+        var source = _project.Rd3d.MaterialMap;
+        if (source.Width <= 0 || source.Height <= 0 || !source.HasAnyData)
+        {
+            throw new InvalidOperationException("La MaterialMap du terrain est absente ; le sable ne peut pas être appliqué.");
+        }
+
+        var map = source.Clone();
+        var beforeIds = map.PackedMaterialIds.ToArray();
+        var beforeAlphas = map.PackedMaterialAlphas.ToArray();
+        var options = BuildAutomaticHeightMaterialOptions();
+        var sandId = options.BeachMaterialId;
+        var shallowWaterId = options.ShallowWaterMaterialId;
+        var deepWaterId = options.DeepWaterMaterialId;
+        var gridWidth = Math.Max(1d, _project.Rd3d.GridWidth > 0 ? _project.Rd3d.GridWidth : map.Width - 1);
+        var gridHeight = Math.Max(1d, _project.Rd3d.GridHeight > 0 ? _project.Rd3d.GridHeight : map.Height - 1);
+        var start = new System.Numerics.Vector2((float)beach.StartX, (float)beach.StartZ);
+        var end = new System.Numerics.Vector2((float)beach.EndX, (float)beach.EndZ);
+        var axis = end - start;
+        var length = axis.Length();
+        if (length < 1f)
+        {
+            throw new InvalidOperationException("Le tracé de plage est trop court.");
+        }
+
+        var tangent = axis / length;
+        var outward = System.Numerics.Vector2.Normalize(new System.Numerics.Vector2((float)beach.OutwardX, (float)beach.OutwardZ));
+        // Une plage vanilla garde du sable légèrement sous la ligne d'eau. La suite
+        // de la bande doit toutefois recevoir un matériau sous-marin : conserver
+        // l'ancien matériau herbe le rendait visible lors des transitions de LOD.
+        var shallowSandWidth = Math.Min(beach.WaterWidth, Math.Max(64d, beach.WaterWidth * 0.30d));
+        var shallowWaterWidth = Math.Min(beach.WaterWidth, Math.Max(shallowSandWidth, beach.WaterWidth * 0.65d));
+        var padding = Math.Max(map.MaterialIdBlockSize, 2);
+        var materialBandWidth = Math.Max(beach.LandWidth, beach.WaterWidth);
+        var rawMinX = Math.Min(beach.StartX, beach.EndX) - materialBandWidth - padding * gridWidth / Math.Max(1, map.Width - 1);
+        var rawMaxX = Math.Max(beach.StartX, beach.EndX) + materialBandWidth + padding * gridWidth / Math.Max(1, map.Width - 1);
+        var rawMinZ = Math.Min(beach.StartZ, beach.EndZ) - materialBandWidth - padding * gridHeight / Math.Max(1, map.Height - 1);
+        var rawMaxZ = Math.Max(beach.StartZ, beach.EndZ) + materialBandWidth + padding * gridHeight / Math.Max(1, map.Height - 1);
+        var left = Math.Clamp((int)Math.Floor(rawMinX / gridWidth * Math.Max(1, map.Width - 1)), 0, map.Width - 1);
+        var right = Math.Clamp((int)Math.Ceiling(rawMaxX / gridWidth * Math.Max(1, map.Width - 1)), left, map.Width - 1);
+        var top = Math.Clamp((int)Math.Floor(rawMinZ / gridHeight * Math.Max(1, map.Height - 1)), 0, map.Height - 1);
+        var bottom = Math.Clamp((int)Math.Ceiling(rawMaxZ / gridHeight * Math.Max(1, map.Height - 1)), top, map.Height - 1);
+        var visited = 0;
+        var paintedLeft = map.Width;
+        var paintedTop = map.Height;
+        var paintedRight = -1;
+        var paintedBottom = -1;
+        for (var y = top; y <= bottom; y++)
+        {
+            var rawZ = y / (double)Math.Max(1, map.Height - 1) * gridHeight;
+            for (var x = left; x <= right; x++)
+            {
+                visited++;
+                var rawX = x / (double)Math.Max(1, map.Width - 1) * gridWidth;
+                var relative = new System.Numerics.Vector2((float)(rawX - beach.StartX), (float)(rawZ - beach.StartZ));
+                var along = System.Numerics.Vector2.Dot(relative, tangent);
+                var lateral = System.Numerics.Vector2.Dot(relative, outward);
+                if (along < 0f || along > length || lateral < -beach.LandWidth || lateral > beach.WaterWidth)
+                {
+                    continue;
+                }
+
+                var materialId = lateral <= shallowSandWidth
+                    ? sandId
+                    : lateral <= shallowWaterWidth
+                        ? shallowWaterId
+                        : deepWaterId;
+                map.SetDominantMaterialSafe(x, y, materialId, TerrainMaterialPackEncoding.MaxPackedSlotValue);
+                paintedLeft = Math.Min(paintedLeft, x);
+                paintedTop = Math.Min(paintedTop, y);
+                paintedRight = Math.Max(paintedRight, x);
+                paintedBottom = Math.Max(paintedBottom, y);
+            }
+        }
+
+        var changedCells = beforeAlphas.Zip(map.PackedMaterialAlphas, (before, after) => before != after).Count(changed => changed);
+        var changedBlocks = beforeIds.Zip(map.PackedMaterialIds, (before, after) => before != after).Count(changed => changed);
+        var result = new TerrainMaterialPaintResult
+        {
+            CellsVisited = visited,
+            CellsChanged = changedCells,
+            BlocksChanged = changedBlocks,
+            AffectedBounds = paintedRight >= paintedLeft ? new RectI(paintedLeft, paintedTop, paintedRight, paintedBottom) : null
+        };
+        result.AffectedMaterialIds.Add(sandId);
+        result.AffectedMaterialIds.Add(shallowWaterId);
+        result.AffectedMaterialIds.Add(deepWaterId);
+        result.Messages.Add($"Matériaux plage {sandId}, eau peu profonde {shallowWaterId} et fond marin {deepWaterId} appliqués jusqu'au bord de carte.");
+        var editState = _project.MaterialEditState ?? new TerrainMaterialEditState();
+        editState.AddGeneratedOperation(result, "v46.10 plage DX11 : sable puis matériaux sous-marins jusqu'au bord");
+        _editor.ReplaceTerrainMaterialMap(_project, map, editState);
+        return result;
+    }
+
+    private int AddPlayableCoastLineToGameData(GpuBeachDefinition beach)
+    {
+        var text = _project.RawContent.GameDataText;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            throw new InvalidOperationException("gamedata.xml est absent ; la ligne de côte du comptoir ne peut pas être créée.");
+        }
+
+        // v46.9 : les CoastLine natives sont des EditorObject. Les anciennes versions
+        // les ajoutaient par erreur dans GameObject, où le jeu ne les enregistrait pas
+        // comme emplacements de comptoir. Nettoyer ces anciens objets générés avant
+        // d'insérer la nouvelle côte au même endroit que les côtes natives.
+        text = RemoveGeneratedCoastLines(text, "GameObject");
+        text = RemoveGeneratedCoastLines(text, "EditorObject");
+        var snapshot = GameDataAreaObjectsXmlEditor.Extract(text, "EditorObject");
+        if (snapshot.Containers.Count == 0)
+        {
+            throw new InvalidOperationException("Aucun groupe EditorObject n’existe dans AreaObjectManager/gamedata.xml.");
+        }
+
+        var target = snapshot.Containers.FirstOrDefault(container =>
+            container.Objects.Any(item => item.RawXml.Contains("<guid>1003910</guid>", StringComparison.OrdinalIgnoreCase)))
+            ?? snapshot.Containers[0];
+        var allIds = Regex.Matches(text, @"<ID>\s*(?<id>-?\d+)\s*</ID>", RegexOptions.IgnoreCase)
+            .Select(match => long.TryParse(match.Groups["id"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : 0L)
+            .ToHashSet();
+        // v46.16 : dans Anno, la Position d'un objet CoastLine sert également de
+        // point d'ancrage au placement du comptoir. Une seule CoastLine très longue
+        // dessinait correctement le rivage, mais ne rendait constructible que son
+        // unique point d'origine. Découper la ligne en tronçons continus fournit des
+        // ancrages régulièrement espacés sur toute la plage, sans changer le tracé.
+        var beachSegments = SplitBeachForGameplayAnchors(beach);
+        var generatedObjects = new List<string>(beachSegments.Count);
+        var objectId = long.MinValue + 1024;
+        foreach (var segment in beachSegments)
+        {
+            while (allIds.Contains(objectId) && objectId < long.MaxValue)
+            {
+                objectId++;
+            }
+            generatedObjects.Add(BuildPlayableCoastLineObject(segment, objectId));
+            allIds.Add(objectId);
+            objectId++;
+        }
+
+        var edits = new List<AreaObjectEdit>();
+        foreach (var container in snapshot.Containers)
+        {
+            edits.AddRange(container.Objects.Select(item => new AreaObjectEdit(container.Index, item.RawXml)));
+            if (container.Index == target.Index)
+            {
+                edits.AddRange(generatedObjects.Select(rawObject => new AreaObjectEdit(container.Index, rawObject)));
+            }
+        }
+        _project.RawContent.GameDataText = GameDataAreaObjectsXmlEditor.ReplaceObjects(text, snapshot, edits);
+        return generatedObjects.Count;
+    }
+
+    private static IReadOnlyList<GpuBeachDefinition> SplitBeachForGameplayAnchors(GpuBeachDefinition beach)
+    {
+        var dx = beach.EndX - beach.StartX;
+        var dz = beach.EndZ - beach.StartZ;
+        var length = Math.Sqrt((dx * dx) + (dz * dz));
+        if (length <= 192d)
+        {
+            return new[] { beach };
+        }
+
+        // 192 unités RD3D correspondent à environ 6 cases root sur les îles
+        // standards. L'espacement reste inférieur à la largeur utile d'un comptoir,
+        // afin que les zones constructibles se recouvrent le long de toute la plage.
+        var segmentCount = Math.Clamp((int)Math.Ceiling(length / 192d), 1, 96);
+        var segments = new List<GpuBeachDefinition>(segmentCount);
+        for (var index = 0; index < segmentCount; index++)
+        {
+            var t0 = index / (double)segmentCount;
+            var t1 = (index + 1) / (double)segmentCount;
+            segments.Add(beach with
+            {
+                StartX = beach.StartX + (dx * t0),
+                StartZ = beach.StartZ + (dz * t0),
+                EndX = beach.StartX + (dx * t1),
+                EndZ = beach.StartZ + (dz * t1)
+            });
+        }
+        return segments;
+    }
+
+    private static string RemoveGeneratedCoastLines(string text, string objectGroupName)
+    {
+        var snapshot = GameDataAreaObjectsXmlEditor.Extract(text, objectGroupName);
+        if (snapshot.Containers.Count == 0)
+        {
+            return text;
+        }
+
+        var generatedIdLimit = long.MinValue + 1_000_000;
+        var edits = new List<AreaObjectEdit>();
+        var removed = false;
+        foreach (var container in snapshot.Containers)
+        {
+            foreach (var item in container.Objects)
+            {
+                var idMatch = Regex.Match(item.RawXml, @"<ID>\s*(?<id>-?\d+)\s*</ID>", RegexOptions.IgnoreCase);
+                var isGeneratedCoast = item.RawXml.Contains("<guid>1003910</guid>", StringComparison.OrdinalIgnoreCase) &&
+                    idMatch.Success &&
+                    long.TryParse(idMatch.Groups["id"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) &&
+                    id >= long.MinValue + 1024 &&
+                    id <= generatedIdLimit;
+                if (isGeneratedCoast)
+                {
+                    removed = true;
+                    continue;
+                }
+                edits.Add(new AreaObjectEdit(container.Index, item.RawXml));
+            }
+        }
+
+        return removed ? GameDataAreaObjectsXmlEditor.ReplaceObjects(text, snapshot, edits) : text;
+    }
+
+    private int RepairGeneratedPlayableCoastLine()
+    {
+        var text = _project.RawContent.GameDataText;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return 0;
+        }
+
+        var snapshot = GameDataAreaObjectsXmlEditor.Extract(text, "EditorObject");
+        var generatedIdLimit = long.MinValue + 1_000_000;
+        var generated = snapshot.Containers
+            .SelectMany(container => container.Objects)
+            .Where(item =>
+            {
+                var idMatch = Regex.Match(item.RawXml, @"<ID>\s*(?<id>-?\d+)\s*</ID>", RegexOptions.IgnoreCase);
+                return item.RawXml.Contains("<guid>1003910</guid>", StringComparison.OrdinalIgnoreCase) &&
+                       idMatch.Success &&
+                       long.TryParse(idMatch.Groups["id"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) &&
+                       id >= long.MinValue + 1024 && id <= generatedIdLimit;
+            })
+            .ToList();
+        if (generated.Count == 0)
+        {
+            return 0;
+        }
+
+        var points = Regex.Matches(
+                string.Join(Environment.NewLine, generated.Select(item => item.RawXml)),
+                @"<p>\s*(?<x>[-+0-9.,Ee]+)\s+(?<y>[-+0-9.,Ee]+)\s+(?<z>[-+0-9.,Ee]+)\s*</p>",
+                RegexOptions.IgnoreCase)
+            .Select(match => (
+                X: ParseGameDataDouble(match.Groups["x"].Value),
+                Y: ParseGameDataDouble(match.Groups["y"].Value),
+                Z: ParseGameDataDouble(match.Groups["z"].Value)))
+            .Where(point => point.X.HasValue && point.Y.HasValue && point.Z.HasValue)
+            .Select(point => (X: point.X!.Value, Y: point.Y!.Value, Z: point.Z!.Value))
+            .ToList();
+        if (points.Count < 2)
+        {
+            return 0;
+        }
+
+        var mapSize = Math.Max(1d, _project.Root.MapSize > 0 ? _project.Root.MapSize : _project.Metadata.MapSize);
+        var gridWidth = Math.Max(1d, _project.Rd3d.GridWidth > 0 ? _project.Rd3d.GridWidth : mapSize * 32d);
+        var gridHeight = Math.Max(1d, _project.Rd3d.GridHeight > 0 ? _project.Rd3d.GridHeight : mapSize * 32d);
+        // Les tronçons v46.16 partagent leurs extrémités. Retrouver les deux points
+        // les plus éloignés permet de réparer toute la plage, pas seulement le
+        // premier tronçon.
+        var start = points[0];
+        var end = points[^1];
+        var bestDistanceSquared = -1d;
+        foreach (var first in points)
+        {
+            foreach (var second in points)
+            {
+                var distanceSquared = ((second.X - first.X) * (second.X - first.X)) +
+                                      ((second.Z - first.Z) * (second.Z - first.Z));
+                if (distanceSquared > bestDistanceSquared)
+                {
+                    bestDistanceSquared = distanceSquared;
+                    start = first;
+                    end = second;
+                }
+            }
+        }
+        var marginRoot = Math.Min(mapSize * 0.20d, (OuterOceanSafetyWidthWorld + 64d) / Math.Max(1d, gridWidth / mapSize));
+        if (Math.Abs(end.X - start.X) >= Math.Abs(end.Z - start.Z))
+        {
+            start.X = Math.Clamp(start.X, marginRoot, mapSize - marginRoot);
+            end.X = Math.Clamp(end.X, marginRoot, mapSize - marginRoot);
+        }
+        else
+        {
+            start.Z = Math.Clamp(start.Z, marginRoot, mapSize - marginRoot);
+            end.Z = Math.Clamp(end.Z, marginRoot, mapSize - marginRoot);
+        }
+
+        var directionMatch = Regex.Match(generated[0].RawXml, @"<d>\s*(?<x>[-+0-9.,Ee]+)\s+(?<z>[-+0-9.,Ee]+)\s*</d>", RegexOptions.IgnoreCase);
+        var outwardX = directionMatch.Success ? ParseGameDataDouble(directionMatch.Groups["x"].Value) ?? 0d : 0d;
+        var outwardZ = directionMatch.Success ? ParseGameDataDouble(directionMatch.Groups["z"].Value) ?? 0d : 0d;
+        if (Math.Abs(outwardX) + Math.Abs(outwardZ) < 0.5d)
+        {
+            outwardX = Math.Abs(end.X - start.X) < Math.Abs(end.Z - start.Z) ? (start.X >= mapSize * 0.5d ? 1d : -1d) : 0d;
+            outwardZ = Math.Abs(end.Z - start.Z) <= Math.Abs(end.X - start.X) ? (start.Z >= mapSize * 0.5d ? 1d : -1d) : 0d;
+        }
+
+        var definition = new GpuBeachDefinition(
+            FindMostDetailedEditableLod(),
+            start.X / mapSize * gridWidth,
+            start.Z / mapSize * gridHeight,
+            end.X / mapSize * gridWidth,
+            end.Z / mapSize * gridHeight,
+            outwardX,
+            outwardZ,
+            256d,
+            384d,
+            TerrainHeightEncoding.WorldHeightToLegacyFineHeight((float)start.Y),
+            -2047f);
+        return AddPlayableCoastLineToGameData(definition);
+    }
+
+    private static double? ParseGameDataDouble(string value)
+    {
+        var normalized = value.Replace(',', '.');
+        return double.TryParse(normalized, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
+    }
+
+    private string BuildPlayableCoastLineObject(GpuBeachDefinition beach, long objectId)
+    {
+        var mapWidth = Math.Max(1d, _project.Root.MapSize > 0 ? _project.Root.MapSize : _project.Metadata.MapSize);
+        var mapHeight = mapWidth;
+        var gridWidth = Math.Max(1d, _project.Rd3d.GridWidth > 0 ? _project.Rd3d.GridWidth : mapWidth * 32d);
+        var gridHeight = Math.Max(1d, _project.Rd3d.GridHeight > 0 ? _project.Rd3d.GridHeight : mapHeight * 32d);
+        var startX = beach.StartX / gridWidth * mapWidth;
+        var startZ = beach.StartZ / gridHeight * mapHeight;
+        var endX = beach.EndX / gridWidth * mapWidth;
+        var endZ = beach.EndZ / gridHeight * mapHeight;
+        var height = TerrainHeightEncoding.LegacyFineHeightToWorldHeight(beach.BeachDecodedHeight);
+        var mapLength = Math.Sqrt(((endX - startX) * (endX - startX)) + ((endZ - startZ) * (endZ - startZ)));
+        var pointCount = Math.Clamp((int)Math.Ceiling(mapLength / 4d) + 1, 2, 96);
+        var points = Enumerable.Range(0, pointCount)
+            .Select(index =>
+            {
+                var t = index / (double)(pointCount - 1);
+                return (X: startX + ((endX - startX) * t), Z: startZ + ((endZ - startZ) * t));
+            })
+            .ToList();
+        var minX = points.Min(point => point.X);
+        var minZ = points.Min(point => point.Z);
+        var maxX = points.Max(point => point.X);
+        var maxZ = points.Max(point => point.Z);
+        var direction = Math.Abs(beach.OutwardX) >= Math.Abs(beach.OutwardZ)
+            ? (beach.OutwardX >= 0d ? "1 0" : "-1 0")
+            : (beach.OutwardZ >= 0d ? "0 1" : "0 -1");
+
+        var sb = new StringBuilder();
+        sb.AppendLine("<None>");
+        sb.AppendLine("  <guid>1003910</guid>");
+        sb.AppendLine($"  <ID>{objectId.ToString(CultureInfo.InvariantCulture)}</ID>");
+        sb.AppendLine("  <ObjectFolderID>0</ObjectFolderID>");
+        sb.AppendLine($"  <Position>{FormatGameDataNumber(startX)} {FormatGameDataNumber(height)} {FormatGameDataNumber(startZ)}</Position>");
+        sb.AppendLine("  <ParticipantID><id>8</id></ParticipantID>");
+        sb.AppendLine("  <Mesh>");
+        sb.AppendLine("    <Flags><flags>1</flags></Flags>");
+        sb.AppendLine("    <SequenceData><CurrentSequenceStartTime>100</CurrentSequenceStartTime></SequenceData>");
+        sb.AppendLine("    <Orientation>0 0 0 1</Orientation>");
+        sb.AppendLine("  </Mesh>");
+        sb.AppendLine("  <BezierPath>");
+        sb.AppendLine("    <Path>");
+        sb.AppendLine($"      <Minimum>{FormatGameDataNumber(minX)} {FormatGameDataNumber(height)} {FormatGameDataNumber(minZ)}</Minimum>");
+        sb.AppendLine($"      <Maximum>{FormatGameDataNumber(maxX)} {FormatGameDataNumber(height)} {FormatGameDataNumber(maxZ)}</Maximum>");
+        sb.AppendLine("      <BezierCurve>");
+        for (var index = 0; index < points.Count; index++)
+        {
+            var previous = points[Math.Max(0, index - 1)];
+            var next = points[Math.Min(points.Count - 1, index + 1)];
+            var tangentX = (next.X - previous.X) / 6d;
+            var tangentZ = (next.Z - previous.Z) / 6d;
+            var point = points[index];
+            sb.AppendLine("        <None>");
+            sb.AppendLine($"          <p>{FormatGameDataNumber(point.X)} {FormatGameDataNumber(height)} {FormatGameDataNumber(point.Z)}</p>");
+            sb.AppendLine($"          <i>{FormatGameDataNumber(-tangentX)} 0 {FormatGameDataNumber(-tangentZ)}</i>");
+            sb.AppendLine($"          <o>{FormatGameDataNumber(tangentX)} 0 {FormatGameDataNumber(tangentZ)}</o>");
+            sb.AppendLine($"          <d>{direction}</d>");
+            sb.AppendLine("        </None>");
+        }
+        sb.AppendLine("      </BezierCurve>");
+        sb.AppendLine("    </Path>");
+        sb.AppendLine("  </BezierPath>");
+        sb.AppendLine("  <CoastLine />");
+        sb.Append("</None>");
+        return sb.ToString();
+    }
+
+    private static string FormatGameDataNumber(double value)
+        => value.ToString("0.######", CultureInfo.InvariantCulture).Replace('.', ',');
+
     private void PropagateMeshButton_Click(object sender, RoutedEventArgs e)
     {
         try
@@ -354,8 +1670,12 @@ public partial class Terrain3DWindow : Window
             }
 
             ApplyActiveMapMaskToProject(regenerateText: true);
+            var oceanRingSamples = EnforceOuterOceanSafetyRing();
             var map = BuildWorkingMap();
-            var dirty = new RectI(
+            var fullBounds = new RectI(0, 0, Math.Max(0, map.Width - 1), Math.Max(0, map.Height - 1));
+            var dirty = oceanRingSamples > 0
+                ? fullBounds
+                : new RectI(
                 _dirtyRegion.Value.X,
                 _dirtyRegion.Value.Y,
                 _dirtyRegion.Value.X + Math.Max(0, _dirtyRegion.Value.Width - 1),
@@ -403,12 +1723,20 @@ public partial class Terrain3DWindow : Window
                 ResolveMeshBackedSourceLod(state, selectedLod),
                 forceAllNormalHeightPages ? null : dirty);
             _editedCoarseSamples = meshBackedMap.Samples.ToArray();
+            var restoredOceanRingSamples = EnforceOuterOceanSafetyRing();
+            if (restoredOceanRingSamples > 0)
+            {
+                dirty = fullBounds;
+                meshBackedMap = BuildWorkingMap();
+            }
             _lastTerrainDependencySyncReport = _editor.ReplaceCoarseHeightMapAndSyncTerrainDependencies(_project, meshBackedMap, dirty);
 
             var normalWrites = forceAllNormalHeightPages
                 ? _localRegenerator.GenerateAllInterpretedNormalMapWrites(_project, meshBackedMap, state)
                 : _localRegenerator.GenerateInterpretedNormalMapWrites(_project, meshBackedMap, state);
-            var materialSyncSummary = "Matériaux v43.6 : aucune MaterialMap modifiée depuis la validation 3D. Utilise la fenêtre Matériaux après validation, puis Appliquer au projet pour écrire MaterialIDs2/MaterialAlphas2 et resynchroniser UsedMaterialBits.";
+            var oceanMaterialSummary = PaintOuterOceanSafetyRingMaterials();
+            _editor.ResynchronizeMeshUsedMaterialBitsFromMaterialMap(_project);
+            var materialSyncSummary = $"Matériaux : MaterialMap intérieure conservée ; {oceanMaterialSummary}";
             // v39.1/v42 : topology source + régénération tintmap automatique locale.
             // Le problème venait du rebuild topologique adaptatif, pas des tintmaps ;
             // on régénère donc les tintmaps tout en conservant X/Z, indices et vertices du mesh courant/importé/édité.
@@ -429,7 +1757,7 @@ public partial class Terrain3DWindow : Window
                 ? "toutes les height/normal pages forcées, pour éviter le retour du relief en caméra proche"
                 : "height/normal pages affectées";
             MessageBox.Show(this,
-                $"Validation mesh terminée.\nCoarse dérivée des meshes, {meshWrites.Count} mesh page(s) ({meshScopeText}), {normalWrites.Count} normalmap(s) ({normalScopeText}) et {tintWrites.Count} tintmap(s) régénérées automatiquement.\n{materialSyncSummary}\nMode v43.6 : topologie source en édition normale ; Flatten prend la hauteur du centre du pinceau ; en extension île, topologie source préservée et nouveaux triangles injectés uniquement dans ActiveMapGrid.bits hors empreinte. La MaterialMap reste réservée à la fenêtre Matériaux.\n\n{(_lastTerrainDependencySyncReport?.ToDisplayText() ?? string.Empty)}",
+                $"Validation mesh terminée.\nCoarse dérivée des meshes, {meshWrites.Count} mesh page(s) ({meshScopeText}), {normalWrites.Count} normalmap(s) ({normalScopeText}) et {tintWrites.Count} tintmap(s) régénérées automatiquement.\nAnneau océanique : {oceanRingSamples + restoredOceanRingSamples} hauteur(s) protégée(s). {materialSyncSummary}\nMode v46.19 : topologie source conservée ; empreinte et LOD bornés strictement ; matériaux, teintes, vues 2D, objets et aperçu Normal local synchronisés ; aperçu de plage rempli et contrasté.\n\n{(_lastTerrainDependencySyncReport?.ToDisplayText() ?? string.Empty)}",
                 "Validation LOD",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
@@ -457,7 +1785,11 @@ public partial class Terrain3DWindow : Window
                 return;
             }
 
-            var dirty = new RectI(
+            var oceanRingSamples = EnforceOuterOceanSafetyRing();
+            var fullBounds = new RectI(0, 0, Math.Max(0, map.Width - 1), Math.Max(0, map.Height - 1));
+            var dirty = oceanRingSamples > 0
+                ? fullBounds
+                : new RectI(
                 _dirtyRegion.Value.X,
                 _dirtyRegion.Value.Y,
                 _dirtyRegion.Value.X + Math.Max(0, _dirtyRegion.Value.Width - 1),
@@ -474,10 +1806,17 @@ public partial class Terrain3DWindow : Window
                 ResolveMeshBackedSourceLod(state, selectedLod),
                 forceAllNormalHeightPages ? null : dirty);
             _editedCoarseSamples = meshBackedMap.Samples.ToArray();
-            _lastTerrainDependencySyncReport = _editor.ReplaceCoarseHeightMapAndSyncTerrainDependencies(_project, meshBackedMap, dirty);
-            var writes = forceAllNormalHeightPages
-                ? _localRegenerator.GenerateAllInterpretedNormalMapWrites(_project, meshBackedMap, state)
-                : _localRegenerator.GenerateInterpretedNormalMapWrites(_project, meshBackedMap, state);
+            var restoredOceanRingSamples = EnforceOuterOceanSafetyRing();
+            var authoritativeMap = restoredOceanRingSamples > 0 ? BuildWorkingMap() : meshBackedMap;
+            if (restoredOceanRingSamples > 0)
+            {
+                dirty = fullBounds;
+            }
+            _lastTerrainDependencySyncReport = _editor.ReplaceCoarseHeightMapAndSyncTerrainDependencies(_project, authoritativeMap, dirty);
+            var writes = forceAllNormalHeightPages || oceanRingSamples + restoredOceanRingSamples > 0
+                ? _localRegenerator.GenerateAllInterpretedNormalMapWrites(_project, authoritativeMap, state)
+                : _localRegenerator.GenerateInterpretedNormalMapWrites(_project, authoritativeMap, state);
+            PaintOuterOceanSafetyRingMaterials();
             _editor.ApplyLocalRegeneration(_project, state);
             _editor.ApplyGeneratedNormalMapWrites(_project, state);
             _editor.RegenerateAllTexts(_project);
@@ -564,8 +1903,10 @@ public partial class Terrain3DWindow : Window
     {
         var usesIslandExpansion = IsIslandExpansionModeEnabled() || _activeMapMaskDirty;
         ApplyActiveMapMaskToProject(regenerateText: true);
+        var oceanRingSamples = EnforceOuterOceanSafetyRing();
         var workingMap = BuildWorkingMap();
-        var dirtyBounds = GetDirtySampleBoundsFromExactMask();
+        var fullBounds = new RectI(0, 0, Math.Max(0, workingMap.Width - 1), Math.Max(0, workingMap.Height - 1));
+        var dirtyBounds = oceanRingSamples > 0 ? fullBounds : GetDirtySampleBoundsFromExactMask();
         if (usesIslandExpansion)
         {
             _editor.ReplaceCoarseHeightMap(_project, workingMap);
@@ -581,9 +1922,12 @@ public partial class Terrain3DWindow : Window
         {
             _lastTerrainDependencySyncReport = _editor.ReplaceCoarseHeightMapAndSyncTerrainDependencies(_project, workingMap, dirtyBounds);
         }
+        var oceanMaterialSummary = PaintOuterOceanSafetyRingMaterials();
+        _editor.ResynchronizeMeshUsedMaterialBitsFromMaterialMap(_project);
+        _editor.RegenerateAllTexts(_project);
         RefreshPropagationInfo();
         MessageBox.Show(this,
-            "La coarse dérivée des meshes édités a été appliquée au projet en mémoire. GameData/RD3D ont été resynchronisés. En mode extension v42.3, les positions Y existantes ne sont pas recalculées automatiquement afin d'éviter l'aplatissement global." + Environment.NewLine + Environment.NewLine + _lastTerrainDependencySyncReport.ToDisplayText(),
+            $"La coarse dérivée des meshes édités a été appliquée au projet en mémoire. GameData/RD3D ont été resynchronisés. Anneau océanique : {oceanRingSamples} hauteur(s) protégée(s). {oceanMaterialSummary}" + Environment.NewLine + Environment.NewLine + _lastTerrainDependencySyncReport.ToDisplayText(),
             "Terrain 3D",
             MessageBoxButton.OK,
             MessageBoxImage.Information);
@@ -593,20 +1937,34 @@ public partial class Terrain3DWindow : Window
     {
         try
         {
+            var summary = ValidateEntireTerrainCore();
+            MessageBox.Show(this, summary, "Validation terrain", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Validation terrain", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private string ValidateEntireTerrainFromGpu()
+        => ValidateEntireTerrainCore();
+
+    private string ValidateEntireTerrainCore()
+    {
             // v42.3 : capturer le mode extension AVANT toute régénération. L'extension
             // d'emprise ne doit pas être traitée comme une reconstruction globale de hauteur.
             var usesIslandExpansion = IsIslandExpansionModeEnabled() || _activeMapMaskDirty;
 
             ApplyActiveMapMaskToProject(regenerateText: true);
+            var oceanRingSamples = EnforceOuterOceanSafetyRing();
             var workingMap = BuildWorkingMap();
             if (workingMap.Width <= 0 || workingMap.Height <= 0)
             {
-                MessageBox.Show(this, "La coarse dérivée du projet est vide.", "Validation terrain", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
+                throw new InvalidOperationException("La coarse dérivée du projet est vide.");
             }
 
             var fullBounds = new RectI(0, 0, Math.Max(0, workingMap.Width - 1), Math.Max(0, workingMap.Height - 1));
-            var dirtyBounds = GetDirtySampleBoundsFromExactMask();
+            var dirtyBounds = oceanRingSamples > 0 ? fullBounds : GetDirtySampleBoundsFromExactMask();
 
             if (usesIslandExpansion)
             {
@@ -647,16 +2005,21 @@ public partial class Terrain3DWindow : Window
             // générés hors île peuvent contenir des hauteurs provisoires : ils ne doivent pas écraser
             // la heightmap GameData vanilla.
             var authoritativeMap = workingMap;
+            var restoredOceanRingSamples = 0;
             if (!usesIslandExpansion)
             {
                 var meshBackedMap = _localRegenerator.BuildMeshBackedCoarseHeightMap(_project, workingMap, ResolveMeshBackedSourceLod(state, selectedLod), fullBounds);
                 _editedCoarseSamples = meshBackedMap.Samples.ToArray();
-                _lastTerrainDependencySyncReport = _editor.ReplaceCoarseHeightMapAndSyncTerrainDependencies(_project, meshBackedMap, fullBounds);
-                authoritativeMap = meshBackedMap;
+                restoredOceanRingSamples = EnforceOuterOceanSafetyRing();
+                authoritativeMap = restoredOceanRingSamples > 0 ? BuildWorkingMap() : meshBackedMap;
+                _lastTerrainDependencySyncReport = _editor.ReplaceCoarseHeightMapAndSyncTerrainDependencies(_project, authoritativeMap, fullBounds);
             }
 
             var normalWrites = _localRegenerator.GenerateAllInterpretedNormalMapWrites(_project, authoritativeMap, state);
-            var materialSyncSummary = "Matériaux v43.6 : MaterialMap conservée intacte pendant la validation globale 3D. Fais les transitions plage/eau/terre et la peinture uniquement depuis la fenêtre Matériaux, puis Appliquer au projet.";
+            var oceanMaterialSummary = PaintOuterOceanSafetyRingMaterials();
+            var repairedCoastAnchors = RepairGeneratedPlayableCoastLine();
+            var usedMaterialPages = _editor.ResynchronizeMeshUsedMaterialBitsFromMaterialMap(_project);
+            var materialSyncSummary = $"MaterialMap intérieure conservée ; {oceanMaterialSummary} UsedMaterialBits resynchronisés sur {usedMaterialPages} page(s).";
             // v42.1 : "Valider tout le terrain" force maintenant une régénération complète
             // des tintmaps, en DDS DXT1 vanilla-like, et ajoute uniquement les pages manquantes
             // qui recoupent ActiveMapGrid.bits. Si la MaterialMap a été recalée depuis la hauteur,
@@ -671,16 +2034,10 @@ public partial class Terrain3DWindow : Window
             var presetInfo = _pickedRawAttributePreset is null || UsePickedRawPresetCheckBox?.IsChecked != true
                 ? "preset Raw3..Raw7 inactif"
                 : $"preset Raw3..Raw7 appliqué {_pickedRawAttributePreset}";
-            MessageBox.Show(this,
-                $"Validation globale terrain terminée.\nMeshes régénérés sur tous les LOD éditables en topologie source, {meshWrites.Count} mesh page(s), {normalWrites.Count} normalmap(s) et {tintWrites.Count} tintmap(s) régénérées complètement en format DDS DXT1 vanilla-like.\n{materialSyncSummary}\nX/Z, indices, ordre/nombre de vertices et Raw3..7 sont conservés/validés depuis le mesh courant/édité ; les matériaux ne sont pas modifiés par cette validation.\nLes pages normalmap/tintmap manquantes sont ajoutées seulement quand elles recoupent ActiveMapGrid.bits ; LOD0/LOD1 restent sans géométrie et ne sont pas utilisés comme source de hauteur.\n{presetInfo}.\n\n{(_lastTerrainDependencySyncReport?.ToDisplayText() ?? string.Empty)}",
-                "Validation terrain",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, ex.Message, "Validation terrain", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
+            var coastInfo = repairedCoastAnchors > 0
+                ? $"Côte du comptoir réparée : {repairedCoastAnchors} emplacement(s) réparti(s) sur toute la plage."
+                : "Aucune côte de comptoir générée à réparer.";
+            return $"Validation globale terrain terminée.\nMeshes régénérés sur tous les LOD éditables en topologie source, {meshWrites.Count} mesh page(s), {normalWrites.Count} normalmap(s) et {tintWrites.Count} tintmap(s) régénérées complètement en format DDS DXT1 vanilla-like.\nAnneau océanique : {oceanRingSamples + restoredOceanRingSamples} hauteur(s) protégée(s). {materialSyncSummary}\n{coastInfo}\nX/Z, indices, ordre/nombre de vertices et Raw3..7 sont conservés/validés depuis le mesh courant/édité ; seuls les matériaux de l’anneau extérieur sont forcés en eau.\nLes pages normalmap/tintmap manquantes sont ajoutées seulement quand elles recoupent ActiveMapGrid.bits ; LOD0/LOD1 restent sans géométrie et ne sont pas utilisés comme source de hauteur.\n{presetInfo}.\n\n{(_lastTerrainDependencySyncReport?.ToDisplayText() ?? string.Empty)}";
     }
 
     private void PickRawPresetButton_Click(object sender, RoutedEventArgs e)
@@ -1797,7 +3154,12 @@ public partial class Terrain3DWindow : Window
     }
 
     private bool IsIslandExpansionModeEnabled()
-        => IslandExpansionModeCheckBox?.IsChecked == true;
+        // Une île déjà exportée avec l'extension maximale doit rester en mode
+        // extension lorsqu'elle est rouverte. Sinon la case revient visuellement
+        // à false et une nouvelle plage pouvait régénérer les LOD avec le chemin
+        // conservatif, faisant réapparaître l'ancienne bordure terrestre.
+        => IslandExpansionModeCheckBox?.IsChecked == true ||
+           (_activeMapMask.Length > 0 && _activeMapMask.All(static active => active));
 
     private int ParseIslandExpansionCellCount()
     {
@@ -1814,6 +3176,272 @@ public partial class Terrain3DWindow : Window
     private void ExtendIslandTopButton_Click(object sender, RoutedEventArgs e) => ExtendIslandActiveMask(0, ParseIslandExpansionCellCount(), 0, 0);
     private void ExtendIslandRightButton_Click(object sender, RoutedEventArgs e) => ExtendIslandActiveMask(0, 0, ParseIslandExpansionCellCount(), 0);
     private void ExtendIslandBottomButton_Click(object sender, RoutedEventArgs e) => ExtendIslandActiveMask(0, 0, 0, ParseIslandExpansionCellCount());
+
+    private void ExtendIslandToMaximumActiveMask()
+    {
+        var grid = _project.Root.ActiveMapGrid;
+        if (grid.X <= 0 || grid.Y <= 0 || _activeMapMask.Length < grid.X * grid.Y)
+        {
+            InitializeActiveMapMask();
+            grid = _project.Root.ActiveMapGrid;
+        }
+        if (grid.X <= 0 || grid.Y <= 0)
+        {
+            return;
+        }
+
+        var before = _activeMapMask.ToArray();
+        var maximum = Enumerable.Repeat(true, grid.X * grid.Y).ToArray();
+        var initializedOceanSamples = InitializeNewlyActivatedSamplesAsDeepWater(before, grid);
+        if (before.SequenceEqual(maximum))
+        {
+            IslandExpansionModeCheckBox.IsChecked = true;
+            if (initializedOceanSamples > 0)
+            {
+                _activeMapMaskDirty = true;
+                MarkDirtyOperation($"Nettoyage bord océanique GPU v46.6 : {initializedOceanSamples} échantillon(s) replacé(s) à -8 sous l’eau");
+                MergeDirtyRegionFromWorldBounds(0, 0, _project.Rd3d.GridWidth, _project.Rd3d.GridHeight);
+            }
+            return;
+        }
+
+        if (!_extensionMaterialFillPending)
+        {
+            _extensionMaterialFillSourceMask = before;
+        }
+        _activeMapMask = maximum;
+        _activeMapMaskDirty = true;
+        _extensionMaterialFillPending = true;
+        ApplyActiveMapMaskToProject(regenerateText: true);
+
+        var dirtyRoot = ActiveMapGridMaskCodec.ComputeDifferenceRect(grid, before, maximum)
+                        ?? new RectI(0, 0, grid.X * ActiveMapGridMaskCodec.RootUnitsPerCell, grid.Y * ActiveMapGridMaskCodec.RootUnitsPerCell);
+        var addedCells = ActiveMapGridMaskCodec.CountActiveCells(maximum) - ActiveMapGridMaskCodec.CountActiveCells(before);
+        MarkDirtyOperation($"Extension maximale XML GPU v46.6 : +{Math.Max(0, addedCells)} cellule(s), {initializedOceanSamples} échantillon(s) initialisé(s) à -8 sous l’eau, zone root complète {_project.Root.ActiveMapRect}");
+        MergeDirtyRegionFromWorldBounds(dirtyRoot.Left * 32.0, dirtyRoot.Top * 32.0, dirtyRoot.Right * 32.0, dirtyRoot.Bottom * 32.0);
+        IslandExpansionModeCheckBox.IsChecked = true;
+    }
+
+    private int InitializeNewlyActivatedSamplesAsDeepWater(bool[] previousActiveMask, Int2 grid)
+    {
+        var map = _project.GameData.TerrainHeightMap;
+        if (map.Width <= 0 || map.Height <= 0 ||
+            _editedCoarseSamples.Length < map.Width * map.Height ||
+            previousActiveMask.Length < grid.X * grid.Y)
+        {
+            return 0;
+        }
+
+        var worldWidth = _project.Rd3d.GridWidth > 0
+            ? _project.Rd3d.GridWidth
+            : Math.Max(1, _project.Root.MapSize * 32);
+        var worldHeight = _project.Rd3d.GridHeight > 0
+            ? _project.Rd3d.GridHeight
+            : Math.Max(1, _project.Root.MapSize * 32);
+        var oceanBorderWidthX = worldWidth / (double)Math.Max(1, grid.X);
+        var oceanBorderWidthZ = worldHeight / (double)Math.Max(1, grid.Y);
+        var deepWaterRaw = TerrainHeightEncoding.WorldHeightToGameDataRaw(-8f);
+        var changed = 0;
+        for (var y = 0; y < map.Height; y++)
+        {
+            var worldZ = map.Height > 1 ? y * (worldHeight / (double)(map.Height - 1)) : 0d;
+            for (var x = 0; x < map.Width; x++)
+            {
+                var worldX = map.Width > 1 ? x * (worldWidth / (double)(map.Width - 1)) : 0d;
+                var wasPreviouslyActive = ActiveMapGridMaskCodec.IsWorldPointActive(previousActiveMask, grid, worldX, worldZ, worldWidth, worldHeight);
+                var isOuterOceanBorder = worldX <= oceanBorderWidthX || worldX >= worldWidth - oceanBorderWidthX ||
+                                         worldZ <= oceanBorderWidthZ || worldZ >= worldHeight - oceanBorderWidthZ;
+                if (wasPreviouslyActive && !isOuterOceanBorder)
+                {
+                    continue;
+                }
+
+                var index = (y * map.Width) + x;
+                if ((int)Math.Round(_editedCoarseSamples[index], MidpointRounding.AwayFromZero) == deepWaterRaw)
+                {
+                    continue;
+                }
+                _editedCoarseSamples[index] = deepWaterRaw;
+                changed++;
+            }
+        }
+
+        return changed;
+    }
+
+    private int EnforceOuterOceanSafetyRing()
+    {
+        var map = _project.GameData.TerrainHeightMap;
+        if (!ActiveFootprintTouchesOuterMapBoundary() ||
+            map.Width <= 1 || map.Height <= 1 ||
+            _editedCoarseSamples.Length < map.Width * map.Height)
+        {
+            return 0;
+        }
+
+        var worldWidth = Math.Max(1d, _project.Rd3d.GridWidth > 0
+            ? _project.Rd3d.GridWidth
+            : _project.Root.MapSize * 32d);
+        var worldHeight = Math.Max(1d, _project.Rd3d.GridHeight > 0
+            ? _project.Rd3d.GridHeight
+            : _project.Root.MapSize * 32d);
+        var changed = 0;
+        for (var y = 0; y < map.Height; y++)
+        {
+            var worldZ = y * (worldHeight / (map.Height - 1d));
+            for (var x = 0; x < map.Width; x++)
+            {
+                var worldX = x * (worldWidth / (map.Width - 1d));
+                var edgeDistance = Math.Min(
+                    Math.Min(worldX, worldWidth - worldX),
+                    Math.Min(worldZ, worldHeight - worldZ));
+                if (edgeDistance > OuterOceanSafetyWidthWorld)
+                {
+                    continue;
+                }
+
+                var targetWorld = ResolveOuterOceanTargetHeight(edgeDistance);
+                var sampleIndex = (y * map.Width) + x;
+                var currentWorld = TerrainHeightEncoding.SampleToWorldHeight(
+                    _editedCoarseSamples[sampleIndex],
+                    TerrainHeightSampleEncoding.GameDataRawUInt16);
+                if (currentWorld <= targetWorld + 0.0001f)
+                {
+                    continue;
+                }
+
+                _editedCoarseSamples[sampleIndex] = TerrainHeightEncoding.WorldHeightToGameDataRaw(targetWorld);
+                changed++;
+            }
+        }
+
+        if (changed > 0)
+        {
+            MergeDirtyRegionFromWorldBounds(0, 0, worldWidth, worldHeight);
+            MarkDirtyOperation($"Anneau océanique v46.14 : {changed} échantillon(s) abaissé(s) sous l’eau sur {OuterOceanSafetyWidthWorld:0} unités de bord");
+        }
+        return changed;
+    }
+
+    private string PaintOuterOceanSafetyRingMaterials()
+    {
+        var touchesOuterBoundary = ActiveFootprintTouchesOuterMapBoundary();
+
+        var source = _project.Rd3d.MaterialMap;
+        if (source.Width <= 0 || source.Height <= 0 || !source.HasAnyData)
+        {
+            return "Anneau océanique : MaterialMap absente, correction des matériaux ignorée.";
+        }
+
+        var map = source.Clone();
+        var beforeIds = map.PackedMaterialIds.ToArray();
+        var beforeAlphas = map.PackedMaterialAlphas.ToArray();
+        var options = BuildAutomaticHeightMaterialOptions();
+        var heightMap = BuildWorkingMap();
+        var worldWidth = Math.Max(1d, _project.Rd3d.GridWidth > 0
+            ? _project.Rd3d.GridWidth
+            : _project.Root.MapSize * 32d);
+        var worldHeight = Math.Max(1d, _project.Rd3d.GridHeight > 0
+            ? _project.Rd3d.GridHeight
+            : _project.Root.MapSize * 32d);
+        var visited = 0;
+        for (var y = 0; y < map.Height; y++)
+        {
+            var worldZ = (y + 0.5d) / map.Height * worldHeight;
+            for (var x = 0; x < map.Width; x++)
+            {
+                var worldX = (x + 0.5d) / map.Width * worldWidth;
+                var edgeDistance = Math.Min(
+                    Math.Min(worldX, worldWidth - worldX),
+                    Math.Min(worldZ, worldHeight - worldZ));
+                var sampleX = Math.Clamp((int)Math.Round(x / (double)Math.Max(1, map.Width - 1) * Math.Max(0, heightMap.Width - 1)), 0, Math.Max(0, heightMap.Width - 1));
+                var sampleY = Math.Clamp((int)Math.Round(y / (double)Math.Max(1, map.Height - 1) * Math.Max(0, heightMap.Height - 1)), 0, Math.Max(0, heightMap.Height - 1));
+                var sampleIndex = (sampleY * heightMap.Width) + sampleX;
+                var isSubmerged = sampleIndex >= 0 && sampleIndex < heightMap.Samples.Length &&
+                    TerrainHeightEncoding.CoarseSampleToWorldHeight(heightMap, heightMap.Samples[sampleIndex]) <= -0.02f;
+                if ((!touchesOuterBoundary || edgeDistance > OuterOceanSafetyWidthWorld) && !isSubmerged)
+                {
+                    continue;
+                }
+
+                visited++;
+                // Le corail (ID 4) crée une ligne jaune sur les grandes plages droites.
+                // Tout terrain réellement sous l'eau, y compris la bordure extérieure,
+                // reçoit donc le matériau sous-marin neutre (ID 3, GroundType=None).
+                map.SetDominantMaterialSafe(x, y, options.DeepWaterMaterialId, TerrainMaterialPackEncoding.MaxPackedSlotValue);
+            }
+        }
+
+        var changedCells = beforeAlphas.Zip(map.PackedMaterialAlphas, static (before, after) => before != after).Count(static changed => changed);
+        var changedBlocks = beforeIds.Zip(map.PackedMaterialIds, static (before, after) => before != after).Count(static changed => changed);
+        if (changedCells == 0 && changedBlocks == 0)
+        {
+            return $"Anneau océanique : {visited} texel(s) de bord déjà en matériaux sous-marins.";
+        }
+
+        var result = new TerrainMaterialPaintResult
+        {
+            CellsVisited = visited,
+            CellsChanged = changedCells,
+            BlocksChanged = changedBlocks,
+            AffectedBounds = new RectI(0, 0, Math.Max(0, map.Width - 1), Math.Max(0, map.Height - 1))
+        };
+        result.AffectedMaterialIds.Add(options.DeepWaterMaterialId);
+        result.Messages.Add("v46.14 : matériau sous-marin neutre forcé sur tous les texels sous l'eau et sur l’anneau extérieur afin d’éviter herbe, corail jaune et écume sur terre.");
+        var editState = _project.MaterialEditState ?? new TerrainMaterialEditState();
+        editState.AddGeneratedOperation(result, "v46.14 nettoyage sous-marin et anneau océanique");
+        _editor.ReplaceTerrainMaterialMap(_project, map, editState);
+        return $"Eau/anneau océanique : {changedCells} texel(s) et {changedBlocks} bloc(s) matériau corrigés.";
+    }
+
+    private bool ActiveFootprintTouchesOuterMapBoundary()
+    {
+        var grid = _project.Root.ActiveMapGrid;
+        if (grid.X <= 0 || grid.Y <= 0)
+        {
+            return false;
+        }
+
+        var mask = _activeMapMask.Length >= grid.X * grid.Y
+            ? _activeMapMask
+            : ActiveMapGridMaskCodec.Decode(grid, _project.Root.ActiveMapGridBits, _project.Root.ActiveMapRect);
+        if (mask.Length < grid.X * grid.Y)
+        {
+            return false;
+        }
+
+        for (var x = 0; x < grid.X; x++)
+        {
+            if (mask[x] || mask[((grid.Y - 1) * grid.X) + x])
+            {
+                return true;
+            }
+        }
+        for (var y = 1; y < grid.Y - 1; y++)
+        {
+            if (mask[y * grid.X] || mask[(y * grid.X) + grid.X - 1])
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static float ResolveOuterOceanTargetHeight(double edgeDistance)
+    {
+        if (edgeDistance <= OuterOceanDeepWidthWorld)
+        {
+            return OuterOceanDeepHeightWorld;
+        }
+
+        var normalized = (float)Math.Clamp(
+            (edgeDistance - OuterOceanDeepWidthWorld) /
+            Math.Max(1d, OuterOceanSafetyWidthWorld - OuterOceanDeepWidthWorld),
+            0d,
+            1d);
+        var smooth = normalized * normalized * (3f - (2f * normalized));
+        return Lerp(OuterOceanDeepHeightWorld, OuterOceanShoreHeightWorld, smooth);
+    }
 
     private void ExtendIslandActiveMask(int leftCells, int topCells, int rightCells, int bottomCells)
     {
@@ -2144,7 +3772,6 @@ public partial class Terrain3DWindow : Window
     {
         var current = e.GetPosition(SceneViewport);
         _hoverViewportPoint = current;
-        UpdateMouseCoordinateStatus(current);
 
         if (_isSelectingHeightZone)
         {
@@ -2157,6 +3784,8 @@ public partial class Terrain3DWindow : Window
             _lastMousePosition = current;
             return;
         }
+
+        UpdateMouseCoordinateStatus(current);
 
         if (!_isOrbiting && !_isPanning)
         {
@@ -2203,6 +3832,7 @@ public partial class Terrain3DWindow : Window
         }
         else if (wasPainting)
         {
+            FlushDeferredInteractiveWork();
             RequestSceneRebuild(immediate: true);
         }
     }
@@ -2589,7 +4219,14 @@ public partial class Terrain3DWindow : Window
         var dirtyMaxZ = Math.Max(maxWorldZ, world.Z + footprint.MaxOffsetZ);
         if (modified)
         {
-            UpdateCoarseFromEditedMeshRegion(lod, dirtyMinX, dirtyMinZ, dirtyMaxX, dirtyMaxZ);
+            if (_isPainting && IsFastLargeIslandModeEnabled())
+            {
+                AccumulateDeferredInteractiveWork(lod, dirtyMinX, dirtyMinZ, dirtyMaxX, dirtyMaxZ);
+            }
+            else
+            {
+                UpdateCoarseFromEditedMeshRegion(lod, dirtyMinX, dirtyMinZ, dirtyMaxX, dirtyMaxZ);
+            }
         }
         MergeDirtyRegionFromWorldBounds(dirtyMinX, dirtyMinZ, dirtyMaxX, dirtyMaxZ);
         // v42.6 : un coup de pinceau ne doit plus modifier ActiveMapGrid.bits.
@@ -2597,7 +4234,14 @@ public partial class Terrain3DWindow : Window
         // Sinon un flatten large active tout le footprint du pinceau et transforme
         // l'île en quasi-rectangle, ce qui produit les grandes plaques blanches/vertes en jeu.
         MarkDirtyOperation($"3D {mode} LOD {lod} autour RD3D X={world.X.ToString("0.##", CultureInfo.InvariantCulture)}, Z={world.Z.ToString("0.##", CultureInfo.InvariantCulture)}" + (coarseAffectedSamples > 0 ? $" + extension coarse {coarseAffectedSamples} sample(s) borné(s) au masque actif" : string.Empty));
-        PopulatePageRows(GetSelectedPageRow()?.Page.Key);
+        if (_isPainting && IsFastLargeIslandModeEnabled())
+        {
+            _pendingInteractivePageRowsRefresh = true;
+        }
+        else
+        {
+            PopulatePageRows(GetSelectedPageRow()?.Page.Key);
+        }
         _hoverWorldPoint = world;
         _hoverWorldNormal = NormalizeOrDefault(worldNormal, new Vector3D(0, 1, 0));
         _hasBrushHover = true;
@@ -2614,7 +4258,57 @@ public partial class Terrain3DWindow : Window
         if (updateVisuals)
         {
             UpdateLiveBrushOverlay();
-            RequestSceneRebuild(immediate: continuous == false);
+            var deferFullRebuild = _isPainting && IsFastLargeIslandModeEnabled();
+            RequestSceneRebuild(immediate: continuous == false && !deferFullRebuild);
+        }
+    }
+
+    private bool IsFastLargeIslandModeEnabled()
+        => FastLargeIslandModeCheckBox?.IsChecked != false;
+
+    private void AccumulateDeferredInteractiveWork(int lod, double minWorldX, double minWorldZ, double maxWorldX, double maxWorldZ)
+    {
+        if (_pendingInteractiveCoarseSync && _pendingInteractiveCoarseSyncLod != lod)
+        {
+            FlushDeferredInteractiveWork();
+        }
+
+        _pendingInteractiveCoarseSync = true;
+        _pendingInteractiveCoarseSyncLod = lod;
+        _pendingInteractiveMinWorldX = Math.Min(_pendingInteractiveMinWorldX, minWorldX);
+        _pendingInteractiveMinWorldZ = Math.Min(_pendingInteractiveMinWorldZ, minWorldZ);
+        _pendingInteractiveMaxWorldX = Math.Max(_pendingInteractiveMaxWorldX, maxWorldX);
+        _pendingInteractiveMaxWorldZ = Math.Max(_pendingInteractiveMaxWorldZ, maxWorldZ);
+    }
+
+    private void FlushDeferredInteractiveWork()
+    {
+        if (_pendingInteractiveCoarseSync &&
+            _pendingInteractiveCoarseSyncLod >= 0 &&
+            double.IsFinite(_pendingInteractiveMinWorldX) &&
+            double.IsFinite(_pendingInteractiveMinWorldZ) &&
+            double.IsFinite(_pendingInteractiveMaxWorldX) &&
+            double.IsFinite(_pendingInteractiveMaxWorldZ))
+        {
+            UpdateCoarseFromEditedMeshRegion(
+                _pendingInteractiveCoarseSyncLod,
+                _pendingInteractiveMinWorldX,
+                _pendingInteractiveMinWorldZ,
+                _pendingInteractiveMaxWorldX,
+                _pendingInteractiveMaxWorldZ);
+        }
+
+        _pendingInteractiveCoarseSync = false;
+        _pendingInteractiveCoarseSyncLod = -1;
+        _pendingInteractiveMinWorldX = double.PositiveInfinity;
+        _pendingInteractiveMinWorldZ = double.PositiveInfinity;
+        _pendingInteractiveMaxWorldX = double.NegativeInfinity;
+        _pendingInteractiveMaxWorldZ = double.NegativeInfinity;
+
+        if (_pendingInteractivePageRowsRefresh)
+        {
+            _pendingInteractivePageRowsRefresh = false;
+            PopulatePageRows(GetSelectedPageRow()?.Page.Key);
         }
     }
 
@@ -2766,7 +4460,10 @@ public partial class Terrain3DWindow : Window
         var dx = currentViewportPoint.X - previousViewportPoint.X;
         var dy = currentViewportPoint.Y - previousViewportPoint.Y;
         var distance = Math.Sqrt((dx * dx) + (dy * dy));
-        var steps = Math.Clamp((int)Math.Ceiling(distance / BrushStrokeMaxScreenStep), 1, BrushStrokeMaxInterpolatedSteps);
+        var fastInteraction = IsFastLargeIslandModeEnabled();
+        var screenStep = fastInteraction ? BrushStrokeMaxScreenStep * 2.0 : BrushStrokeMaxScreenStep;
+        var maxSteps = fastInteraction ? BrushStrokeMaxInterpolatedSteps / 2 : BrushStrokeMaxInterpolatedSteps;
+        var steps = Math.Clamp((int)Math.Ceiling(distance / screenStep), 1, maxSteps);
         for (var step = 1; step <= steps; step++)
         {
             var t = step / (double)steps;
@@ -2812,6 +4509,7 @@ public partial class Terrain3DWindow : Window
     {
         return _project.MeshPages.Values
             .Where(page => page.Key.Lod == lod)
+            .Where(page => !_project.SuppressedTerrainPagePaths.Contains(page.OriginalRelativePath))
             .Where(page => page.HasEditablePayload)
             .Where(page => page.Clusters.Any(cluster => cluster.Vertices.Count > 0))
             .OrderBy(page => page.Key.X)
@@ -3556,6 +5254,13 @@ public partial class Terrain3DWindow : Window
 
         _rebuildPending = true;
         _interactivePreviewMode = !immediate && (_isPainting || _isOrbiting || _isPanning || (_hasBrushHover && GetBrushMode() != Terrain3DBrushMode.Navigation));
+        if (!immediate && _isPainting && IsFastLargeIslandModeEnabled())
+        {
+            // La géométrie courante reste résidente et rendue par Direct3D pendant le trait.
+            // On évite ainsi clone complet, recalcul des normales et ré-upload GPU toutes les 90 ms.
+            return;
+        }
+
         if (immediate)
         {
             _rebuildTimer.Stop();
@@ -3661,7 +5366,7 @@ public partial class Terrain3DWindow : Window
     {
         var requestedMode = GetSourceMode();
         var interactivePreview = _interactivePreviewMode || _isPainting || _isOrbiting || _isPanning;
-        var ultraLightPreview = false; // v40.3 : aucune preview ultra-light/décimation pendant peinture.
+        var ultraLightPreview = interactivePreview && IsFastLargeIslandModeEnabled();
         var renderMode = requestedMode;
         var selectedKey = GetSelectedPageRow()?.Page.Key;
 
@@ -3673,6 +5378,7 @@ public partial class Terrain3DWindow : Window
         var onlyDecodedPages = OnlyDecodedPagesCheckBox?.IsChecked == true;
         var ignoreEmptyPages = IgnoreEmptyPagesCheckBox?.IsChecked == true;
         var visiblePages = _project.MeshPages.Values
+            .Where(page => !_project.SuppressedTerrainPagePaths.Contains(page.OriginalRelativePath))
             .Where(page => (!onlyDecodedPages || string.Equals(page.DecodeStatus, "Décodée", StringComparison.OrdinalIgnoreCase)) &&
                            (!ignoreEmptyPages || !string.Equals(page.DecodeStatus, "Vide", StringComparison.OrdinalIgnoreCase)))
             .ToList();
@@ -3710,6 +5416,7 @@ public partial class Terrain3DWindow : Window
 
         switch (renderMode)
         {
+            case Terrain3DSourceMode.MeshLodExactRaw:
             case Terrain3DSourceMode.MeshLodMergedRaw:
             case Terrain3DSourceMode.MeshLodMergedReconstructed:
                 CapturePages(visiblePages.Where(page => page.Key.Lod == GetSelectedLod()));
@@ -3767,7 +5474,7 @@ public partial class Terrain3DWindow : Window
             UseInterPageWelding = UseInterPageWelding(),
             InteractivePreviewMode = interactivePreview,
             UltraLightPreviewMode = ultraLightPreview,
-            UseFastInteractiveNormals = false,
+            UseFastInteractiveNormals = ultraLightPreview,
             BuildSelectedPagePreviewBundle = !interactivePreview && (renderMode == Terrain3DSourceMode.MeshSelectedPageRaw || renderMode == Terrain3DSourceMode.MeshSelectedPageReconstructed || renderMode == Terrain3DSourceMode.MeshComparisonReconstructed),
             EnableIslandExpansion = IsIslandExpansionModeEnabled(),
         };
@@ -4891,7 +6598,7 @@ public partial class Terrain3DWindow : Window
 
     private void AddPageBoundsOverlays(Terrain3DSourceMode mode)
     {
-        var rows = (mode == Terrain3DSourceMode.MeshLodMergedRaw || mode == Terrain3DSourceMode.MeshLodMergedReconstructed) ? _meshPageRows.Where(r => r.Lod == GetSelectedLod()).ToList() : _meshPageRows.ToList();
+        var rows = (mode == Terrain3DSourceMode.MeshLodExactRaw || mode == Terrain3DSourceMode.MeshLodMergedRaw || mode == Terrain3DSourceMode.MeshLodMergedReconstructed) ? _meshPageRows.Where(r => r.Lod == GetSelectedLod()).ToList() : _meshPageRows.ToList();
         var selected = GetSelectedPageRow();
         foreach (var row in rows)
         {
@@ -5559,6 +7266,7 @@ public partial class Terrain3DWindow : Window
         sb.AppendLine($"Clusters : {page.ParsedClusterCount}/{page.DeclaredClusterCount}");
         sb.AppendLine($"Vertices : {vertices.Count}");
         sb.AppendLine($"Indices : {indices}");
+        sb.AppendLine($"Triangles : {indices / 3}");
         sb.AppendLine($"Éditable : {page.HasEditablePayload}");
         sb.AppendLine($"Stride : {page.VertexStride}");
         sb.AppendLine($"Hypothèse layout : {page.VertexLayoutHypothesis}");
@@ -5592,6 +7300,45 @@ public partial class Terrain3DWindow : Window
         sb.AppendLine("v16.2 : lecture directe des meshes brutes sans décimation, validation locale par LOD actif et chaîne terrain complète (coarse, mesh, normalmaps, tintmaps). Compare une page brute, la page reconstruite et le crop coarse correspondant pour identifier si le problème vient du mapping X/Z, de la topologie ou des attributs de vertex.");
         sb.AppendLine(page.DecodeNotes);
         PageDetailsTextBox.Text = sb.ToString();
+    }
+
+    private void AppendMeshStatisticsSummary(StringBuilder sb)
+    {
+        var stats = _project.MeshPages.Values
+            .GroupBy(page => page.Key.Lod)
+            .OrderBy(group => group.Key)
+            .Select(group =>
+            {
+                var pages = group.ToList();
+                var clusters = pages.Sum(page => page.ParsedClusterCount > 0 ? page.ParsedClusterCount : page.Clusters.Count);
+                var vertices = pages.Sum(page => page.Clusters.Sum(cluster => cluster.Vertices.Count));
+                var indices = pages.Sum(page => page.Clusters.Sum(cluster => cluster.Indices.Count));
+                var decodedPages = pages.Count(page => page.Clusters.Any(cluster => cluster.Vertices.Count > 0 || cluster.Indices.Count > 0));
+                return new
+                {
+                    Lod = group.Key,
+                    Pages = pages.Count,
+                    DecodedPages = decodedPages,
+                    EditablePages = pages.Count(page => page.HasEditablePayload),
+                    Clusters = clusters,
+                    Vertices = vertices,
+                    Indices = indices,
+                    Triangles = indices / 3
+                };
+            })
+            .ToList();
+
+        if (stats.Count == 0)
+        {
+            sb.AppendLine("Stats mesh : aucune page mesh chargée");
+            return;
+        }
+
+        sb.AppendLine("Stats mesh par LOD :");
+        foreach (var item in stats)
+        {
+            sb.AppendLine($"  LOD {item.Lod}: pages={item.Pages} (décodées={item.DecodedPages}, éditables={item.EditablePages}), clusters={item.Clusters}, vertices={item.Vertices}, indices={item.Indices}, triangles={item.Triangles}");
+        }
     }
 
     private void UpdateNormalPreview()
@@ -5664,7 +7411,8 @@ public partial class Terrain3DWindow : Window
         sb.AppendLine($"Mode : {DescribeSourceMode(mode)}");
         sb.AppendLine($"MapSize : {_project.Metadata.MapSize}");
         sb.AppendLine($"Pages mesh : {meshPageCount} ({editablePageCount} éditables)");
-        sb.AppendLine($"LOD actif : {GetSelectedLod()}");
+        sb.AppendLine($"LOD actif : {GetSelectedLod()} / LOD auto détaillé : {FindMostDetailedEditableLod()}");
+        AppendMeshStatisticsSummary(sb);
         sb.AppendLine($"Filtres pages : décodées={(OnlyDecodedPagesCheckBox?.IsChecked == true ? "oui" : "non")}, vides ignorées={(IgnoreEmptyPagesCheckBox?.IsChecked == true ? "oui" : "non")}");
         sb.AppendLine($"Reconstruction : {GetReconstructionMethod()} / soudure inter-pages={(UseInterPageWelding() ? "oui" : "non")}");
         sb.AppendLine("Décimation interactive : désactivée depuis v40.3 (qualité complète pendant peinture/navigation)");
@@ -5735,12 +7483,13 @@ public partial class Terrain3DWindow : Window
 
     private Terrain3DSourceMode GetSourceMode() => SourceModeComboBox.SelectedIndex switch
     {
-        1 => Terrain3DSourceMode.MeshSelectedPageRaw,
-        2 => Terrain3DSourceMode.MeshLodMergedReconstructed,
-        3 => Terrain3DSourceMode.MeshSelectedPageReconstructed,
-        4 => Terrain3DSourceMode.MeshComparisonReconstructed,
-        5 => Terrain3DSourceMode.CoarseHeightmap,
-        _ => Terrain3DSourceMode.MeshLodMergedRaw,
+        1 => Terrain3DSourceMode.MeshLodMergedRaw,
+        2 => Terrain3DSourceMode.MeshSelectedPageRaw,
+        3 => Terrain3DSourceMode.MeshLodMergedReconstructed,
+        4 => Terrain3DSourceMode.MeshSelectedPageReconstructed,
+        5 => Terrain3DSourceMode.MeshComparisonReconstructed,
+        6 => Terrain3DSourceMode.CoarseHeightmap,
+        _ => Terrain3DSourceMode.MeshLodExactRaw,
     };
 
     private Terrain3DBrushMode GetBrushMode() => BrushModeComboBox.SelectedIndex switch
@@ -5784,8 +7533,26 @@ public partial class Terrain3DWindow : Window
 
     private int GetEffectiveQualityStep()
     {
-        // v40.8 : l'utilisateur a demandé aucune décimation temporaire.
-        // On garde donc la qualité complète, même pendant navigation/peinture.
+        if (!IsFastLargeIslandModeEnabled() || !(_interactivePreviewMode || _isPainting || _isOrbiting || _isPanning))
+        {
+            return 1;
+        }
+
+        // Cette décimation ne touche que les surfaces reconstruites/coarse temporaires.
+        // Le mode LOD brut exact conserve sa topologie et retrouve toujours la qualité 1
+        // lors du rebuild final au relâchement du pinceau.
+        var selectedLod = GetSelectedLod();
+        var vertexCount = _project.MeshPages.Values
+            .Where(page => page.Key.Lod == selectedLod && page.HasEditablePayload)
+            .Sum(page => page.Clusters.Sum(cluster => cluster.Vertices.Count));
+        if (vertexCount >= 1_000_000)
+        {
+            return 4;
+        }
+        if (vertexCount >= 300_000)
+        {
+            return 2;
+        }
         return 1;
     }
 
@@ -5818,7 +7585,10 @@ public partial class Terrain3DWindow : Window
         var preview = _sceneBuildInFlight
             ? "rebuild : en cours/coalescé"
             : "rebuild : prêt";
-        return $"Calcul CPU : {TerrainComputeScheduler.DescribeCpuBackend()} | rendu WPF : {DescribeWpfRenderTier()}\nCompute GPU : {_computeCapabilities.GpuComputeBackendName} | {spatial} | {preview}\n{TerrainMemoryMonitor.Capture().ToShortDisplay()}";
+        var interaction = IsFastLargeIslandModeEnabled()
+            ? "grande île : rendu GPU maintenu, calculs différés pendant le pinceau"
+            : "grande île : désactivé, aperçu recalculé pendant le pinceau";
+        return $"Calcul terrain : {TerrainComputeScheduler.DescribeCpuBackend()} | rendu WPF/Direct3D : {DescribeWpfRenderTier()}\nCompute shaders : {_computeCapabilities.GpuComputeBackendName} | {interaction}\n{spatial} | {preview}\n{TerrainMemoryMonitor.Capture().ToShortDisplay()}";
     }
 
     private void UpdateComputeStatusDisplay()
@@ -5842,6 +7612,7 @@ public partial class Terrain3DWindow : Window
 
     private static string DescribeSourceMode(Terrain3DSourceMode mode) => mode switch
     {
+        Terrain3DSourceMode.MeshLodExactRaw => "LOD brut exact",
         Terrain3DSourceMode.MeshLodMergedRaw => "Mesh brut fusionné du LOD",
         Terrain3DSourceMode.CoarseHeightmap => "Coarse dérivée des meshes (debug)",
         Terrain3DSourceMode.MeshLodMergedReconstructed => "Surface reconstruite lissée du LOD",
@@ -6223,6 +7994,7 @@ public partial class Terrain3DWindow : Window
         var lod = GetSelectedLod();
         var pages = _project.MeshPages.Values
             .Where(page => page.Key.Lod == lod && page.HasEditablePayload)
+            .Where(page => !_project.SuppressedTerrainPagePaths.Contains(page.OriginalRelativePath))
             .ToList();
         if (pages.Count == 0)
         {
@@ -6366,6 +8138,17 @@ public partial class Terrain3DWindow : Window
         var vertices = page.Clusters.SelectMany(c => c.Vertices).ToList();
         if (vertices.Count > 0)
         {
+            if (GetSourceMode() == Terrain3DSourceMode.MeshLodExactRaw)
+            {
+                var minXExact = vertices.Min(v => v.X);
+                var maxXExact = vertices.Max(v => v.X);
+                var minZExact = vertices.Min(v => v.Z);
+                var maxZExact = vertices.Max(v => v.Z);
+                var minYExact = vertices.Min(v => v.WorldHeight);
+                var maxYExact = vertices.Max(v => v.WorldHeight);
+                return new Rect3D(minXExact, minYExact, minZExact, Math.Max(1, maxXExact - minXExact), Math.Max(1, maxYExact - minYExact), Math.Max(1, maxZExact - minZExact));
+            }
+
             var minX = vertices.Min(v => v.X);
             var maxX = vertices.Max(v => v.X);
             var minZ = vertices.Min(v => v.Z);
@@ -6794,6 +8577,7 @@ public partial class Terrain3DWindow : Window
             _sceneBounds = _snapshot.RenderMode switch
             {
                 Terrain3DSourceMode.CoarseHeightmap => BuildCoarseTerrainSource(_snapshot.QualityStepUsed, _snapshot.HeightScale),
+                Terrain3DSourceMode.MeshLodExactRaw => BuildMergedMeshSourceExactRaw(_snapshot.SelectedLod, _snapshot.HeightScale),
                 Terrain3DSourceMode.MeshLodMergedRaw => BuildMergedMeshSourceRaw(_snapshot.SelectedLod, _snapshot.HeightScale),
                 Terrain3DSourceMode.MeshLodMergedReconstructed => BuildMergedMeshSourceReconstructed(_snapshot.SelectedLod, _snapshot.HeightScale),
                 Terrain3DSourceMode.MeshSelectedPageRaw => BuildSelectedMeshPageSourceRaw(GetSelectedPage(), _snapshot.HeightScale),
@@ -7027,6 +8811,17 @@ public partial class Terrain3DWindow : Window
             // v41.2 : la surface fantôme sert uniquement au raycast hors mesh.
             // Ne pas l’ajouter au rendu évite les grandes plaques/lignes bleues et le z-fighting visuel.
             return geometry.Bounds;
+        }
+
+        private Rect3D BuildMergedMeshSourceExactRaw(int lod, double heightScale)
+        {
+            var pages = GetVisibleMeshPagesForCurrentLod(lod)
+                .Where(page => page.HasEditablePayload && page.Clusters.Any(cluster => cluster.Vertices.Count > 0 && cluster.Indices.Count > 0))
+                .ToList();
+
+            return pages.Count == 0
+                ? Rect3D.Empty
+                : BuildMeshPagesExactRawGeometry(pages, heightScale, Color.FromRgb(148, 182, 220), Color.FromRgb(54, 76, 104), 0d);
         }
 
         private Rect3D BuildMergedMeshSourceRaw(int lod, double heightScale)
@@ -7619,6 +9414,61 @@ public partial class Terrain3DWindow : Window
                 : BuildNormals(geometry, smoothingPasses);
         }
 
+        private Rect3D BuildMeshPagesExactRawGeometry(IEnumerable<MeshPage> pages, double heightScale, Color diffuse, Color specular, double offsetX)
+        {
+            var pageList = pages.ToList();
+            var positions = new Point3DCollection();
+            var triangleIndices = new Int32Collection();
+
+            foreach (var page in pageList)
+            {
+                ThrowIfCancellationRequested();
+                foreach (var cluster in page.Clusters)
+                {
+                    var baseIndex = positions.Count;
+                    foreach (var vertex in cluster.Vertices)
+                    {
+                        positions.Add(new Point3D(
+                            vertex.X + offsetX,
+                            vertex.WorldHeight * heightScale,
+                            vertex.Z));
+                    }
+
+                    for (var i = 0; i + 2 < cluster.Indices.Count; i += 3)
+                    {
+                        var a = cluster.Indices[i];
+                        var b = cluster.Indices[i + 1];
+                        var c = cluster.Indices[i + 2];
+                        if (a < 0 || b < 0 || c < 0 || a >= cluster.Vertices.Count || b >= cluster.Vertices.Count || c >= cluster.Vertices.Count)
+                        {
+                            continue;
+                        }
+
+                        triangleIndices.Add(baseIndex + a);
+                        triangleIndices.Add(baseIndex + b);
+                        triangleIndices.Add(baseIndex + c);
+                    }
+                }
+            }
+
+            if (positions.Count == 0 || triangleIndices.Count == 0)
+            {
+                return Rect3D.Empty;
+            }
+
+            var geometry = new MeshGeometry3D { Positions = positions, TriangleIndices = triangleIndices };
+            geometry.Normals = BuildTerrainNormals(geometry);
+            FreezeIfPossible(geometry);
+            RegisterTerrainHitGeometry(geometry);
+            _sceneRoot.Children.Add(CreateModel(geometry, diffuse, specular));
+            if (_snapshot.ShowWireframe)
+            {
+                AddWireframeOverlay(geometry, Color.FromArgb(175, 220, 240, 255), Math.Max(0.5, Math.Max(geometry.Bounds.SizeX, geometry.Bounds.SizeZ) * 0.00045));
+            }
+
+            return geometry.Bounds;
+        }
+
         private Rect3D BuildMeshPagesGeometry(IEnumerable<MeshPage> pages, double heightScale, Color diffuse, Color specular, double offsetX)
         {
             var pageList = pages.ToList();
@@ -7684,7 +9534,7 @@ public partial class Terrain3DWindow : Window
 
         private void AddPageBoundsOverlays(Terrain3DSourceMode mode)
         {
-            var rows = (mode == Terrain3DSourceMode.MeshLodMergedRaw || mode == Terrain3DSourceMode.MeshLodMergedReconstructed)
+            var rows = (mode == Terrain3DSourceMode.MeshLodExactRaw || mode == Terrain3DSourceMode.MeshLodMergedRaw || mode == Terrain3DSourceMode.MeshLodMergedReconstructed)
                 ? _snapshot.MeshPages.Values.Where(page => page.Key.Lod == _snapshot.SelectedLod).Where(ShouldIncludePageInRows).OrderBy(page => page.Key.X).ThenBy(page => page.Key.Y).ToList()
                 : _snapshot.MeshPages.Values.Where(ShouldIncludePageInRows).OrderBy(page => page.Key.Lod).ThenBy(page => page.Key.X).ThenBy(page => page.Key.Y).ToList();
             var selectedPage = GetSelectedPage();
@@ -7718,8 +9568,9 @@ public partial class Terrain3DWindow : Window
                 return;
             }
 
-            var minY = vertices.Min(vertex => vertex.DecodedHeight);
-            var maxY = vertices.Max(vertex => vertex.DecodedHeight);
+            var exactRaw = _snapshot.RenderMode == Terrain3DSourceMode.MeshLodExactRaw;
+            var minY = exactRaw ? vertices.Min(vertex => vertex.WorldHeight) : vertices.Min(vertex => vertex.DecodedHeight);
+            var maxY = exactRaw ? vertices.Max(vertex => vertex.WorldHeight) : vertices.Max(vertex => vertex.DecodedHeight);
             var yRange = Math.Max(1, maxY - minY);
             var minX = vertices.Min(vertex => vertex.X);
             var maxX = vertices.Max(vertex => vertex.X);
@@ -7733,8 +9584,10 @@ public partial class Terrain3DWindow : Window
             var indices = new Int32Collection();
             foreach (var vertex in vertices.Take(4000))
             {
-                var y = _snapshot.DisplayTransform.ToSceneY(vertex.DecodedHeight, heightScale);
-                AddBillboardSquare(positions, indices, new Point3D(vertex.X, y + (pointSize * 0.4), vertex.Z), pointSize);
+                var x = vertex.X;
+                var z = vertex.Z;
+                var y = exactRaw ? vertex.WorldHeight * heightScale : _snapshot.DisplayTransform.ToSceneY(vertex.DecodedHeight, heightScale);
+                AddBillboardSquare(positions, indices, new Point3D(x, y + (pointSize * 0.4), z), pointSize);
             }
 
             if (positions.Count == 0)
@@ -7858,6 +9711,17 @@ public partial class Terrain3DWindow : Window
             var vertices = page.Clusters.SelectMany(cluster => cluster.Vertices).ToList();
             if (vertices.Count > 0)
             {
+                if (_snapshot.RenderMode == Terrain3DSourceMode.MeshLodExactRaw)
+                {
+                    var minXExact = vertices.Min(vertex => vertex.X);
+                    var maxXExact = vertices.Max(vertex => vertex.X);
+                    var minZExact = vertices.Min(vertex => vertex.Z);
+                    var maxZExact = vertices.Max(vertex => vertex.Z);
+                    var minYExact = vertices.Min(vertex => vertex.WorldHeight);
+                    var maxYExact = vertices.Max(vertex => vertex.WorldHeight);
+                    return new Rect3D(minXExact, minYExact, minZExact, Math.Max(1, maxXExact - minXExact), Math.Max(1, maxYExact - minYExact), Math.Max(1, maxZExact - minZExact));
+                }
+
                 var minX = vertices.Min(vertex => vertex.X);
                 var maxX = vertices.Max(vertex => vertex.X);
                 var minZ = vertices.Min(vertex => vertex.Z);
@@ -7891,6 +9755,7 @@ public partial class Terrain3DWindow : Window
     private enum Terrain3DSourceMode
     {
         CoarseHeightmap,
+        MeshLodExactRaw,
         MeshLodMergedRaw,
         MeshLodMergedReconstructed,
         MeshSelectedPageRaw,
@@ -7942,14 +9807,10 @@ public partial class Terrain3DWindow : Window
         public int X => Page.Key.X;
         public int Y => Page.Key.Y;
         public string Status => Page.DecodeStatus;
-        public string Summary
-        {
-            get
-            {
-                var vertices = Page.Clusters.Sum(c => c.Vertices.Count);
-                var indices = Page.Clusters.Sum(c => c.Indices.Count);
-                return $"clusters={Page.ParsedClusterCount}, vtx={vertices}, idx={indices}";
-            }
-        }
+        public int Clusters => Page.ParsedClusterCount > 0 ? Page.ParsedClusterCount : Page.Clusters.Count;
+        public int Vertices => Page.Clusters.Sum(c => c.Vertices.Count);
+        public int Indices => Page.Clusters.Sum(c => c.Indices.Count);
+        public int Triangles => Indices / 3;
+        public string Summary => $"déclarés={Page.DeclaredClusterCount}, parsed={Page.ParsedClusterCount}, stride={Page.VertexStride}, éditable={(Page.HasEditablePayload ? "oui" : "non")}";
     }
 }

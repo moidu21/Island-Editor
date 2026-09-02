@@ -7,6 +7,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Anno1800IslandTool.Core.Models;
+using Anno1800IslandTool.Core.Terrain;
 
 namespace Anno1800IslandTool.UI;
 
@@ -20,6 +21,7 @@ public partial class GlobalTintBaseMapWindow : Window
     private int _height;
     private int _channelCount;
     private int[] _values = Array.Empty<int>();
+    private bool[] _activeMask = Array.Empty<bool>();
     private bool _isPainting;
 
     public event EventHandler? ProjectApplied;
@@ -27,6 +29,7 @@ public partial class GlobalTintBaseMapWindow : Window
     public GlobalTintBaseMapWindow(IslandProject project)
     {
         _project = project;
+        _activeMask = ActiveMapGridMaskCodec.Decode(_project.Root.ActiveMapGrid, _project.Root.ActiveMapGridBits, _project.Root.ActiveMapRect);
         InitializeComponent();
         Loaded += (_, _) => UiLocalizationManager.ApplyTo(this);
         UpdateSliderLabels();
@@ -46,6 +49,14 @@ public partial class GlobalTintBaseMapWindow : Window
         var changed = 0;
         for (var i = 0; i + 2 < _values.Length; i += _channelCount)
         {
+            var pixelIndex = i / _channelCount;
+            var x = pixelIndex % _width;
+            var y = pixelIndex / _width;
+            if (!IsTintPixelEditable(x, y))
+            {
+                continue;
+            }
+
             var before = _values[i + 2];
             ClampRedToOrange(_values, i, _channelCount, 1f);
             if (_values[i + 2] != before)
@@ -165,6 +176,11 @@ public partial class GlobalTintBaseMapWindow : Window
                     continue;
                 }
 
+                if (!IsTintPixelEditable(x, y))
+                {
+                    continue;
+                }
+
                 var weight = strength;
                 if (soft)
                 {
@@ -262,6 +278,14 @@ public partial class GlobalTintBaseMapWindow : Window
             {
                 var sourceIndex = ((y * _width) + x) * _channelCount;
                 var targetIndex = ((y * _width) + x) * 4;
+                if (!IsTintPixelActive(x, y))
+                {
+                    pixels[targetIndex + 0] = 54;
+                    pixels[targetIndex + 1] = 36;
+                    pixels[targetIndex + 2] = 24;
+                    pixels[targetIndex + 3] = 255;
+                    continue;
+                }
                 var rgb = DecodeApproximateRgb(sourceIndex);
                 pixels[targetIndex + 0] = ToPreviewByte(rgb.B);
                 pixels[targetIndex + 1] = ToPreviewByte(rgb.G);
@@ -274,6 +298,44 @@ public partial class GlobalTintBaseMapWindow : Window
         bitmap.Freeze();
         TintPreviewImage.Source = bitmap;
         ApplyZoom();
+    }
+
+    private bool IsTintPixelEditable(int x, int y)
+    {
+        if (!IsTintPixelActive(x, y))
+        {
+            return false;
+        }
+
+        var materialMap = _project.Rd3d.MaterialMap;
+        if (!_project.ProtectBeachMaterial || materialMap.Width <= 0 || materialMap.Height <= 0 || !materialMap.HasAnyData)
+        {
+            return true;
+        }
+
+        var materialX = Math.Clamp((int)Math.Floor((x + 0.5) / Math.Max(1.0, _width) * materialMap.Width), 0, materialMap.Width - 1);
+        var materialY = Math.Clamp((int)Math.Floor((y + 0.5) / Math.Max(1.0, _height) * materialMap.Height), 0, materialMap.Height - 1);
+        return materialMap.GetDominantMaterialId(materialX, materialY) != 1;
+    }
+
+    private bool IsTintPixelActive(int x, int y)
+    {
+        var grid = _project.Root.ActiveMapGrid;
+        if (grid.X <= 0 || grid.Y <= 0)
+        {
+            return true;
+        }
+
+        if (!ActiveMapGridMaskCodec.HasAnyActiveCell(_activeMask))
+        {
+            return true;
+        }
+
+        var rootWidth = _project.Root.MapSize > 0 ? _project.Root.MapSize : Math.Max(1, grid.X * ActiveMapGridMaskCodec.RootUnitsPerCell);
+        var rootHeight = _project.Root.MapSize > 0 ? _project.Root.MapSize : Math.Max(1, grid.Y * ActiveMapGridMaskCodec.RootUnitsPerCell);
+        var rootX = ((x + 0.5) / Math.Max(1.0, _width)) * rootWidth;
+        var rootY = ((y + 0.5) / Math.Max(1.0, _height)) * rootHeight;
+        return ActiveMapGridMaskCodec.IsRootPointActive(_activeMask, grid, rootX, rootY);
     }
 
     private (float R, float G, float B) DecodeApproximateRgb(int index)

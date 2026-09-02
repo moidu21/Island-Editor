@@ -21,6 +21,93 @@ namespace Anno1800IslandTool.Tests;
 public sealed class SmokeTests
 {
     [Fact]
+    public void ZipArchiveReader_Session_Reuses_Archive_For_Index_Text_And_Batches()
+    {
+        var temp = Path.Combine(Path.GetTempPath(), $"anno-v465-session-{Guid.NewGuid():N}.zip");
+        try
+        {
+            using (var archive = ZipFile.Open(temp, ZipArchiveMode.Create))
+            {
+                var root = archive.CreateEntry("island/root.xml");
+                using (var writer = new StreamWriter(root.Open())) writer.Write("<root />");
+                var page = archive.CreateEntry("meshes/2/0x0.xml");
+                using (var writer = new StreamWriter(page.Open())) writer.Write("<mesh />");
+                var tint = archive.CreateEntry("tintmaps/2/0x0.dds");
+                using (var stream = tint.Open()) stream.Write(new byte[] { 7, 8, 9 });
+            }
+
+            var reader = new ZipArchiveReader();
+            using var session = reader.OpenSession(temp);
+            Assert.Equal(3, session.ReadIndex().Count);
+            Assert.Equal("<root />", session.ReadEntryText("island/root.xml"));
+
+            var batches = new Dictionary<string, string>();
+            session.ProcessEntriesTextBatched(new[] { "meshes/2/0x0.xml" }, 1, batch =>
+            {
+                foreach (var pair in batch) batches[pair.Key] = pair.Value;
+            });
+            Assert.Equal("<mesh />", batches["meshes/2/0x0.xml"]);
+
+            byte[]? tintBytes = null;
+            session.ProcessEntriesBytes(new[] { "tintmaps/2/0x0.dds" }, (_, bytes) => tintBytes = bytes);
+            Assert.Equal(new byte[] { 7, 8, 9 }, tintBytes);
+        }
+        finally
+        {
+            if (File.Exists(temp))
+            {
+                File.Delete(temp);
+            }
+        }
+    }
+
+    [Fact]
+    public void MeshPageReader_Fast_Number_Decoder_Preserves_All_Eight_Signed_Values()
+    {
+        const string xml = """
+<Content><width>1</width><height>1</height><Meshes>
+  <None><Indices>0 2 1 -4</Indices><Vertices>
+    48 28795 60 24575 -1408 -164 23680 30469
+    -10 32767 99 -1 -2 -3 -4 -5
+  </Vertices><UsedMaterialBits>-2147483648</UsedMaterialBits><GroundObjects /></None>
+</Meshes></Content>
+""";
+
+        var page = new MeshPageReader().Read("meshes/2/0x0.xml", new TerrainPageKey(2, 0, 0), xml, retainRawText: false);
+
+        Assert.Single(page.Clusters);
+        Assert.Equal(new[] { 0, 2, 1, -4 }, page.Clusters[0].Indices);
+        Assert.Equal(2, page.Clusters[0].Vertices.Count);
+        Assert.Equal(new[] { 48, 28795, 60, 24575, -1408, -164, 23680, 30469 }, page.Clusters[0].Vertices[0].RawValues);
+        Assert.Equal(new[] { -10, 32767, 99, -1, -2, -3, -4, -5 }, page.Clusters[0].Vertices[1].RawValues);
+        Assert.Equal(unchecked((int)0x80000000), page.Clusters[0].UsedMaterialBits);
+        Assert.False(page.RawUnknownFields.ContainsKey("__raw"));
+    }
+
+    [Fact]
+    public void NormalMapPageReader_LowMemory_Keeps_Numeric_Samples_Without_Text_Byte_Copy()
+    {
+        const string xml = """
+<Content><HeightMap>
+  <Downsampled><width>3</width><height>1</height><map>-10 0 65535</map></Downsampled>
+  <Deltas>
+    <None><Data><width>2</width><height>1</height><map>1 255</map></Data><ScaleFactor>4</ScaleFactor><QuantBits>8</QuantBits></None>
+  </Deltas>
+</HeightMap></Content>
+""";
+
+        var page = new NormalMapPageReader().Read("normalmaps/2/0x0.xml", new TerrainPageKey(2, 0, 0), xml, retainRawText: false);
+
+        Assert.Equal(new[] { -10, 0, 65535 }, page.DownsampledSamples);
+        Assert.Empty(page.DownsampledData);
+        Assert.Single(page.DeltaLevels);
+        Assert.Equal(new[] { 1, 255 }, page.DeltaLevels[0].QuantizedSamples);
+        Assert.Empty(page.DeltaLevels[0].RawData);
+        Assert.Equal(4, page.DeltaLevels[0].ScaleFactor);
+        Assert.Equal(8, page.DeltaLevels[0].QuantBits);
+    }
+
+    [Fact]
     public void ZipArchiveReader_ReadEntriesBytes_Uses_Single_Bulk_Call_Semantics()
     {
         var temp = Path.Combine(Path.GetTempPath(), $"anno-v40-{Guid.NewGuid():N}.zip");
@@ -39,6 +126,78 @@ public sealed class SmokeTests
 
             Assert.Equal("one", System.Text.Encoding.UTF8.GetString(payloads["a/one.txt"]));
             Assert.Equal("two", System.Text.Encoding.UTF8.GetString(payloads["b/two.txt"]));
+        }
+        finally
+        {
+            if (File.Exists(temp))
+            {
+                File.Delete(temp);
+            }
+        }
+    }
+
+    [Fact]
+    public void ZipArchiveReader_ProcessEntriesTextBatched_Preserves_Text_And_Batch_Limit()
+    {
+        var temp = Path.Combine(Path.GetTempPath(), $"anno-v462-{Guid.NewGuid():N}.zip");
+        try
+        {
+            using (var archive = ZipFile.Open(temp, ZipArchiveMode.Create))
+            {
+                foreach (var item in new[] { ("a/one.xml", "un"), ("b/two.xml", "deux"), ("c/three.xml", "trois") })
+                {
+                    var entry = archive.CreateEntry(item.Item1);
+                    using var writer = new StreamWriter(entry.Open());
+                    writer.Write(item.Item2);
+                }
+            }
+
+            var reader = new ZipArchiveReader();
+            var received = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var largestBatch = 0;
+            reader.ProcessEntriesTextBatched(temp, new[] { "a/one.xml", "b/two.xml", "c/three.xml" }, 2, batch =>
+            {
+                largestBatch = Math.Max(largestBatch, batch.Count);
+                foreach (var pair in batch)
+                {
+                    received[pair.Key] = pair.Value;
+                }
+            });
+
+            Assert.Equal(2, largestBatch);
+            Assert.Equal("un", received["a/one.xml"]);
+            Assert.Equal("deux", received["b/two.xml"]);
+            Assert.Equal("trois", received["c/three.xml"]);
+        }
+        finally
+        {
+            if (File.Exists(temp))
+            {
+                File.Delete(temp);
+            }
+        }
+    }
+
+    [Fact]
+    public void ZipArchiveReader_ProcessEntriesBytes_Transfers_One_Entry_At_A_Time()
+    {
+        var temp = Path.Combine(Path.GetTempPath(), $"anno-v462-dds-{Guid.NewGuid():N}.zip");
+        try
+        {
+            using (var archive = ZipFile.Open(temp, ZipArchiveMode.Create))
+            {
+                var first = archive.CreateEntry("tint/0.dds");
+                using (var stream = first.Open()) stream.Write(new byte[] { 1, 2, 3 });
+                var second = archive.CreateEntry("tint/1.dds");
+                using (var stream = second.Open()) stream.Write(new byte[] { 4, 5 });
+            }
+
+            var reader = new ZipArchiveReader();
+            var received = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+            reader.ProcessEntriesBytes(temp, new[] { "tint/0.dds", "tint/1.dds" }, (path, bytes) => received[path] = bytes);
+
+            Assert.Equal(new byte[] { 1, 2, 3 }, received["tint/0.dds"]);
+            Assert.Equal(new byte[] { 4, 5 }, received["tint/1.dds"]);
         }
         finally
         {
@@ -153,6 +312,79 @@ public sealed class SmokeTests
         Assert.False(expanded[(0 * 5) + 1]);
         Assert.False(expanded[(4 * 5) + 1]);
         Assert.Equal(6, ActiveMapGridMaskCodec.CountActiveCells(expanded));
+    }
+
+    [Fact]
+    public void ProjectTextRegenerator_WaterMask_Does_Not_Keep_An_Underwater_Collision_Halo()
+    {
+        var rawHeights = new[] { 0.20f, -0.10f, -1.0f, -4.0f }
+            .Select(TerrainHeightEncoding.WorldHeightToGameDataRaw)
+            .Select(static value => (float)value)
+            .ToArray();
+        var project = new IslandProject
+        {
+            Metadata = new IslandMetadata { MapSize = 4 },
+            Root = new IslandRootDefinition
+            {
+                MapSize = 4,
+                ActiveMapGrid = new Int2(1, 1),
+                ActiveMapRect = new RectI(0, 0, 8, 8),
+                ActiveMapGridBits = new List<uint> { 1 }
+            },
+            GameData = new GameDataDefinition
+            {
+                TerrainHeightMap = new CoarseHeightMap
+                {
+                    Width = 4,
+                    Height = 2,
+                    SampleEncoding = TerrainHeightSampleEncoding.GameDataRawUInt16,
+                    Samples = rawHeights.Concat(rawHeights).ToArray()
+                }
+            },
+            RawContent = new RawProjectContent
+            {
+                GameDataText = "<GameData><TerrainManager><HeightMap><Width>4</Width><Height>2</Height><HeightMap>0 0 0 0 0 0 0 0</HeightMap></HeightMap></TerrainManager><WorldManager><Water><x>4</x><y>1</y><bits>15</bits></Water></WorldManager></GameData>"
+            }
+        };
+
+        new ProjectTextRegenerator().RegenerateGameDataText(project);
+
+        var water = Regex.Match(project.RawContent.GameDataText!, @"<Water>(?<body>.*?)</Water>", RegexOptions.Singleline).Groups["body"].Value;
+        Assert.Contains("<bits>1</bits>", water);
+    }
+
+    [Fact]
+    public void Exporter_Omits_Terrain_Pages_Suppressed_By_The_Drawn_Footprint()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "Anno1800IslandToolTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        var sourceZip = Path.Combine(tempDir, "source.zip");
+        using (var archive = ZipFile.Open(sourceZip, ZipArchiveMode.Create))
+        {
+            using (var writer = new StreamWriter(archive.CreateEntry("island/meshes/2/0x0.xml").Open())) writer.Write("<mesh />");
+            using (var writer = new StreamWriter(archive.CreateEntry("island/keep.txt").Open())) writer.Write("keep");
+        }
+
+        var project = new IslandProject
+        {
+            Metadata = new IslandMetadata { SourceArchivePath = sourceZip, ProjectName = "island" }
+        };
+        project.SuppressedTerrainPagePaths.Add("island/meshes/2/0x0.xml");
+        var outputZip = Path.Combine(tempDir, "export.zip");
+
+        new IslandExporter().Export(project, outputZip, new ExportOptions
+        {
+            FailOnValidationErrors = false,
+            IncludeValidationReport = false,
+            IncludeProjectSummary = false,
+            IncludeExportManifest = false,
+            AddGeneratedTerrainEntriesWhenMissing = false,
+            IncludeTerrainDirtyAreaReport = false
+        });
+
+        using var exported = ZipFile.OpenRead(outputZip);
+        Assert.Null(exported.GetEntry("island/meshes/2/0x0.xml"));
+        Assert.NotNull(exported.GetEntry("island/keep.txt"));
     }
 
     [Fact]
@@ -378,6 +610,26 @@ public sealed class SmokeTests
     }
 
     [Fact]
+    public void Editor_Replaces_Slots_Collapses_Duplicate_SlotObjects_Blocks()
+    {
+        const string rawRoot = "<Content><MapSize>192 192</MapSize><ActiveMapGrid><x>24</x><y>24</y></ActiveMapGrid><ActiveMapRect>0 0 192 192</ActiveMapRect><ObjectMetaInfo><SlotObjects><None /></SlotObjects><SlotObjects><None /></SlotObjects><SlotObjects><None /></SlotObjects></ObjectMetaInfo></Content>";
+        var project = new IslandProject
+        {
+            Root = new IslandRootDefinition(),
+            RawContent = new RawProjectContent { RootText = rawRoot }
+        };
+
+        new IslandProjectEditor().ReplaceSlotObjects(project, new List<SlotObjectDefinition>
+        {
+            new() { ObjectId = 7, ObjectGuid = "1000253", Position = new Float3(8, 1, 8) }
+        });
+
+        Assert.Equal(1, Regex.Matches(project.RawContent.RootText, @"<SlotObjects>").Count);
+        Assert.Equal(1, Regex.Matches(project.RawContent.RootText, @"<ObjectId>").Count);
+        Assert.Contains("<ObjectId>7</ObjectId>", project.RawContent.RootText);
+    }
+
+    [Fact]
     public void ConservativeExporter_Copies_Source_Archive_And_Adds_Report()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "Anno1800IslandToolTests", Guid.NewGuid().ToString("N"));
@@ -445,6 +697,38 @@ public sealed class SmokeTests
         Assert.True(state.NormalPreview.HasPixels);
         Assert.True(state.TintPreview.HasPixels);
         Assert.NotEmpty(state.AffectedPages);
+    }
+
+    [Fact]
+    public void NormalPreview_V4617_Refreshes_From_Authoritative_Map_Before_Export()
+    {
+        var original = new CoarseHeightMap
+        {
+            Width = 9,
+            Height = 9,
+            Samples = new float[81]
+        };
+        var authoritative = new CoarseHeightMap
+        {
+            Width = 9,
+            Height = 9,
+            Samples = Enumerable.Range(0, 81)
+                .Select(index => (float)((index % 9) * (index / 9)))
+                .ToArray()
+        };
+        var project = new IslandProject
+        {
+            GameData = new GameDataDefinition { TerrainHeightMap = original }
+        };
+        var regenerator = new LocalTerrainDerivativeRegenerator();
+        var bounds = new RectI(0, 0, 8, 8);
+        var state = regenerator.RegenerateAroundBounds(project, original, "Mesh", null, bounds, bounds, 0);
+        var before = state.NormalPreview.PixelsBgra32.ToArray();
+
+        regenerator.GenerateInterpretedNormalMapWrites(project, authoritative, state);
+
+        Assert.True(state.NormalPreview.HasPixels);
+        Assert.False(before.SequenceEqual(state.NormalPreview.PixelsBgra32));
     }
 
 
@@ -1126,6 +1410,35 @@ public sealed class SmokeTests
     }
 
     [Fact]
+    public void TerrainMaterialPainter_CellPredicate_Protects_Cells_Outside_Footprint()
+    {
+        var map = new TerrainMaterialMap
+        {
+            Width = 4,
+            Height = 4,
+            MaterialIdBlockSize = 2,
+            PackedMaterialIds = Enumerable.Repeat(TerrainMaterialPackEncoding.EncodeMaterialIds(new[] { 2, 3, 4, 5, 6, 7 }), 4).ToArray(),
+            PackedMaterialAlphas = Enumerable.Repeat(TerrainMaterialPackEncoding.EncodeMaterialAlphas(new[] { 31, 0, 0, 0, 0, 0 }), 16).ToArray()
+        };
+
+        var result = TerrainMaterialPainter.PaintBrush(map, 1, 1, new TerrainMaterialBrushOptions
+        {
+            MaterialId = 8,
+            Radius = 2,
+            Strength = 31,
+            Mode = TerrainMaterialBrushMode.ReplaceDominant,
+            UseFalloff = false,
+            CellPredicate = (x, y) => x == 1 && y == 1
+        });
+
+        Assert.True(result.HasChanges);
+        Assert.Equal(8, map.GetDominantMaterialId(1, 1));
+        Assert.Equal(2, map.GetDominantMaterialId(0, 0));
+        Assert.Equal(2, map.GetDominantMaterialId(2, 2));
+        Assert.Equal(1, result.CellsVisited);
+    }
+
+    [Fact]
     public void Editor_ReplaceTerrainMaterialMap_Regenerates_Rd3d_Material_Blocks()
     {
         var map = new TerrainMaterialMap
@@ -1499,6 +1812,91 @@ public sealed class SmokeTests
         Assert.True(rebuilt.Normal.Y > 0.99f);
         Assert.True(Math.Abs(rebuilt.Normal.X) < 0.02f);
         Assert.True(Math.Abs(rebuilt.Normal.Z) < 0.02f);
+    }
+
+    [Fact]
+    public void ConservativeMeshRegeneration_V464_Changes_Height_Without_Rebuilding_Shader_Attributes()
+    {
+        var key = new TerrainPageKey(2, 0, 0);
+        var sourceVertices = new[]
+        {
+            new MeshVertex { RawValues = new[] { 0, MeshVertex.EncodeWorldHeight(1f), 0, -15169, -386, 8046, 28288, -29183 } },
+            new MeshVertex { RawValues = new[] { 100, MeshVertex.EncodeWorldHeight(2f), 0, 1234, 2345, 3456, 4567, 5678 } },
+            new MeshVertex { RawValues = new[] { 0, MeshVertex.EncodeWorldHeight(3f), 100, -1234, -2345, -3456, -4567, -5678 } }
+        };
+        var page = new MeshPage
+        {
+            Key = key,
+            OriginalRelativePath = "meshes/2/0x0.xml",
+            HasEditablePayload = true,
+            HasDecodedPayload = true,
+            ContainsStructuredMeshPayload = true,
+            VertexStride = 8,
+            ProbableHeightComponentIndex = 1,
+            Clusters =
+            {
+                new MeshCluster
+                {
+                    Vertices = sourceVertices.ToList(),
+                    Indices = { 0, 1, 2 }
+                }
+            }
+        };
+        var project = new IslandProject
+        {
+            Rd3d = new Rd3dDefinition { GridWidth = 100, GridHeight = 100, UnitScale = 1f },
+            MeshPages = { [key] = page }
+        };
+        var map = new CoarseHeightMap
+        {
+            Width = 2,
+            Height = 2,
+            SampleEncoding = TerrainHeightSampleEncoding.WorldUnits,
+            Samples = new[] { 5f, 5f, 5f, 5f }
+        };
+
+        var method = typeof(LocalTerrainDerivativeRegenerator).GetMethod(
+            "BuildConservativeMeshPageWrite",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+        var write = Assert.IsType<RegeneratedMeshPageWrite>(method!.Invoke(
+            null,
+            new object?[] { project, page, map, new RectI(0, 0, 1, 1), new MeshRegenerationOptions { RebuildSurfaceAttributes = false }, null }));
+        var regenerated = new MeshPageReader().Read("generated.xml", key, write.XmlText, retainRawText: false);
+        var outputVertices = Assert.Single(regenerated.Clusters).Vertices;
+
+        Assert.Equal(sourceVertices.Length, outputVertices.Count);
+        for (var index = 0; index < sourceVertices.Length; index++)
+        {
+            Assert.Equal(MeshVertex.EncodeWorldHeight(5f), outputVertices[index].Raw1);
+            Assert.Equal(sourceVertices[index].RawValues.Skip(3).Take(5), outputVertices[index].RawValues.Skip(3).Take(5));
+        }
+    }
+
+    [Fact]
+    public void ExpandedMeshRegeneration_V4616_Removes_Triangle_That_Crosses_Footprint_Boundary()
+    {
+        var cluster = new MeshCluster
+        {
+            Vertices =
+            {
+                new MeshVertex { RawValues = new[] { 0, 0, 0, 0, 0, 0, 0, 0 } },
+                new MeshVertex { RawValues = new[] { 100, 0, 0, 0, 0, 0, 0, 0 } },
+                new MeshVertex { RawValues = new[] { 0, 0, 100, 0, 0, 0, 0, 0 } }
+            },
+            Indices = { 0, 1, 2 }
+        };
+        var method = typeof(LocalTerrainDerivativeRegenerator).GetMethod(
+            "FilterClusterToActiveFootprint",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+
+        // Le centroïde (33,33) est actif, mais le triangle dépasse largement vers
+        // l'eau. L'ancien contrôle du seul centroïde le conservait entièrement.
+        method!.Invoke(null, new object[] { cluster, (Func<double, double, bool>)((x, z) => x < 50d && z < 50d) });
+
+        Assert.Empty(cluster.Vertices);
+        Assert.Empty(cluster.Indices);
     }
 
 

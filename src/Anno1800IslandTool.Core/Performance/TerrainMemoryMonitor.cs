@@ -38,9 +38,9 @@ public static class TerrainMemoryMonitor
         var processorCount = TerrainComputeScheduler.MaxDegreeOfParallelism;
         var baseSize = mode switch
         {
-            TerrainMemoryMode.LowMemory => Math.Max(8, processorCount),
-            TerrainMemoryMode.Speed => Math.Max(64, processorCount * 8),
-            _ => Math.Max(24, processorCount * 3)
+            TerrainMemoryMode.LowMemory => Math.Clamp(processorCount / 2, 8, 16),
+            TerrainMemoryMode.Speed => Math.Clamp(processorCount * 4, 64, 128),
+            _ => Math.Clamp(processorCount * 2, 24, 64)
         };
 
         return Math.Clamp(baseSize, 1, totalPages);

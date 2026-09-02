@@ -10,4 +10,8 @@
     <ProjectReference Include="..\Anno1800IslandTool.Core\Anno1800IslandTool.Core.csproj" />
     <ProjectReference Include="..\Anno1800IslandTool.Formats\Anno1800IslandTool.Formats.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\MaterialSets\*.xml" />
+  </ItemGroup>
 </Project>

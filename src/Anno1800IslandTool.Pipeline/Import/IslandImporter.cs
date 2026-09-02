@@ -26,6 +26,7 @@ public sealed class IslandImporter : IIslandReader
     private readonly NormalMapPageReader _normalMapPageReader = new();
     private readonly DdsInfoReader _ddsInfoReader = new();
     private readonly DefaultMaterialSetResolver _materialResolver = new();
+    private readonly EmbeddedMaterialSetLibrary _embeddedMaterialSetLibrary = new();
     private readonly IslandValidator _validator = new();
 
     public IslandProject Read(string archivePath)
@@ -35,7 +36,8 @@ public sealed class IslandImporter : IIslandReader
     {
         options ??= new ImportOptions();
 
-        var entries = _discovery.Classify(_zipReader.ReadIndex(archivePath)).ToList();
+        using var archive = _zipReader.OpenSession(archivePath);
+        var entries = _discovery.Classify(archive.ReadIndex()).ToList();
         var discovered = _structureDetector.Detect(entries);
 
         var project = new IslandProject
@@ -65,7 +67,7 @@ public sealed class IslandImporter : IIslandReader
 
         if (!string.IsNullOrWhiteSpace(discovered.RootIslandXmlPath))
         {
-            var rootText = ReadZipText(archivePath, discovered.RootIslandXmlPath);
+            var rootText = archive.ReadEntryText(discovered.RootIslandXmlPath);
             project.RawContent.RootText = rootText;
             project.Root = _rootReader.Read(rootText);
             project.Metadata.MapSize = project.Root.MapSize;
@@ -80,14 +82,14 @@ public sealed class IslandImporter : IIslandReader
 
         if (!string.IsNullOrWhiteSpace(discovered.Rd3dPath))
         {
-            var rd3dText = ReadZipText(archivePath, discovered.Rd3dPath);
+            var rd3dText = archive.ReadEntryText(discovered.Rd3dPath);
             project.RawContent.Rd3dText = rd3dText;
             project.Rd3d = _rd3dReader.Read(rd3dText);
         }
 
         if (!string.IsNullOrWhiteSpace(discovered.GameDataPath))
         {
-            var gameDataText = ReadZipText(archivePath, discovered.GameDataPath);
+            var gameDataText = archive.ReadEntryText(discovered.GameDataPath);
             project.RawContent.GameDataText = gameDataText;
             project.GameData = _gameDataReader.Read(gameDataText);
         }
@@ -95,10 +97,10 @@ public sealed class IslandImporter : IIslandReader
         project.EffectiveMaterialSetName = _materialResolver.ResolveEffectiveName(project.Rd3d);
         project.Metadata.UsesDefaultMaterialSet = string.IsNullOrWhiteSpace(project.Rd3d.MaterialSetFileName);
 
-        LoadMaterialSet(project, archivePath, entries, discovered, options);
-        LoadMeshPages(project, archivePath, discovered.MeshPagePaths, options);
-        LoadNormalMapPages(project, archivePath, discovered.NormalMapPagePaths, options);
-        LoadTintMapPages(project, archivePath, discovered.TintMapPagePaths);
+        LoadMaterialSet(project, archivePath, archive, entries, discovered, options);
+        LoadMeshPages(project, archive, discovered.MeshPagePaths, options);
+        LoadNormalMapPages(project, archive, discovered.NormalMapPagePaths, options);
+        LoadTintMapPages(project, archive, discovered.TintMapPagePaths);
 
         if (options.CompactAfterImport)
         {
@@ -112,22 +114,34 @@ public sealed class IslandImporter : IIslandReader
     private void LoadMaterialSet(
         IslandProject project,
         string archivePath,
+        ZipArchiveReader.ZipArchiveReadSession archive,
         IReadOnlyCollection<ArchiveEntryIndex> entries,
         DiscoveredIslandFiles discovered,
         ImportOptions options)
     {
-        var desiredFileName = project.EffectiveMaterialSetName;
+        var desiredFileName = EmbeddedMaterialSetLibrary.NormalizeFileName(project.EffectiveMaterialSetName);
 
-        var archiveMaterialPath =
-            discovered.MaterialSetPath ??
-            entries
-                .Where(e => e.Kind == FileKind.MaterialSetXml)
-                .Select(e => e.RelativePath)
-                .FirstOrDefault(p => Path.GetFileName(p).Equals(desiredFileName, StringComparison.OrdinalIgnoreCase));
+        // Ordre v45.2 modifiée :
+        // 1) materialset exact présent dans l'archive de l'île ;
+        // 2) materialset exact fourni en fichier loose ;
+        // 3) materialset vanilla embarqué dans le programme.
+        // Le nom vient toujours de rd3d.xml/MaterialSetFileName ; si absent,
+        // DefaultMaterialSetResolver garde le fallback terra_01.xml.
+        var archiveMaterialPath = entries
+            .Where(e => e.RelativePath.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
+            .Select(e => e.RelativePath)
+            .FirstOrDefault(p => Path.GetFileName(p).Equals(desiredFileName, StringComparison.OrdinalIgnoreCase));
+
+        if (string.IsNullOrWhiteSpace(archiveMaterialPath) &&
+            !string.IsNullOrWhiteSpace(discovered.MaterialSetPath) &&
+            Path.GetFileName(discovered.MaterialSetPath).Equals(desiredFileName, StringComparison.OrdinalIgnoreCase))
+        {
+            archiveMaterialPath = discovered.MaterialSetPath;
+        }
 
         if (!string.IsNullOrWhiteSpace(archiveMaterialPath))
         {
-            var materialText = ReadZipText(archivePath, archiveMaterialPath);
+            var materialText = archive.ReadEntryText(archiveMaterialPath);
             project.RawContent.MaterialSetText = materialText;
             project.MaterialSet = _materialSetReader.Read(Path.GetFileName(archiveMaterialPath), materialText);
             project.MaterialSetFilePath = archiveMaterialPath;
@@ -141,10 +155,22 @@ public sealed class IslandImporter : IIslandReader
             project.RawContent.MaterialSetText = materialText;
             project.MaterialSet = _materialSetReader.Read(Path.GetFileName(loosePath), materialText);
             project.MaterialSetFilePath = loosePath;
+            return;
+        }
+
+        if (_embeddedMaterialSetLibrary.TryRead(desiredFileName, out var embeddedMaterialText))
+        {
+            project.RawContent.MaterialSetText = embeddedMaterialText;
+            project.MaterialSet = _materialSetReader.Read(desiredFileName, embeddedMaterialText);
+            project.MaterialSetFilePath = $"embedded://MaterialSets/{desiredFileName}";
         }
     }
 
-    private void LoadMeshPages(IslandProject project, string archivePath, IEnumerable<string> meshPagePaths, ImportOptions options)
+    private void LoadMeshPages(
+        IslandProject project,
+        ZipArchiveReader.ZipArchiveReadSession archive,
+        IEnumerable<string> meshPagePaths,
+        ImportOptions options)
     {
         var pages = meshPagePaths
             .Select(path => TryParseTerrainPageKey(path, "meshes", out var key) ? (Path: path, Key: key, Valid: true) : (Path: path, Key: default, Valid: false))
@@ -173,17 +199,16 @@ public sealed class IslandImporter : IIslandReader
         }
 
         var batchSize = TerrainMemoryMonitor.ResolvePageImportBatchSize(options.MemoryMode, options.TerrainPageImportBatchSize, pages.Count);
-        for (var offset = 0; offset < pages.Count; offset += batchSize)
+        var pagesByPath = pages.ToDictionary(item => item.Path, StringComparer.OrdinalIgnoreCase);
+        archive.ProcessEntriesTextBatched(pages.Select(item => item.Path), batchSize, payloads =>
         {
-            var batch = pages.Skip(offset).Take(batchSize).ToList();
-            var payloads = _zipReader.ReadEntriesBytes(archivePath, batch.Select(item => item.Path));
+            var batch = payloads.Keys.Select(path => pagesByPath[path]).ToList();
             var parsed = new MeshPage[batch.Count];
 
             TerrainComputeScheduler.For(0, batch.Count, 16, index =>
             {
                 var item = batch[index];
-                var text = Encoding.UTF8.GetString(payloads[item.Path]);
-                parsed[index] = new MeshPageReader().Read(item.Path, item.Key, text, options.RetainRawPageText);
+                parsed[index] = new MeshPageReader().Read(item.Path, item.Key, payloads[item.Path], options.RetainRawPageText);
             });
 
             for (var index = 0; index < batch.Count; index++)
@@ -191,14 +216,14 @@ public sealed class IslandImporter : IIslandReader
                 project.MeshPages[batch[index].Key] = parsed[index];
             }
 
-            if (options.MemoryMode == TerrainMemoryMode.LowMemory)
-            {
-                TerrainMemoryMonitor.CompactIfRequested(options.MemoryMode);
-            }
-        }
+        });
     }
 
-    private void LoadNormalMapPages(IslandProject project, string archivePath, IEnumerable<string> normalMapPagePaths, ImportOptions options)
+    private void LoadNormalMapPages(
+        IslandProject project,
+        ZipArchiveReader.ZipArchiveReadSession archive,
+        IEnumerable<string> normalMapPagePaths,
+        ImportOptions options)
     {
         var pages = normalMapPagePaths
             .Select(path => TryParseTerrainPageKey(path, "normalmaps", out var key) ? (Path: path, Key: key, Valid: true) : (Path: path, Key: default, Valid: false))
@@ -225,17 +250,16 @@ public sealed class IslandImporter : IIslandReader
         }
 
         var batchSize = TerrainMemoryMonitor.ResolvePageImportBatchSize(options.MemoryMode, options.TerrainPageImportBatchSize, pages.Count);
-        for (var offset = 0; offset < pages.Count; offset += batchSize)
+        var pagesByPath = pages.ToDictionary(item => item.Path, StringComparer.OrdinalIgnoreCase);
+        archive.ProcessEntriesTextBatched(pages.Select(item => item.Path), batchSize, payloads =>
         {
-            var batch = pages.Skip(offset).Take(batchSize).ToList();
-            var payloads = _zipReader.ReadEntriesBytes(archivePath, batch.Select(item => item.Path));
+            var batch = payloads.Keys.Select(path => pagesByPath[path]).ToList();
             var parsed = new NormalMapPage[batch.Count];
 
             TerrainComputeScheduler.For(0, batch.Count, 16, index =>
             {
                 var item = batch[index];
-                var text = Encoding.UTF8.GetString(payloads[item.Path]);
-                parsed[index] = new NormalMapPageReader().Read(item.Path, item.Key, text, options.RetainRawPageText);
+                parsed[index] = new NormalMapPageReader().Read(item.Path, item.Key, payloads[item.Path], options.RetainRawPageText);
             });
 
             for (var index = 0; index < batch.Count; index++)
@@ -243,14 +267,13 @@ public sealed class IslandImporter : IIslandReader
                 project.NormalMapPages[batch[index].Key] = parsed[index];
             }
 
-            if (options.MemoryMode == TerrainMemoryMode.LowMemory)
-            {
-                TerrainMemoryMonitor.CompactIfRequested(options.MemoryMode);
-            }
-        }
+        });
     }
 
-    private void LoadTintMapPages(IslandProject project, string archivePath, IEnumerable<string> tintMapPagePaths)
+    private void LoadTintMapPages(
+        IslandProject project,
+        ZipArchiveReader.ZipArchiveReadSession archive,
+        IEnumerable<string> tintMapPagePaths)
     {
         var pages = tintMapPagePaths
             .Select(path => TryParseTerrainPageKey(path, "tintmaps", out var key) ? (Path: path, Key: key, Valid: true) : (Path: path, Key: default, Valid: false))
@@ -262,11 +285,10 @@ public sealed class IslandImporter : IIslandReader
             return;
         }
 
-        var payloads = _zipReader.ReadEntriesBytes(archivePath, pages.Select(item => item.Path));
-        for (var index = 0; index < pages.Count; index++)
+        var pagesByPath = pages.ToDictionary(item => item.Path, StringComparer.OrdinalIgnoreCase);
+        archive.ProcessEntriesBytes(pages.Select(item => item.Path), (path, bytes) =>
         {
-            var item = pages[index];
-            var bytes = payloads[item.Path];
+            var item = pagesByPath[path];
             var ddsInfo = _ddsInfoReader.ReadInfo(bytes);
 
             project.TintMapPages[item.Key] = new TintMapPage
@@ -280,11 +302,8 @@ public sealed class IslandImporter : IIslandReader
                 PitchOrLinearSize = ddsInfo.PitchOrLinearSize,
                 RawDdsBytes = bytes
             };
-        }
+        });
     }
-
-    private string ReadZipText(string archivePath, string entryPath)
-        => Encoding.UTF8.GetString(_zipReader.ReadEntryBytes(archivePath, entryPath));
 
     private static bool TryParseTerrainPageKey(string path, string folderName, out TerrainPageKey key)
     {

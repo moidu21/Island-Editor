@@ -67,6 +67,9 @@ public static class DdsDxt1TextureConverter
         => bytes.Length >= 128 && IsDds(bytes) && (ReadInt32(bytes, 80) & 0x00000004) != 0 &&
            bytes[84] == (byte)'D' && bytes[85] == (byte)'X' && bytes[86] == (byte)'T' && bytes[87] == (byte)'1';
 
+    public static byte[] EncodeBgra32ToClassicDxt1(int width, int height, byte[] pixelsBgra32)
+        => BuildDxt1Dds(width, height, pixelsBgra32 ?? Array.Empty<byte>());
+
     private static bool IsDds(byte[] bytes)
         => bytes.Length >= 4 && bytes[0] == (byte)'D' && bytes[1] == (byte)'D' && bytes[2] == (byte)'S' && bytes[3] == (byte)' ';
 

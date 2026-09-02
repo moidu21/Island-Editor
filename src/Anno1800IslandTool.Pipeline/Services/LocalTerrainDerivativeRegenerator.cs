@@ -979,6 +979,10 @@ public sealed class LocalTerrainDerivativeRegenerator
         IReadOnlyList<(NormalMapPage Page, RectI Bounds, bool ForcedFullRebuild)> pageInputs,
         string summaryTitle)
     {
+        // v46.17 : la heightmap autoritaire peut être remplacée par la version dérivée
+        // du mesh après la création initiale de l'état. L'aperçu doit suivre la map qui
+        // sert réellement à générer les normalmaps, sans attendre un export/rechargement.
+        state.NormalPreview = BuildSyntheticNormalPreview(workingMap, state.ExpandedSampleBounds);
         if (pageInputs.Count == 0)
         {
             state.GeneratedNormalMapWrites = new List<RegeneratedNormalMapWrite>();
@@ -1047,7 +1051,9 @@ public sealed class LocalTerrainDerivativeRegenerator
         SampleRegionWorld(project, map, samplingBounds, Math.Max(page.DownsampledWidth, page.DownsampledHeight), heightSampler, out var samples, out var width, out var height);
         if (samples.Length == 0 || width <= 0 || height <= 0)
         {
-            return DecodeUtf8(page.DownsampledData);
+            return page.DownsampledSamples is { Length: > 0 }
+                ? string.Join(" ", page.DownsampledSamples.Select(value => value.ToString(CultureInfo.InvariantCulture)))
+                : DecodeUtf8(page.DownsampledData);
         }
 
         var targetWidth = Math.Max(1, page.DownsampledWidth);
@@ -1066,7 +1072,9 @@ public sealed class LocalTerrainDerivativeRegenerator
     {
         if (level.Width <= 0 || level.Height <= 0)
         {
-            return DecodeUtf8(level.RawData);
+            return level.QuantizedSamples is { Length: > 0 }
+                ? string.Join(" ", level.QuantizedSamples.Select(value => value.ToString(CultureInfo.InvariantCulture)))
+                : DecodeUtf8(level.RawData);
         }
 
         // v26.2 : certaines height/normal pages Anno 1800 ont un dernier niveau de delta
@@ -1922,6 +1930,10 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
     {
         var sourceCluster = clusterIndex < page.Clusters.Count ? page.Clusters[clusterIndex] : new MeshCluster();
         var rebuiltCluster = BuildHeightOnlyClusterFromOriginal(project, sourceCluster, map, options, heightSampler);
+        if (hasActiveMask && activeWorldPredicate is not null)
+        {
+            FilterClusterToActiveFootprint(rebuiltCluster, activeWorldPredicate);
+        }
 
         var col = clusterIndex % clusterGridWidth;
         var row = clusterIndex / clusterGridWidth;
@@ -1952,6 +1964,88 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
     rebuilt.DeclaredClusterCount = Math.Max(page.DeclaredClusterCount, rebuilt.Clusters.Count);
     rebuilt.DecodeNotes = (rebuilt.DecodeNotes + " v42 : extension injectée par cluster depuis ActiveMapGrid.bits, topologie source conservée.").Trim();
     return rebuilt;
+}
+
+private static void FilterClusterToActiveFootprint(MeshCluster cluster, Func<double, double, bool> isActive)
+{
+    if (cluster.Vertices.Count == 0 || cluster.Indices.Count < 3)
+    {
+        cluster.Vertices.Clear();
+        cluster.Indices.Clear();
+        cluster.GroundObjects.Clear();
+        return;
+    }
+
+    var keptTriangles = new List<(int A, int B, int C)>();
+    var used = new HashSet<int>();
+    for (var index = 0; index + 2 < cluster.Indices.Count; index += 3)
+    {
+        var a = cluster.Indices[index];
+        var b = cluster.Indices[index + 1];
+        var c = cluster.Indices[index + 2];
+        if (a < 0 || b < 0 || c < 0 || a >= cluster.Vertices.Count || b >= cluster.Vertices.Count || c >= cluster.Vertices.Count)
+        {
+            continue;
+        }
+
+        var va = cluster.Vertices[a];
+        var vb = cluster.Vertices[b];
+        var vc = cluster.Vertices[c];
+        var centerX = (va.X + vb.X + vc.X) / 3.0;
+        var centerZ = (va.Z + vb.Z + vc.Z) / 3.0;
+
+        // v46.16 : un test limité au centre laissait survivre de grands triangles
+        // des LOD lointains dès que leur centroïde touchait une cellule active. Le
+        // reste du triangle dépassait alors dans l'eau sous forme de dalles ou de
+        // rectangles. Tester aussi chaque sommet, très légèrement ramené vers le
+        // centroïde, garde les triangles situés sur la limite exacte tout en retirant
+        // ceux qui traversent réellement l'empreinte.
+        const double inward = 0.0025;
+        static (double X, double Z) Inset(MeshVertex vertex, double cx, double cz)
+            => (vertex.X + ((cx - vertex.X) * inward), vertex.Z + ((cz - vertex.Z) * inward));
+        var pa = Inset(va, centerX, centerZ);
+        var pb = Inset(vb, centerX, centerZ);
+        var pc = Inset(vc, centerX, centerZ);
+        if (!isActive(centerX, centerZ) ||
+            !isActive(pa.X, pa.Z) ||
+            !isActive(pb.X, pb.Z) ||
+            !isActive(pc.X, pc.Z))
+        {
+            continue;
+        }
+
+        keptTriangles.Add((a, b, c));
+        used.Add(a);
+        used.Add(b);
+        used.Add(c);
+    }
+
+    if (keptTriangles.Count == 0)
+    {
+        cluster.Vertices.Clear();
+        cluster.Indices.Clear();
+        cluster.GroundObjects.Clear();
+        return;
+    }
+
+    var remap = new Dictionary<int, int>();
+    var vertices = new List<MeshVertex>(used.Count);
+    foreach (var oldIndex in used.OrderBy(value => value))
+    {
+        remap[oldIndex] = vertices.Count;
+        vertices.Add(cluster.Vertices[oldIndex]);
+    }
+
+    var indices = new List<int>(keptTriangles.Count * 3);
+    foreach (var triangle in keptTriangles)
+    {
+        indices.Add(remap[triangle.A]);
+        indices.Add(remap[triangle.B]);
+        indices.Add(remap[triangle.C]);
+    }
+
+    cluster.Vertices = vertices;
+    cluster.Indices = indices;
 }
 
     private static int InferClusterGridWidth(MeshPage page)
@@ -1998,6 +2092,19 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
     addedTriangles = 0;
 
     var step = ResolveExtensionMeshStepRaw(lod, options);
+    var activeGrid = project.Root.ActiveMapGrid;
+    if (activeGrid.X > 0 && activeGrid.Y > 0)
+    {
+        // Chaque cellule générée doit pouvoir suivre une cellule ActiveMapGrid.
+        // Un pas de 512 sur une grille de 256 unités enjambait deux cellules et
+        // recréait une demi-dalle de terrain dans l'eau aux LOD distants.
+        var gridWorldWidth = project.Rd3d.GridWidth > 0 ? project.Rd3d.GridWidth : Math.Max(1, (map.Width - 1) * 16);
+        var gridWorldHeight = project.Rd3d.GridHeight > 0 ? project.Rd3d.GridHeight : Math.Max(1, (map.Height - 1) * 16);
+        var activeCellStep = Math.Max(16, (int)Math.Floor(Math.Min(
+            gridWorldWidth / (double)activeGrid.X,
+            gridWorldHeight / (double)activeGrid.Y)));
+        step = Math.Min(step, activeCellStep);
+    }
     var xCount = Math.Clamp((int)Math.Ceiling((maxX - minX) / step) + 1, 2, 33);
     var zCount = Math.Clamp((int)Math.Ceiling((maxZ - minZ) / step) + 1, 2, 33);
     var xs = BuildRegularAxisValues((int)Math.Round(minX, MidpointRounding.AwayFromZero), (int)Math.Round(maxX, MidpointRounding.AwayFromZero), xCount);
@@ -2123,22 +2230,13 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
             return true;
         }
 
-        var epsX = Math.Max(0.001, Math.Abs(x1 - x0) * 0.001);
-        var epsZ = Math.Max(0.001, Math.Abs(z1 - z0) * 0.001);
-        var minX = Math.Min(x0, x1) + epsX;
-        var maxX = Math.Max(x0, x1) - epsX;
-        var minZ = Math.Min(z0, z1) + epsZ;
-        var maxZ = Math.Max(z0, z1) - epsZ;
-        if (maxX < minX) maxX = minX = (x0 + x1) * 0.5;
-        if (maxZ < minZ) maxZ = minZ = (z0 + z1) * 0.5;
-
         var midX = (x0 + x1) * 0.5;
         var midZ = (z0 + z1) * 0.5;
-        return activeWorldPredicate(midX, midZ)
-               || activeWorldPredicate(minX, minZ)
-               || activeWorldPredicate(maxX, minZ)
-               || activeWorldPredicate(minX, maxZ)
-               || activeWorldPredicate(maxX, maxZ);
+        // v46.16 : le précédent OR sur les quatre coins remplissait une cellule
+        // entière dès qu'un seul coin touchait l'île. Le centre est stable avec le
+        // pas désormais borné à la taille d'une cellule ActiveMapGrid et évite tout
+        // débordement dans l'eau.
+        return activeWorldPredicate(midX, midZ);
     }
 
     private static bool ShouldFillExtensionCell(double x0, double x1, double z0, double z1, IReadOnlyList<FootprintTriangle> footprint, bool useFootprint)
@@ -2272,11 +2370,10 @@ private static int ToSignedUInt16Storage(int value)
     private static RegeneratedMeshPageWrite? BuildConservativeMeshPageWrite(IslandProject project, MeshPage page, CoarseHeightMap map, RectI bounds, MeshRegenerationOptions? options, Func<double, double, float>? heightSampler)
 {
     var effectiveOptions = options ?? new MeshRegenerationOptions();
-    // v43.4 : en validation globale, les shaders terrain lisent Raw4..7 directement.
-    // Après flatten, garder les normales/tangentes vanilla provoque des artefacts angle/distance.
-    // On conserve les UV et on reconstruit seulement normale/tangente depuis la heightmap.
-    effectiveOptions.RebuildSurfaceAttributes = true;
-    effectiveOptions.RawAttributePreset = null;
+    // v46.4 : une édition de hauteur conservatrice ne doit modifier que Raw1.
+    // Raw4..Raw7 contiennent des attributs shader propres au maillage Anno ; les recalculer
+    // sur chaque vertex d'une île existante produit un relief hérissé en jeu. Le recalcul
+    // reste disponible uniquement lorsqu'il est demandé explicitement dans les options.
     effectiveOptions.PreserveNearestRawAttributes = true;
 
     var rebuiltPage = new MeshPage
@@ -2328,7 +2425,7 @@ private static int ToSignedUInt16Storage(int value)
         TargetPath = page.OriginalRelativePath,
         XmlText = xml,
         Comparison = comparison,
-        Summary = $"topologie SOURCE conservée v34.8 LOD2+ bitmask + tintmaps : clusters={rebuiltPage.Clusters.Count}, vtx {originalVertexCount}->{generatedVertexCount}, tris={generatedTriangleCount}, X/Z gérés=mesh courant/édité, indices gérés=mesh courant/édité, vertices gérés=même nombre/ordre courant, UV conservés, Raw4..7 reconstruits depuis heightmap, Δavg={comparison.AverageAbsoluteDelta.ToString("0.###", CultureInfo.InvariantCulture)}, UsedMaterialBits resynchronisés MaterialMap"
+        Summary = $"topologie SOURCE conservée v46.4 LOD2+ bitmask + tintmaps : clusters={rebuiltPage.Clusters.Count}, vtx {originalVertexCount}->{generatedVertexCount}, tris={generatedTriangleCount}, X/Z et indices conservés, Raw1 hauteur synchronisé, Raw3..Raw7 {(effectiveOptions.RebuildSurfaceAttributes ? "reconstruits sur demande" : "préservés à l'identique")}, Δavg={comparison.AverageAbsoluteDelta.ToString("0.###", CultureInfo.InvariantCulture)}, UsedMaterialBits resynchronisés MaterialMap"
     };
 }
 

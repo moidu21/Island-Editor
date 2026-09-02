@@ -154,7 +154,9 @@ internal static class UiProjectHelpers
             return null;
         }
 
-        var values = ParseNumericTokens(Encoding.UTF8.GetString(page.DownsampledData ?? Array.Empty<byte>()));
+        var values = page.DownsampledSamples is { Length: > 0 }
+            ? page.DownsampledSamples.Select(value => (float)value).ToList()
+            : ParseNumericTokens(Encoding.UTF8.GetString(page.DownsampledData ?? Array.Empty<byte>()));
         var expected = page.DownsampledWidth * page.DownsampledHeight;
         if (values.Count < expected)
         {
@@ -342,7 +344,18 @@ internal static class UiProjectHelpers
 
     public static BitmapSource? LoadPreviewBitmap(IslandProject project, string? relativePath)
     {
-        if (string.IsNullOrWhiteSpace(relativePath) || string.IsNullOrWhiteSpace(project.Metadata.SourceArchivePath) || !File.Exists(project.Metadata.SourceArchivePath))
+        if (string.IsNullOrWhiteSpace(relativePath))
+        {
+            return null;
+        }
+
+        var normalized = NormalizePath(relativePath);
+        if (project.GeneratedBinaryFileReplacements.TryGetValue(normalized, out var generated) && generated.Length > 0)
+        {
+            return DecodePreviewBitmap(generated);
+        }
+
+        if (string.IsNullOrWhiteSpace(project.Metadata.SourceArchivePath) || !File.Exists(project.Metadata.SourceArchivePath))
         {
             return null;
         }
@@ -365,6 +378,17 @@ internal static class UiProjectHelpers
         stream.CopyTo(memory);
         memory.Position = 0;
 
+        return DecodePreviewBitmap(memory.ToArray());
+    }
+
+    private static BitmapSource? DecodePreviewBitmap(byte[] bytes)
+    {
+        if (bytes.Length == 0)
+        {
+            return null;
+        }
+
+        using var memory = new MemoryStream(bytes, writable: false);
         var image = new BitmapImage();
         image.BeginInit();
         image.CacheOption = BitmapCacheOption.OnLoad;

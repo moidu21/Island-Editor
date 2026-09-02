@@ -1,192 +1,197 @@
-name: Build and Release
+name: Build and publish a release
 
+# Ce workflow ne possède volontairement aucun déclencheur automatique.
+# Il ne peut être lancé que depuis Actions > Build and publish a release > Run workflow.
 on:
-  push:
-    branches:
-      - main
-      - master
-    tags:
-      - "v*"
-      - "V*"
-
-  pull_request:
-    branches:
-      - main
-      - master
-
   workflow_dispatch:
     inputs:
-      run_tests:
-        description: "Run tests before packaging"
+      release_tag:
+        description: "Tag de la Release (exemple : v46.19)"
         required: true
-        default: "false"
-        type: choice
-        options:
-          - "false"
-          - "true"
+        type: string
+      release_name:
+        description: "Nom affiché (vide = Anno1800IslandTool + tag)"
+        required: false
+        default: ""
+        type: string
+      release_notes:
+        description: "Notes de version (vide = notes générées par GitHub)"
+        required: false
+        default: ""
+        type: string
+      prerelease:
+        description: "Publier comme préversion"
+        required: true
+        default: false
+        type: boolean
+      run_tests:
+        description: "Exécuter les tests avant de publier"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: write
 
+concurrency:
+  group: manual-release
+  cancel-in-progress: false
+
 env:
-  CONFIGURATION: Release
-  PLATFORM: x64
   DOTNET_VERSION: "8.0.x"
+  CONFIGURATION: Release
+  RUNTIME: win-x64
+  SOLUTION: Anno1800IslandTool.sln
   APP_PROJECT: src/Anno1800IslandTool.UI/Anno1800IslandTool.UI.csproj
   TEST_PROJECT: tests/Anno1800IslandTool.Tests/Anno1800IslandTool.Tests.csproj
-  APP_FOLDER_NAME: Anno1800IslandTool
-  ARTIFACTS_DIR: artifacts
   PUBLISH_DIR: artifacts/publish/win-x64
+  PACKAGE_DIR: artifacts/package
 
 jobs:
-  build:
-    name: Build Windows x64
+  build-and-release:
+    name: Build Windows x64 and publish the requested Release
+    if: github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
+    timeout-minutes: 30
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+      - name: Checkout the selected revision
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v5
+      - name: Validate the requested tag
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $tag = $env:RELEASE_TAG.Trim()
+
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            throw "Le tag de Release est obligatoire."
+          }
+
+          if ($tag -notmatch '^[0-9A-Za-z][0-9A-Za-z._-]*$') {
+            throw "Le tag contient un caractère non autorisé. Exemple accepté : v46.19"
+          }
+
+      - name: Install .NET
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
+          cache: true
+          cache-dependency-path: "**/*.csproj"
 
-      - name: Restore
+      - name: Restore dependencies
         shell: pwsh
-        run: dotnet restore Anno1800IslandTool.sln -p:Platform=$env:PLATFORM
+        run: dotnet restore $env:SOLUTION
 
-      - name: Build
+      - name: Build the software
         shell: pwsh
-        run: >
-          dotnet build Anno1800IslandTool.sln
-          --configuration $env:CONFIGURATION
-          --no-restore
-          -p:Platform=$env:PLATFORM
+        run: dotnet build $env:SOLUTION --configuration $env:CONFIGURATION --no-restore
 
-      - name: Test
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_tests == 'true'
+      - name: Run tests when requested
+        if: inputs.run_tests
         shell: pwsh
-        run: >
+        run: >-
           dotnet test $env:TEST_PROJECT
           --configuration $env:CONFIGURATION
           --no-build
           --no-restore
-          -p:Platform=$env:PLATFORM
           --logger "trx;LogFileName=test-results.trx"
 
-      - name: Publish Windows x64 application
+      - name: Publish the self-contained Windows application
         shell: pwsh
-        run: >
+        run: >-
           dotnet publish $env:APP_PROJECT
           --configuration $env:CONFIGURATION
-          --runtime win-x64
+          --runtime $env:RUNTIME
           --self-contained true
           --output $env:PUBLISH_DIR
-          -p:Platform=$env:PLATFORM
           -p:PublishSingleFile=false
-          -p:IncludeNativeLibrariesForSelfExtract=true
-          -p:EnableCompressionInSingleFile=true
+          -p:DebugType=None
+          -p:DebugSymbols=false
 
-      - name: Prepare release folder
+      - name: Create the ZIP package
+        id: package
         shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           $ErrorActionPreference = "Stop"
 
-          $releaseRoot = Join-Path $env:ARTIFACTS_DIR "release-package"
-          $appFolder = Join-Path $releaseRoot $env:APP_FOLDER_NAME
+          $tag = $env:RELEASE_TAG.Trim()
+          $safeTag = $tag -replace '[^0-9A-Za-z._-]', '-'
+          $zipName = "Anno1800IslandTool-$safeTag-win-x64.zip"
+          $zipPath = Join-Path $env:PACKAGE_DIR $zipName
 
-          if (Test-Path $releaseRoot) {
-            Remove-Item $releaseRoot -Recurse -Force
+          New-Item -ItemType Directory -Path $env:PACKAGE_DIR -Force | Out-Null
+
+          if (Test-Path -LiteralPath $zipPath) {
+            Remove-Item -LiteralPath $zipPath -Force
           }
 
-          New-Item -ItemType Directory -Path $appFolder -Force | Out-Null
+          Compress-Archive `
+            -Path (Join-Path $env:PUBLISH_DIR '*') `
+            -DestinationPath $zipPath `
+            -CompressionLevel Optimal
 
-          Copy-Item -Path "$env:PUBLISH_DIR\*" -Destination $appFolder -Recurse -Force
+          if (-not (Test-Path -LiteralPath $zipPath)) {
+            throw "Le paquet ZIP n'a pas été créé."
+          }
 
-      - name: Create ZIP files
+          "zip_path=$zipPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "zip_name=$zipName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Keep the ZIP as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.zip_name }}
+          path: ${{ steps.package.outputs.zip_path }}
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Create the GitHub Release and attach the ZIP
+        if: github.event_name == 'workflow_dispatch'
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_NAME: ${{ inputs.release_name }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+          IS_PRERELEASE: ${{ inputs.prerelease }}
+          ZIP_PATH: ${{ steps.package.outputs.zip_path }}
         run: |
           $ErrorActionPreference = "Stop"
 
-          $version = if ($env:GITHUB_REF_TYPE -eq "tag") {
-            $env:GITHUB_REF_NAME
-          } else {
-            "dev-${{ github.sha }}"
+          $tag = $env:RELEASE_TAG.Trim()
+          $title = $env:RELEASE_NAME.Trim()
+          if ([string]::IsNullOrWhiteSpace($title)) {
+            $title = "Anno1800IslandTool $tag"
           }
 
-          $appZip = Join-Path $env:ARTIFACTS_DIR "Anno1800IslandTool-$version-win-x64.zip"
-          $sourcesZip = Join-Path $env:ARTIFACTS_DIR "Anno1800IslandTool-$version-sources.zip"
+          $releaseArgs = @(
+            "release", "create", $tag, $env:ZIP_PATH,
+            "--repo", $env:GITHUB_REPOSITORY,
+            "--target", $env:GITHUB_SHA,
+            "--title", $title
+          )
 
-          if (Test-Path $appZip) {
-            Remove-Item $appZip -Force
+          if ($env:IS_PRERELEASE -eq "true") {
+            $releaseArgs += "--prerelease"
           }
 
-          if (Test-Path $sourcesZip) {
-            Remove-Item $sourcesZip -Force
+          if ([string]::IsNullOrWhiteSpace($env:RELEASE_NOTES)) {
+            $releaseArgs += "--generate-notes"
+          }
+          else {
+            $notesPath = Join-Path $env:RUNNER_TEMP "release-notes.txt"
+            [System.IO.File]::WriteAllText($notesPath, $env:RELEASE_NOTES)
+            $releaseArgs += @("--notes-file", $notesPath)
           }
 
-          # ZIP final :
-          # Anno1800IslandTool-vX.X.X-win-x64.zip
-          # └── Anno1800IslandTool/
-          #     ├── Anno1800IslandTool.UI.exe
-          #     ├── *.dll
-          #     └── fichiers nécessaires
-          $releaseRoot = Join-Path $env:ARTIFACTS_DIR "release-package"
-
-          Compress-Archive `
-            -Path "$releaseRoot\*" `
-            -DestinationPath $appZip `
-            -Force
-
-          # Sources :
-          # Anno1800IslandTool-vX.X.X-sources.zip
-          # └── Anno1800IslandTool-sources/
-          #     └── contenu du dépôt
-          $sourceTemp = Join-Path $env:ARTIFACTS_DIR "source-package"
-          $sourceFolder = Join-Path $sourceTemp "Anno1800IslandTool-sources"
-
-          if (Test-Path $sourceTemp) {
-            Remove-Item $sourceTemp -Recurse -Force
+          & gh @releaseArgs
+          if ($LASTEXITCODE -ne 0) {
+            throw "La création de la Release GitHub a échoué. Vérifiez notamment que le tag n'est pas déjà utilisé."
           }
-
-          New-Item -ItemType Directory -Path $sourceFolder -Force | Out-Null
-
-          Get-ChildItem -Path . -Force | ForEach-Object {
-            if ($_.Name -in @(".git", ".vs", "bin", "obj", "artifacts", "TestResults")) {
-              return
-            }
-
-            Copy-Item -Path $_.FullName -Destination $sourceFolder -Recurse -Force
-          }
-
-          Compress-Archive `
-            -Path "$sourceTemp\*" `
-            -DestinationPath $sourcesZip `
-            -Force
-
-      - name: Upload Windows x64 ZIP artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: Anno1800IslandTool-win-x64
-          path: artifacts/*-win-x64.zip
-          if-no-files-found: error
-
-      - name: Upload sources ZIP artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: Anno1800IslandTool-sources
-          path: artifacts/*-sources.zip
-          if-no-files-found: error
-
-      - name: Create GitHub Release
-        if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v3
-        with:
-          name: Anno1800IslandTool ${{ github.ref_name }}
-          tag_name: ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-          files: |
-            artifacts/*-win-x64.zip
-            artifacts/*-sources.zip

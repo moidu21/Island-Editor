@@ -23,15 +23,15 @@ public sealed class IslandExporter : IIslandWriter
         }
 
         var meshWrites = (project.LocalRegeneration?.GeneratedMeshPageWrites ?? new List<RegeneratedMeshPageWrite>())
-            .Where(w => w.HasContent && MatchesTargetedPage(onlyPageKey, w.Key) && IsSupportedGeneratedMeshWrite(w))
+            .Where(w => w.HasContent && !IsSuppressedTerrainPath(project, w.TargetPath) && MatchesTargetedPage(onlyPageKey, w.Key) && IsSupportedGeneratedMeshWrite(w))
             .ToList();
         var normalWrites = (project.LocalRegeneration?.GeneratedNormalMapWrites ?? new List<RegeneratedNormalMapWrite>())
-            .Where(w => w.HasContent && MatchesTargetedPage(onlyPageKey, w.Key))
+            .Where(w => w.HasContent && !IsSuppressedTerrainPath(project, w.TargetPath) && MatchesTargetedPage(onlyPageKey, w.Key))
             .ToList();
         // v39.1 : topologie source/extension active + tintmaps régénérées.
         // Les patchs ciblés exportent à nouveau les tintmaps générées localement.
         var tintWrites = (project.LocalRegeneration?.GeneratedTintMapWrites ?? new List<RegeneratedTintMapWrite>())
-            .Where(w => w.HasContent && MatchesTargetedPage(onlyPageKey, w.Key))
+            .Where(w => w.HasContent && !IsSuppressedTerrainPath(project, w.TargetPath) && MatchesTargetedPage(onlyPageKey, w.Key))
             .ToList();
 
         TerrainMaterialMapCoverageSanitizer.EnsureNoZeroCoverageTexels(project.Rd3d.MaterialMap);
@@ -189,11 +189,19 @@ public sealed class IslandExporter : IIslandWriter
         using var outputArchive = ZipFile.Open(outputArchivePath, ZipArchiveMode.Create);
 
         var replacements = CollectReplacementContent(project, options);
+        foreach (var suppressed in replacements.Keys.Where(path => IsSuppressedTerrainPath(project, path)).ToList())
+        {
+            replacements.Remove(suppressed);
+        }
         var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var sourceEntry in sourceArchive.Entries)
         {
             var normalizedSourcePath = sourceEntry.FullName.Replace('\\', '/');
+            if (IsSuppressedTerrainPath(project, normalizedSourcePath))
+            {
+                continue;
+            }
             var targetPath = BuildTargetArchivePath(project, normalizedSourcePath);
             var targetEntry = outputArchive.CreateEntry(targetPath, CompressionLevel.Optimal);
             writtenPaths.Add(targetPath);
@@ -449,6 +457,14 @@ public sealed class IslandExporter : IIslandWriter
         AddReplacement(replacements, project.Rd3dFilePath, project.RawContent.Rd3dText, options.AddMissingCoreFilesWhenPossible);
         AddReplacement(replacements, project.GameDataFilePath, project.RawContent.GameDataText, options.AddMissingCoreFilesWhenPossible);
         AddReplacement(replacements, project.MaterialSetFilePath, project.RawContent.MaterialSetText, options.AddMissingCoreFilesWhenPossible);
+
+        foreach (var pair in project.GeneratedBinaryFileReplacements)
+        {
+            if (!string.IsNullOrWhiteSpace(pair.Key) && pair.Value is { Length: > 0 })
+            {
+                replacements[pair.Key.Replace('\\', '/')] = pair.Value.ToArray();
+            }
+        }
 
         // v39.1 : les tintmaps sont à nouveau gérées par le pipeline.
         // 1) normalisation DXT1 conservatrice des pages source si nécessaire ;
@@ -1021,6 +1037,23 @@ public sealed class IslandExporter : IIslandWriter
         }
 
         return left.Replace('\\', '/').Equals(right.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSuppressedTerrainPath(IslandProject project, string? path)
+    {
+        if (project.SuppressedTerrainPagePaths.Count == 0 || string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        var normalized = path.Replace('\\', '/').TrimStart('/');
+        return project.SuppressedTerrainPagePaths.Any(candidate =>
+        {
+            var suppressed = candidate.Replace('\\', '/').TrimStart('/');
+            return normalized.Equals(suppressed, StringComparison.OrdinalIgnoreCase) ||
+                   normalized.EndsWith('/' + suppressed, StringComparison.OrdinalIgnoreCase) ||
+                   suppressed.EndsWith('/' + normalized, StringComparison.OrdinalIgnoreCase);
+        });
     }
 
     private static bool ArchiveContainsEntry(ZipArchive archive, string? candidatePath)

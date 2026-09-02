@@ -293,8 +293,13 @@ internal sealed class GameDataAreaObjectsContainer
 
 internal static class GameDataAreaObjectsXmlEditor
 {
-    public static GameDataAreaObjectsSnapshot Extract(string text)
+    public static GameDataAreaObjectsSnapshot Extract(string text, string objectGroupName = "GameObject")
     {
+        if (string.IsNullOrWhiteSpace(objectGroupName))
+        {
+            throw new ArgumentException("Le nom du groupe d'objets est requis.", nameof(objectGroupName));
+        }
+
         var snapshot = new GameDataAreaObjectsSnapshot();
         var containerIndex = 0;
         var areaManagerDataIndex = 0;
@@ -306,7 +311,7 @@ internal static class GameDataAreaObjectsXmlEditor
             foreach (var manager in FindBlocks(areaData.Body, "AreaObjectManager"))
             {
                 var managerBodyBase = areaBodyBase + manager.ContentStart;
-                foreach (var gameObject in FindBlocks(manager.Body, "GameObject"))
+                foreach (var gameObject in FindBlocks(manager.Body, objectGroupName))
                 {
                     var gameObjectBodyBase = managerBodyBase + gameObject.ContentStart;
                     var objectsIndex = 0;

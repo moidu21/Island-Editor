@@ -1,7 +1,7 @@
 <Window x:Class="Anno1800IslandTool.UI.Terrain3DWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Terrain 3D Editor v42 mask-safe extension île"
+        Title="Terrain 3D Editor v46.19 Direct3D 11 - aperçu de plage plein écran"
         Width="1780"
         Height="1020"
         WindowStartupLocation="CenterOwner">
@@ -15,7 +15,8 @@
 
         <WrapPanel Orientation="Horizontal" Margin="0,0,0,10" ItemHeight="30">
             <TextBlock Text="Source 3D" VerticalAlignment="Center"/>
-            <ComboBox x:Name="SourceModeComboBox" Width="250" Margin="8,0,0,0" SelectionChanged="ViewSettingsChanged">
+            <ComboBox x:Name="SourceModeComboBox" Width="285" Margin="8,0,0,0" SelectionChanged="ViewSettingsChanged">
+                <ComboBoxItem Content="LOD brut exact"/>
                 <ComboBoxItem Content="Mesh brut fusionné du LOD"/>
                 <ComboBoxItem Content="Page mesh brute sélectionnée"/>
                 <ComboBoxItem Content="Surface reconstruite lissée du LOD"/>
@@ -35,6 +36,11 @@
             <CheckBox x:Name="IgnoreEmptyPagesCheckBox" Content="Ignorer pages vides" IsChecked="True" Margin="16,4,0,0" Checked="ViewSettingsChanged" Unchecked="ViewSettingsChanged"/>
             <CheckBox x:Name="OnlyDecodedPagesCheckBox" Content="Seulement pages décodées" IsChecked="True" Margin="12,4,0,0" Checked="ViewSettingsChanged" Unchecked="ViewSettingsChanged"/>
             <CheckBox x:Name="InterPageWeldCheckBox" Content="Soudure inter-pages" IsChecked="True" Margin="12,4,0,0" Checked="ViewSettingsChanged" Unchecked="ViewSettingsChanged"/>
+            <CheckBox x:Name="FastLargeIslandModeCheckBox"
+                      Content="Mode grande île (rendu GPU / calcul différé)"
+                      IsChecked="True"
+                      Margin="12,4,0,0"
+                      ToolTip="Conserve le rendu matériel WPF/Direct3D pendant le pinceau et regroupe la reconstruction de scène, les normales, la synchronisation coarse et le rafraîchissement des listes au relâchement. Désactive pour retrouver l'aperçu recalculé pendant chaque mouvement."/>
             <TextBlock Text="Reconstr." Margin="16,0,0,0" VerticalAlignment="Center"/>
             <ComboBox x:Name="ReconstructionMethodComboBox" Width="160" Margin="8,0,0,0" SelectionChanged="ViewSettingsChanged">
                 <ComboBoxItem Content="X/Z uniques"/>
@@ -86,6 +92,7 @@
             <Button Width="110" Height="28" Margin="8,0,0,0" Click="IsoViewButton_Click">Vue iso</Button>
             <Button Width="120" Height="28" Margin="8,0,0,0" Click="FitSceneButton_Click">Cadrer scène</Button>
             <Button Width="140" Height="28" Margin="8,0,0,0" Click="FocusSelectionButton_Click">Cadrer sélection</Button>
+            <Button Width="205" Height="28" Margin="12,0,0,0" Click="OpenDirect3DGpuEditorButton_Click">Éditeur GPU Direct3D 11...</Button>
             <CheckBox x:Name="ShowBrushOnTerrainCheckBox" Content="Rayon 3D sur terrain" IsChecked="True" Margin="12,4,0,0" Checked="BrushSettingsChanged" Unchecked="BrushSettingsChanged" ToolTip="v40.8 : dessine le rayon du pinceau directement sur la surface 3D, en plus du contour écran."/>
             <CheckBox x:Name="AdaptiveTopologyCheckBox" Content="Topologie source v39.1 (X/Z + indices du mesh édité)" IsChecked="False" IsEnabled="False" Margin="16,4,0,0"/>
             <CheckBox x:Name="RebuildSurfaceAttributesCheckBox" Content="Raw3..7 inchangés en v34" IsChecked="False" IsEnabled="False" Margin="12,4,0,0"/>
@@ -187,7 +194,11 @@
                         <DataGridTextColumn Header="LOD" Binding="{Binding Lod}" Width="60"/>
                         <DataGridTextColumn Header="X" Binding="{Binding X}" Width="55"/>
                         <DataGridTextColumn Header="Y" Binding="{Binding Y}" Width="55"/>
-                        <DataGridTextColumn Header="Statut" Binding="{Binding Status}" Width="110"/>
+                        <DataGridTextColumn Header="Statut" Binding="{Binding Status}" Width="100"/>
+                        <DataGridTextColumn Header="Clusters" Binding="{Binding Clusters}" Width="70"/>
+                        <DataGridTextColumn Header="Vertices" Binding="{Binding Vertices}" Width="80"/>
+                        <DataGridTextColumn Header="Indices" Binding="{Binding Indices}" Width="80"/>
+                        <DataGridTextColumn Header="Triangles" Binding="{Binding Triangles}" Width="80"/>
                         <DataGridTextColumn Header="Résumé" Binding="{Binding Summary}" Width="*"/>
                     </DataGrid.Columns>
                 </DataGrid>

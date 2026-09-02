@@ -58,6 +58,11 @@ public static class TerrainMaterialPainter
                     continue;
                 }
 
+                if (options.CellPredicate is not null && !options.CellPredicate(x, y))
+                {
+                    continue;
+                }
+
                 result.CellsVisited++;
                 var influence = options.UseFalloff
                     ? Math.Max(0.05, 1.0 - (distance / Math.Max(1, radius)))

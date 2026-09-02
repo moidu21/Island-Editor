@@ -1048,13 +1048,12 @@ public sealed class ProjectTextRegenerator
         public bool[] TreeAllowed { get; init; } = Array.Empty<bool>();
     }
 
-    // v28.5 : le tag WorldManager/Water n'est pas seulement un masque "terre sèche".
-    // Les îles vanilla gardent un halo côtier sous le niveau de l'eau, utilisé notamment
-    // par la logique de côte/plage/port. Si l'export coupe ce halo trop près de la ligne
-    // d'eau, le bateau ne voit plus les plages comme zones valides de construction de port.
-    private const float GameDataBaseLandThresholdWorld = -1.0f;
-    private const float GameDataShoreHaloMinWorld = -6.0f;
-    private const int GameDataShoreHaloIterations = 6;
+    // v46.11 : WorldManager/Water est aussi le masque de collision maritime.
+    // Les plages vanilla de moderate_l_10 basculent de 1 à 0 dès que la hauteur passe
+    // sous le niveau de l'eau (environ -0.1). L'ancien halo de six cellules gardait au
+    // contraire 8 à 10 cases sous-marines comme « terre » devant une plage générée : le
+    // bateau s'arrêtait trop loin et le comptoir n'était jamais proposé.
+    private const float GameDataBaseLandThresholdWorld = 0.0f;
     private const float GameDataBuildableMinWorld = -7.75f;
     private const float GameDataBuildableMaxWorld = 11.0f;
     private const float GameDataBuildableMaxSlope = 0.65f;
@@ -1112,7 +1111,6 @@ public sealed class ProjectTextRegenerator
         var active = new bool[cellCount];
         var land = new bool[cellCount];
         var baseLand = new bool[cellCount];
-        var shoreCandidate = new bool[cellCount];
         var buildable = new bool[cellCount];
         var treeAllowed = new bool[cellCount];
         var heights = new float[cellCount];
@@ -1147,12 +1145,9 @@ public sealed class ProjectTextRegenerator
                 heights[idx] = h;
                 slopes[idx] = slope;
                 baseLand[idx] = isActive && h > GameDataBaseLandThresholdWorld;
-                shoreCandidate[idx] = isActive && h > GameDataShoreHaloMinWorld;
                 land[idx] = baseLand[idx];
             }
         }
-
-        DilateGameDataLandMaskInPlace(land, shoreCandidate, width, height, GameDataShoreHaloIterations);
 
         for (var i = 0; i < cellCount; i++)
         {
@@ -1677,15 +1672,13 @@ public sealed class ProjectTextRegenerator
     private static string ReplaceSlotObjects(string text, IReadOnlyList<SlotObjectDefinition> slots)
     {
         var generated = BuildSlotObjectsBlock(slots);
+        // Les anciennes versions pouvaient insérer un nouveau bloc à chaque
+        // régénération. On repart toujours d'un texte débarrassé de tous les
+        // SlotObjects afin de garantir un singleton propre dans ObjectMetaInfo.
+        text = RemoveAllBalancedBlocks(text, "SlotObjects");
         if (string.IsNullOrWhiteSpace(generated))
         {
-            return RemoveBalancedBlock(text, "SlotObjects");
-        }
-
-        var replaced = ReplaceBalancedBlock(text, "SlotObjects", generated, wholeBlock: true);
-        if (replaced != text)
-        {
-            return replaced;
+            return text;
         }
 
         var objectMetaBody = ReadBalancedBlock(text, "ObjectMetaInfo");

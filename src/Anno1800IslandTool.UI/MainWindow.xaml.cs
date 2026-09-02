@@ -79,7 +79,7 @@ public partial class MainWindow : Window
         UiLocalizationManager.ApplyToOpenWindows();
     }
 
-    private void OpenArchiveButton_Click(object sender, RoutedEventArgs e)
+    private async void OpenArchiveButton_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFileDialog
         {
@@ -92,22 +92,37 @@ public partial class MainWindow : Window
             return;
         }
 
+        var openButton = sender as Button;
         try
         {
+            if (openButton is not null)
+            {
+                openButton.IsEnabled = false;
+            }
+            Mouse.OverrideCursor = Cursors.Wait;
             var memorySaver = MemorySaverCheckBox?.IsChecked == true;
-            _currentProject = _importer.Import(dialog.FileName, new ImportOptions
+            var importOptions = new ImportOptions
             {
                 ReadPagePayloads = ReadPayloadsCheckBox.IsChecked == true,
-                MemoryMode = memorySaver ? TerrainMemoryMode.Balanced : TerrainMemoryMode.Speed,
-                RetainRawPageText = !memorySaver,
+                MemoryMode = memorySaver ? TerrainMemoryMode.LowMemory : TerrainMemoryMode.Balanced,
+                RetainRawPageText = TerrainMemoryMonitor.RetainRawPageTextByDefault,
                 CompactAfterImport = memorySaver
-            });
+            };
+            _currentProject = await Task.Run(() => _importer.Import(dialog.FileName, importOptions));
 
             RefreshProjectDisplay();
         }
         catch (Exception ex)
         {
             MessageBox.Show(this, ex.ToString(), UiLocalizationManager.T("Erreur d'import"), MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+            if (openButton is not null)
+            {
+                openButton.IsEnabled = true;
+            }
         }
     }
 
@@ -1394,7 +1409,18 @@ public partial class MainWindow : Window
 
     private static BitmapSource? LoadPreviewBitmap(IslandProject project, string? relativePath)
     {
-        if (string.IsNullOrWhiteSpace(relativePath) || !File.Exists(project.Metadata.SourceArchivePath))
+        if (string.IsNullOrWhiteSpace(relativePath))
+        {
+            return null;
+        }
+
+        var normalized = relativePath.Replace('\\', '/');
+        if (project.GeneratedBinaryFileReplacements.TryGetValue(normalized, out var generated) && generated.Length > 0)
+        {
+            return DecodePreviewBitmap(generated);
+        }
+
+        if (!File.Exists(project.Metadata.SourceArchivePath))
         {
             return null;
         }
@@ -1417,6 +1443,17 @@ public partial class MainWindow : Window
         stream.CopyTo(memory);
         memory.Position = 0;
 
+        return DecodePreviewBitmap(memory.ToArray());
+    }
+
+    private static BitmapSource? DecodePreviewBitmap(byte[] bytes)
+    {
+        if (bytes.Length == 0)
+        {
+            return null;
+        }
+
+        using var memory = new MemoryStream(bytes, writable: false);
         var image = new BitmapImage();
         image.BeginInit();
         image.CacheOption = BitmapCacheOption.OnLoad;

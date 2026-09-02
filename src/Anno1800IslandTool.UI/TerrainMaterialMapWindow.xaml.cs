@@ -349,7 +349,7 @@ public partial class TerrainMaterialMapWindow : Window
         InvalidateCoastTransitionBase();
         _isShowingCoastPreview = false;
         BrushPreviewEllipse.Visibility = Visibility.Collapsed;
-        MaterialMapImage.Source = BuildDominantMaterialBitmap(_workingMap);
+        MaterialMapImage.Source = BuildDominantMaterialBitmap(_workingMap, BuildActiveMaterialCellPredicate(_workingMap));
         SummaryTextBox.Text = BuildSummaryText(_project, _workingMap, _editState);
         PaintStatusTextBlock.Text = "Carte matériaux rechargée depuis le projet courant.";
         CellDetailsTextBox.Text = "Image actualisée depuis project.Rd3d.MaterialMap.";
@@ -424,7 +424,7 @@ public partial class TerrainMaterialMapWindow : Window
             CellPattern = usePickup ? _pickedCellPattern!.Clone() : null
         };
 
-        var result = TerrainMaterialPainter.PaintBrush(_workingMap, x, y, options);
+        var result = PaintBrushWithFootprintAndBeachProtection(_workingMap, x, y, options);
         _editState.Add(result, options);
         if (result.HasChanges)
         {
@@ -446,7 +446,7 @@ public partial class TerrainMaterialMapWindow : Window
     {
         _isShowingCoastPreview = false;
         BrushPreviewEllipse.Visibility = Visibility.Collapsed;
-        MaterialMapImage.Source = BuildDominantMaterialBitmap(_workingMap);
+        MaterialMapImage.Source = BuildDominantMaterialBitmap(_workingMap, BuildActiveMaterialCellPredicate(_workingMap));
         SummaryTextBox.Text = BuildSummaryText(_project, _workingMap, _editState);
         if (refreshTables)
         {
@@ -538,7 +538,7 @@ public partial class TerrainMaterialMapWindow : Window
         => PaintModeCheckBox.IsChecked == true;
 
     internal BitmapSource? CreateMaterialMapBitmap()
-        => BuildDominantMaterialBitmap(_workingMap);
+        => BuildDominantMaterialBitmap(_workingMap, BuildActiveMaterialCellPredicate(_workingMap));
 
     internal string BuildMaterialCellDetailsForLargeWindow(int x, int y)
         => BuildCellDetails(x, y);
@@ -554,7 +554,7 @@ public partial class TerrainMaterialMapWindow : Window
 
     internal TerrainMaterialPaintResult PaintMaterialAtFromLargeWindow(int x, int y, TerrainMaterialBrushOptions options)
     {
-        var result = TerrainMaterialPainter.PaintBrush(_workingMap, x, y, options);
+        var result = PaintBrushWithFootprintAndBeachProtection(_workingMap, x, y, options);
         _editState.Add(result, options);
         if (result.HasChanges)
         {
@@ -566,6 +566,48 @@ public partial class TerrainMaterialMapWindow : Window
             SummaryTextBox.Text = BuildSummaryText(_project, _workingMap, _editState);
         }
 
+        return result;
+    }
+
+    private TerrainMaterialPaintResult PaintBrushWithFootprintAndBeachProtection(
+        TerrainMaterialMap map,
+        int centerX,
+        int centerY,
+        TerrainMaterialBrushOptions options)
+    {
+        var activePredicate = BuildActiveMaterialCellPredicate(map);
+        var paintsBeach = options.MaterialId == 1 || options.CellPattern?.ActiveMaterialIds.Contains(1) == true;
+        var protectedBeach = new List<(int X, int Y, TerrainMaterialCellPattern Pattern)>();
+        if (_project.ProtectBeachMaterial && !paintsBeach)
+        {
+            var radius = options.ClampedRadius;
+            for (var y = Math.Max(0, centerY - radius); y <= Math.Min(map.Height - 1, centerY + radius); y++)
+            {
+                for (var x = Math.Max(0, centerX - radius); x <= Math.Min(map.Width - 1, centerX + radius); x++)
+                {
+                    var dx = x - centerX;
+                    var dy = y - centerY;
+                    if ((dx * dx) + (dy * dy) <= radius * radius && map.GetDominantMaterialId(x, y) == 1)
+                    {
+                        protectedBeach.Add((x, y, TerrainMaterialCellPattern.FromCell(map.GetCell(x, y))));
+                    }
+                }
+            }
+        }
+
+        options.CellPredicate = (x, y) =>
+            (activePredicate is null || activePredicate(x, y)) &&
+            (!_project.ProtectBeachMaterial || paintsBeach || map.GetDominantMaterialId(x, y) != 1);
+        var result = TerrainMaterialPainter.PaintBrush(map, centerX, centerY, options);
+        foreach (var protectedCell in protectedBeach)
+        {
+            map.StampCellPattern(protectedCell.X, protectedCell.Y, protectedCell.Pattern, TerrainMaterialPackEncoding.MaxPackedSlotValue);
+        }
+
+        if (protectedBeach.Count > 0)
+        {
+            result.Messages.Add($"Protection plage : {protectedBeach.Count} texel(s) de sable conservé(s).");
+        }
         return result;
     }
 
@@ -596,7 +638,7 @@ public partial class TerrainMaterialMapWindow : Window
         var result = TerrainCoastTransitionPainter.ApplyHeightToMaterialTransition(previewMap, _project.GameData.TerrainHeightMap, options, out var stats, activeMaterialCellPredicate: BuildActiveMaterialCellPredicate(previewMap));
         status = $"Vue seuils : {result.CellsChanged} cellule(s), {result.BlocksChanged} bloc(s). {BuildCoastStatsText(stats)}";
         details = BuildCoastPreviewDetails(options, result, stats);
-        return BuildDominantMaterialBitmap(previewMap);
+        return BuildDominantMaterialBitmap(previewMap, BuildActiveMaterialCellPredicate(previewMap));
     }
 
     internal string ApplyCoastTransitionFromLargeWindow(TerrainCoastTransitionOptions options, out string status)
@@ -799,7 +841,7 @@ public partial class TerrainMaterialMapWindow : Window
             var result = TerrainCoastTransitionPainter.ApplyHeightToMaterialTransition(previewMap, _project.GameData.TerrainHeightMap, options, out var stats, activeMaterialCellPredicate: BuildActiveMaterialCellPredicate(previewMap));
             _isShowingCoastPreview = true;
             BrushPreviewEllipse.Visibility = Visibility.Collapsed;
-            MaterialMapImage.Source = BuildDominantMaterialBitmap(previewMap);
+            MaterialMapImage.Source = BuildDominantMaterialBitmap(previewMap, BuildActiveMaterialCellPredicate(previewMap));
             CoastStatusTextBlock.Text = $"Prévisualisation : {result.CellsChanged} cellule(s), {result.BlocksChanged} bloc(s). {BuildCoastStatsText(stats)}";
             PaintStatusTextBlock.Text = "Prévisualisation affichée seulement. Utilise Rafraîchir stats pour revenir à la copie actuelle, ou Mets à jour l’image peinture depuis seuils.";
             CellDetailsTextBox.Text = BuildCoastPreviewDetails(options, result, stats);
@@ -1053,7 +1095,7 @@ public partial class TerrainMaterialMapWindow : Window
                 ? material.ObjectFileName!
                 : $"Material {material.Id}";
 
-    internal static BitmapSource? BuildDominantMaterialBitmap(TerrainMaterialMap map)
+    internal static BitmapSource? BuildDominantMaterialBitmap(TerrainMaterialMap map, Func<int, int, bool>? activeCellPredicate = null)
     {
         if (map.Width <= 0 || map.Height <= 0 || !map.HasAnyData)
         {
@@ -1065,6 +1107,16 @@ public partial class TerrainMaterialMapWindow : Window
         {
             for (var x = 0; x < map.Width; x++)
             {
+                if (activeCellPredicate is not null && !activeCellPredicate(x, y))
+                {
+                    var inactiveIndex = (y * map.Width + x) * 4;
+                    pixels[inactiveIndex] = 42;
+                    pixels[inactiveIndex + 1] = 28;
+                    pixels[inactiveIndex + 2] = 18;
+                    pixels[inactiveIndex + 3] = 255;
+                    continue;
+                }
+
                 var id = map.GetDominantMaterialId(x, y);
                 var color = GetMaterialColor(id);
                 var idx = (y * map.Width + x) * 4;
