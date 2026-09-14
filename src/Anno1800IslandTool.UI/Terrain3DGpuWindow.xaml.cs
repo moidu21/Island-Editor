@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -25,11 +26,15 @@ namespace Anno1800IslandTool.UI;
 public partial class Terrain3DGpuWindow : Window
 {
     private const float OuterOceanSafetyWidthWorld = 256f;
+    private const int UndoHistoryLimit = 20;
     private readonly IslandProject _project;
     private readonly Func<IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, string>? _applyMaximumExpansion;
     private readonly Func<GpuBeachDefinition, IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, string>? _applyBeachToProject;
     private readonly Func<IReadOnlyList<bool>, IReadOnlyList<GpuFineTerrainStamp>, IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, string>? _applyFootprintToProject;
-    private readonly Func<string>? _validateEntireTerrain;
+    private readonly Func<IReadOnlyList<GpuTreeInstance>, string>? _applyTreesToProject;
+    private readonly Func<int, IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, string>? _validateEntireTerrain;
+    private readonly Func<GpuObjTerrainImportDefinition, string>? _importObjTerrain;
+    private bool _isValidatingTerrain;
     private readonly DefaultEffectsManager _effectsManager;
     private readonly string _adapterName;
     private readonly Dictionary<MeshVertex, int> _positionByVertex = new(ReferenceEqualityComparer.Instance);
@@ -39,6 +44,7 @@ public partial class Terrain3DGpuWindow : Window
     private readonly HashSet<string> _originalModifiedSections;
     private bool _originalIsModified;
     private HxMeshGeometry3D? _geometry;
+    private TerrainRayIndex? _terrainRayIndex;
     private TerrainBrushSpatialIndex? _spatialIndex;
     private IReadOnlyList<MeshPage> _loadedPages = Array.Empty<MeshPage>();
     private CancellationTokenSource? _loadCancellation;
@@ -56,6 +62,9 @@ public partial class Terrain3DGpuWindow : Window
     private float _minimumDecodedHeight;
     private float _sceneHeightScale = 1f;
     private bool _hasLastBrushPoint;
+    private bool _brushHoverRefreshQueued;
+    private readonly System.Windows.Threading.DispatcherTimer _brushPointerTrackingTimer;
+    private double _lastBrushScreenRadius = 36d;
     private Vector3 _lastBrushPoint;
     private bool _hasPickedHeight;
     private float _pickedHeight;
@@ -66,14 +75,28 @@ public partial class Terrain3DGpuWindow : Window
     private Vector3 _beachEndPoint;
     private int _beachSelectionStep;
     private BeachDragMode _beachDragMode;
-    private Vector3 _beachDragAnchor;
-    private Vector3 _beachDragOriginalStart;
-    private Vector3 _beachDragOriginalEnd;
     private bool _hasDirectProjectCommit;
     private bool[] _projectFootprintMask = Array.Empty<bool>();
     private bool[] _workingFootprintMask = Array.Empty<bool>();
     private bool _footprintDirty;
     private readonly List<GpuFineTerrainStamp> _pendingFineTerrainStamps = new();
+    private readonly List<GpuTreeInstance> _pendingTreeInstances = new();
+    private Vector3 _lastTreeStampCenter;
+    private bool _hasLastTreeStampCenter;
+    private readonly Stack<GpuToolSnapshot> _undoHistory = new();
+    private readonly Stack<GpuToolSnapshot> _redoHistory = new();
+    private GpuToolSnapshot? _activeHistoryAction;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeCursorPoint
+    {
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorPos(out NativeCursorPoint point);
 
     public Terrain3DGpuWindow(
         IslandProject project,
@@ -81,19 +104,30 @@ public partial class Terrain3DGpuWindow : Window
         Func<IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, string>? applyMaximumExpansion = null,
         Func<GpuBeachDefinition, IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, string>? applyBeachToProject = null,
         Func<IReadOnlyList<bool>, IReadOnlyList<GpuFineTerrainStamp>, IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, string>? applyFootprintToProject = null,
-        Func<string>? validateEntireTerrain = null)
+        Func<IReadOnlyList<GpuTreeInstance>, string>? applyTreesToProject = null,
+        Func<int, IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, string>? validateEntireTerrain = null,
+        Func<GpuObjTerrainImportDefinition, string>? importObjTerrain = null)
     {
         _project = project ?? throw new ArgumentNullException(nameof(project));
         _applyMaximumExpansion = applyMaximumExpansion;
         _applyBeachToProject = applyBeachToProject;
         _applyFootprintToProject = applyFootprintToProject;
+        _applyTreesToProject = applyTreesToProject;
         _validateEntireTerrain = validateEntireTerrain;
+        _importObjTerrain = importObjTerrain;
         _originalTouchedPages = new Dictionary<TerrainPageKey, int>(_project.HeightEditState.MeshVerticesTouched);
         _originalModifiedSections = new HashSet<string>(_project.ModifiedSections, StringComparer.OrdinalIgnoreCase);
         _originalIsModified = _project.IsModified;
         (_effectsManager, _adapterName) = CreateEffectsManager();
 
         InitializeComponent();
+        PreviewKeyDown += Terrain3DGpuWindow_PreviewKeyDown;
+        _brushPointerTrackingTimer = new System.Windows.Threading.DispatcherTimer(
+            System.Windows.Threading.DispatcherPriority.Input)
+        {
+            Interval = TimeSpan.FromMilliseconds(16)
+        };
+        _brushPointerTrackingTimer.Tick += BrushPointerTrackingTimer_Tick;
         GpuViewport.EffectsManager = _effectsManager;
         GpuViewport.Camera = new HxPerspectiveCamera
         {
@@ -106,10 +140,11 @@ public partial class Terrain3DGpuWindow : Window
         };
         TerrainModel.Material = new PhongMaterial
         {
-            DiffuseColor = new Color4(0.38f, 0.58f, 0.76f, 1f),
+            DiffuseColor = new Color4(0.72f, 0.72f, 0.72f, 1f),
             AmbientColor = new Color4(0.16f, 0.20f, 0.25f, 1f),
             SpecularColor = new Color4(0.18f, 0.20f, 0.24f, 1f),
-            SpecularShininess = 18f
+            SpecularShininess = 18f,
+            VertexColorBlendingFactor = 0.88f
         };
         FootprintHitPlaneModel.Material = new PhongMaterial
         {
@@ -130,7 +165,13 @@ public partial class Terrain3DGpuWindow : Window
         UpdateNavigationBinding();
         PopulateLods(preferredLod);
         _initializing = false;
-        Loaded += async (_, _) => await ReloadGpuGeometryAsync();
+        Loaded += async (_, _) =>
+        {
+            UiLocalizationManager.ApplyTo(this);
+            _brushPointerTrackingTimer.Start();
+            await ReloadGpuGeometryAsync();
+            UiLocalizationManager.ApplyTo(this);
+        };
     }
 
     public bool ProjectWasChanged => _hasDirectProjectCommit || (_committed && (_originalRaw1.Count > 0 || MaximumIslandExpansionRequested));
@@ -143,8 +184,15 @@ public partial class Terrain3DGpuWindow : Window
             .Select(pair => (pair.Key, pair.Value.MinX, pair.Value.MinZ, pair.Value.MaxX, pair.Value.MaxZ))
             .ToList();
 
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        if (_isValidatingTerrain) e.Cancel = true;
+        base.OnClosing(e);
+    }
+
     protected override void OnClosed(EventArgs e)
     {
+        _brushPointerTrackingTimer.Stop();
         _loadCancellation?.Cancel();
         _loadCancellation?.Dispose();
         _loadCancellation = null;
@@ -155,6 +203,7 @@ public partial class Terrain3DGpuWindow : Window
 
         TerrainModel.Geometry = null;
         _geometry = null;
+        _terrainRayIndex = null;
         _spatialIndex = null;
         _positionByVertex.Clear();
         _bindingsByPosition.Clear();
@@ -188,6 +237,7 @@ public partial class Terrain3DGpuWindow : Window
     {
         if (!_initializing && IsLoaded)
         {
+            ResetUndoHistory();
             await ReloadGpuGeometryAsync();
         }
     }
@@ -222,14 +272,18 @@ public partial class Terrain3DGpuWindow : Window
             normals.AddRange(build.Normals);
             var indices = new IntCollection(build.Indices.Length);
             indices.AddRange(build.Indices);
+            var colors = new Color4Collection(build.Colors.Length);
+            colors.AddRange(build.Colors);
 
             _geometry = new HxMeshGeometry3D
             {
                 IsDynamic = true,
                 Positions = positions,
                 Normals = normals,
+                Colors = colors,
                 Indices = indices
             };
+            _terrainRayIndex = TerrainRayIndex.Build(build.Positions, build.Indices);
             _loadedPages = pages;
             _spatialIndex = build.SpatialIndex;
             _sceneBounds = build.Bounds;
@@ -259,15 +313,12 @@ public partial class Terrain3DGpuWindow : Window
             UpdateFootprintPreview();
             stopwatch.Stop();
             FitCamera(build.Bounds);
-            if (GetBrushMode() is not (GpuBrushMode.Navigation or GpuBrushMode.Beach) && _hasLastBrushPoint)
+            if (GetBrushMode() != GpuBrushMode.Navigation && _hasLastBrushPoint)
             {
                 UpdateBrushRing(_lastBrushPoint);
                 ScheduleBrushRingRefresh();
             }
-            if (MaximumIslandExpansionRequested)
-            {
-                DrawMaximumAreaBoundary();
-            }
+            DrawMaximumAreaBoundary();
             StatusTextBlock.Text = BuildStatusText(build.Positions.Length, build.Indices.Length / 3, stopwatch.Elapsed);
         }
         catch (OperationCanceledException)
@@ -312,6 +363,7 @@ public partial class Terrain3DGpuWindow : Window
             return new GpuBuildData(
                 Array.Empty<Vector3>(),
                 Array.Empty<Vector3>(),
+                Array.Empty<Color4>(),
                 Array.Empty<GpuVertexBinding>(),
                 Array.Empty<int>(),
                 emptySpatialIndex,
@@ -408,11 +460,15 @@ public partial class Terrain3DGpuWindow : Window
             ? new GpuBounds(Vector3.Zero, Vector3.One)
             : new GpuBounds(min, max);
         var normals = ComputeVertexNormals(positions, indices);
+        var colors = positions
+            .Select(position => HeightColor(minDecodedHeight + (position.Y / Math.Max(0.000001f, sceneHeightScale))))
+            .ToArray();
         var radius = Math.Max(16.0, Math.Max(bounds.Size.X, bounds.Size.Z) / 256.0);
         var spatialIndex = TerrainBrushSpatialIndex.Build(pages, lod, radius);
         return new GpuBuildData(
             positions.ToArray(),
             normals,
+            colors,
             bindings.ToArray(),
             indices.ToArray(),
             spatialIndex,
@@ -420,6 +476,30 @@ public partial class Terrain3DGpuWindow : Window
             sourceVertexCount,
             minDecodedHeight == int.MaxValue ? 0 : minDecodedHeight,
             Math.Max(0.000001f, sceneHeightScale));
+    }
+
+    private static Color4 HeightColor(float decodedHeight)
+    {
+        var worldHeight = TerrainHeightEncoding.LegacyFineHeightToWorldHeight(decodedHeight);
+        ReadOnlySpan<(float Height, Color4 Color)> stops =
+        [
+            (-8f, new Color4(0.03f, 0.12f, 0.30f, 1f)),
+            (-2f, new Color4(0.03f, 0.42f, 0.72f, 1f)),
+            (0f, new Color4(0.20f, 0.68f, 0.76f, 1f)),
+            (0.55f, new Color4(0.88f, 0.76f, 0.43f, 1f)),
+            (4f, new Color4(0.25f, 0.58f, 0.27f, 1f)),
+            (12f, new Color4(0.38f, 0.49f, 0.22f, 1f)),
+            (24f, new Color4(0.47f, 0.35f, 0.24f, 1f)),
+            (48f, new Color4(0.84f, 0.86f, 0.88f, 1f))
+        ];
+        if (worldHeight <= stops[0].Height) return stops[0].Color;
+        for (var i = 1; i < stops.Length; i++)
+        {
+            if (worldHeight > stops[i].Height) continue;
+            var t = (worldHeight - stops[i - 1].Height) / (stops[i].Height - stops[i - 1].Height);
+            return Color4.Lerp(stops[i - 1].Color, stops[i].Color, t);
+        }
+        return stops[^1].Color;
     }
 
     private static (int A, int B, int C) SortTriangle(int a, int b, int c)
@@ -496,16 +576,10 @@ public partial class Terrain3DGpuWindow : Window
         }
 
         var mode = GetBrushMode();
+        BeginToolHistoryAction();
         _lastBrushPoint = args.HitTestResult.PointHit;
         _hasLastBrushPoint = true;
-        if (mode == GpuBrushMode.Beach)
-        {
-            BrushRingModel.IsRendering = false;
-        }
-        else
-        {
-            UpdateBrushRing(_lastBrushPoint);
-        }
+        UpdateBrushRing(_lastBrushPoint);
         if (mode is GpuBrushMode.AddFootprint or GpuBrushMode.RemoveFootprint)
         {
             _isPainting = true;
@@ -514,7 +588,7 @@ public partial class Terrain3DGpuWindow : Window
             e.Handled = true;
             return;
         }
-        if (mode == GpuBrushMode.Beach)
+        if (IsBeachMode(mode))
         {
             if (!TryBeginBeachDrag(args.HitTestResult.PointHit))
             {
@@ -553,52 +627,27 @@ public partial class Terrain3DGpuWindow : Window
         e.Handled = true;
     }
 
-    private void GpuViewport_MouseMove3D(object sender, RoutedEventArgs e)
-    {
-        if (GetBrushMode() == GpuBrushMode.Navigation || e is not MouseMove3DEventArgs args || args.HitTestResult is null)
-        {
-            return;
-        }
-
-        _lastBrushPoint = args.HitTestResult.PointHit;
-        _hasLastBrushPoint = true;
-        if (GetBrushMode() == GpuBrushMode.Beach)
-        {
-            BrushRingModel.IsRendering = false;
-        }
-        else
-        {
-            UpdateBrushRing(_lastBrushPoint);
-        }
-    }
-
     private void GpuViewport_MouseMove(object sender, MouseEventArgs e)
     {
         if (GetBrushMode() == GpuBrushMode.Navigation)
         {
-            BrushRingModel.IsRendering = false;
+            HideBrushOverlay();
             return;
         }
 
-        var hit = FindEditableSurfaceHit(e.GetPosition(GpuViewport));
+        var pointer = e.GetPosition(GpuViewport);
+        UpdateBrushOverlay(pointer, null);
+        var hit = FindEditableSurfaceHit(pointer);
         if (hit is null)
         {
+            QueueBrushHoverRefresh();
             return;
         }
         _lastBrushPoint = hit.PointHit;
         _hasLastBrushPoint = true;
-        if (GetBrushMode() == GpuBrushMode.Beach)
-        {
-            // Le cercle jaune appartient aux pinceaux de relief. Le conserver pour la
-            // plage faisait croire que sa zone était projetée très loin du rivage.
-            BrushRingModel.IsRendering = false;
-        }
-        else
-        {
-            UpdateBrushRing(_lastBrushPoint);
-        }
+        UpdateBrushOverlay(pointer, _lastBrushPoint);
 
-        if (GetBrushMode() == GpuBrushMode.Beach && _beachDragMode != BeachDragMode.None && e.LeftButton == MouseButtonState.Pressed)
+        if (IsBeachMode() && _beachDragMode != BeachDragMode.None && e.LeftButton == MouseButtonState.Pressed)
         {
             UpdateBeachDrag(hit.PointHit);
             return;
@@ -625,7 +674,7 @@ public partial class Terrain3DGpuWindow : Window
 
     private void GpuViewport_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (GetBrushMode() != GpuBrushMode.Beach || e.ChangedButton != MouseButton.Left)
+        if (!IsBeachMode() || e.ChangedButton != MouseButton.Left)
         {
             return;
         }
@@ -642,7 +691,8 @@ public partial class Terrain3DGpuWindow : Window
 
         _lastBrushPoint = hit.PointHit;
         _hasLastBrushPoint = true;
-        BrushRingModel.IsRendering = false;
+        UpdateBrushRing(_lastBrushPoint);
+        BeginToolHistoryAction();
         if (!TryBeginBeachDrag(hit.PointHit))
         {
             if (BeachAutoStraightCheckBox?.IsChecked == true)
@@ -659,20 +709,68 @@ public partial class Terrain3DGpuWindow : Window
 
     private HelixToolkit.SharpDX.HitTestResult? FindEditableSurfaceHit(Point point)
     {
-        var hits = GpuViewport.FindHits(point);
-        var terrain = hits.FirstOrDefault(result => ReferenceEquals(result.ModelHit, TerrainModel));
-        if (terrain is not null)
+        if (GetBrushMode() == GpuBrushMode.Beach)
         {
-            return terrain;
+            return FindBeachScreenHit(point);
+        }
+        // Le rayon CPU indexé est utilisé en premier. Le hit-test MouseMove3D de
+        // Helix pouvait monopoliser le fil d'interface et ne rendre le nouveau
+        // cercle DirectX que plusieurs secondes plus tard.
+        var directTerrainHit = FindTerrainRayHit(point);
+        if (directTerrainHit is not null)
+        {
+            return directTerrainHit;
         }
 
+        var hits = GpuViewport.FindHits(point);
         return GetBrushMode() is GpuBrushMode.AddFootprint or GpuBrushMode.RemoveFootprint or GpuBrushMode.Beach
             ? hits.FirstOrDefault(result => ReferenceEquals(result.ModelHit, FootprintHitPlaneModel))
             : null;
     }
 
+    private bool IsBeachMode() => IsBeachMode(GetBrushMode());
+
+    private static bool IsBeachMode(GpuBrushMode mode)
+        => mode is GpuBrushMode.Beach or GpuBrushMode.MeshBeach;
+
+    private HelixToolkit.SharpDX.HitTestResult? FindTerrainRayHit(Point point)
+    {
+        if (_geometry?.Positions is null || _geometry.Indices is null || _terrainRayIndex is null)
+        {
+            return null;
+        }
+
+        var terrainRay = GpuViewport.UnProject(point);
+        if (!float.IsFinite(terrainRay.Direction.X) ||
+            !float.IsFinite(terrainRay.Direction.Y) ||
+            !float.IsFinite(terrainRay.Direction.Z) ||
+            terrainRay.Direction.LengthSquared() <= 0.000001f)
+        {
+            return null;
+        }
+
+        if (!_terrainRayIndex.TryFindNearest(terrainRay, _geometry.Positions, _geometry.Indices, out var nearestDistance))
+        {
+            return null;
+        }
+
+        return new HelixToolkit.SharpDX.HitTestResult
+        {
+            IsValid = true,
+            Distance = nearestDistance,
+            PointHit = terrainRay.Position + (terrainRay.Direction * nearestDistance),
+            ModelHit = TerrainModel
+        };
+    }
+
     private void GpuViewport_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
+        if (_isPainting)
+        {
+            _overlaySampler = null;
+            UpdateFootprintPreview();
+            UpdateBeachPreview();
+        }
         _isPainting = false;
         if (_beachDragMode != BeachDragMode.None)
         {
@@ -680,46 +778,166 @@ public partial class Terrain3DGpuWindow : Window
         }
         _beachDragMode = BeachDragMode.None;
         _hasFlattenStrokeTarget = false;
+        _hasLastTreeStampCenter = false;
         _lastBrushUploadTimestamp = 0;
         if (Mouse.Captured == GpuViewport)
         {
             Mouse.Capture(null);
         }
+        CompleteToolHistoryAction();
     }
 
     private void GpuViewport_MouseLeave(object sender, MouseEventArgs e)
     {
-        if (GetBrushMode() == GpuBrushMode.Navigation)
+        // Le contrôle DirectX SwapChain peut produire un MouseLeave transitoire
+        // pendant une capture. Le temporisateur décide depuis le vrai curseur Windows.
+    }
+
+    private void GpuViewport_PreviewMouseRightButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton == MouseButton.Right)
         {
-            BrushRingModel.IsRendering = false;
+            QueueBrushHoverRefresh();
         }
+    }
+
+    private void BrushPointerTrackingTimer_Tick(object? sender, EventArgs e)
+    {
+        if (!IsLoaded || GetBrushMode() == GpuBrushMode.Navigation || TerrainModel.Geometry is null)
+        {
+            HideBrushOverlay();
+            return;
+        }
+
+        var pointer = GetActualViewportPointer();
+        if (pointer.X < 0 || pointer.Y < 0 || pointer.X > GpuViewport.ActualWidth || pointer.Y > GpuViewport.ActualHeight)
+        {
+            HideBrushOverlay();
+            return;
+        }
+
+        // La surcouche se déplace immédiatement. Le calcul 3D qui suit ne peut
+        // donc plus immobiliser visuellement la forme à son ancienne position.
+        UpdateBrushOverlay(pointer, null);
+        var hit = FindEditableSurfaceHit(pointer);
+        if (hit is null)
+        {
+            // La position visuelle ne doit jamais dépendre d'un hit-test : même
+            // entre deux états de caméra, la forme reste collée au curseur.
+            UpdateBrushOverlay(pointer, null);
+            return;
+        }
+
+        _lastBrushPoint = hit.PointHit;
+        _hasLastBrushPoint = true;
+        UpdateBrushOverlay(pointer, _lastBrushPoint);
+    }
+
+    private void QueueBrushHoverRefresh()
+    {
+        if (_brushHoverRefreshQueued || GetBrushMode() == GpuBrushMode.Navigation) return;
+        _brushHoverRefreshQueued = true;
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            _brushHoverRefreshQueued = false;
+            if (GetBrushMode() == GpuBrushMode.Navigation) return;
+            var pointer = GetActualViewportPointer();
+            UpdateBrushOverlay(pointer, null);
+            var hit = FindEditableSurfaceHit(pointer);
+            if (hit is null) return;
+            _lastBrushPoint = hit.PointHit;
+            _hasLastBrushPoint = true;
+            UpdateBrushOverlay(pointer, _lastBrushPoint);
+        }), System.Windows.Threading.DispatcherPriority.Render);
     }
 
     private void UpdateBrushRing(Vector3 center)
     {
-        const int segmentCount = 96;
+        var pointer = GetActualViewportPointer();
+        var pointerIsInside = pointer.X >= 0 && pointer.Y >= 0 && pointer.X <= GpuViewport.ActualWidth && pointer.Y <= GpuViewport.ActualHeight;
+        if (!pointerIsInside)
+        {
+            HideBrushOverlay();
+            return;
+        }
+
+        UpdateBrushOverlay(pointer, center);
+    }
+
+    private void UpdateBrushOverlay(Point pointer, Vector3? terrainCenter)
+    {
+        if (GetBrushMode() == GpuBrushMode.Navigation)
+        {
+            HideBrushOverlay();
+            return;
+        }
+
+        const int segmentCount = 72;
         var radius = Math.Max(1.0, BrushRadiusSlider.Value);
-        var positions = new Vector3Collection(segmentCount);
-        var indices = new IntCollection(segmentCount * 2);
+        var points = new PointCollection(segmentCount + 1);
+        Point? projectedCenter = null;
+        if (terrainCenter.HasValue)
+        {
+            var center = terrainCenter.Value;
+            var projected = GpuViewport.Project(new Point3D(center.X, center.Y + 0.8f, center.Z));
+            if (double.IsFinite(projected.X) && double.IsFinite(projected.Y))
+            {
+                projectedCenter = projected;
+            }
+        }
+
+        var projectedDistances = new List<double>(segmentCount);
         for (var segment = 0; segment < segmentCount; segment++)
         {
             var angle = (Math.PI * 2.0 * segment) / segmentCount;
             var boundaryRadius = GetBrushBoundaryRadius(angle, radius);
-            positions.Add(new Vector3(
-                center.X + (float)(Math.Cos(angle) * boundaryRadius),
-                center.Y + 0.8f,
-                center.Z + (float)(Math.Sin(angle) * boundaryRadius)));
-            indices.Add(segment);
-            indices.Add((segment + 1) % segmentCount);
+            Point screenPoint;
+            if (terrainCenter.HasValue && projectedCenter.HasValue)
+            {
+                var center = terrainCenter.Value;
+                var projected = GpuViewport.Project(new Point3D(
+                    center.X + (Math.Cos(angle) * boundaryRadius),
+                    center.Y + 0.8f,
+                    center.Z + (Math.Sin(angle) * boundaryRadius)));
+                if (double.IsFinite(projected.X) && double.IsFinite(projected.Y))
+                {
+                    screenPoint = new Point(
+                        pointer.X + projected.X - projectedCenter.Value.X,
+                        pointer.Y + projected.Y - projectedCenter.Value.Y);
+                    projectedDistances.Add((screenPoint - pointer).Length);
+                }
+                else
+                {
+                    screenPoint = CreateFallbackBrushPoint(pointer, angle, radius, boundaryRadius);
+                }
+            }
+            else
+            {
+                screenPoint = CreateFallbackBrushPoint(pointer, angle, radius, boundaryRadius);
+            }
+            points.Add(screenPoint);
         }
 
-        BrushRingModel.Geometry = new LineGeometry3D
+        if (projectedDistances.Count > segmentCount / 2)
         {
-            Positions = positions,
-            Indices = indices
-        };
-        BrushRingModel.IsRendering = true;
+            _lastBrushScreenRadius = Math.Clamp(projectedDistances.Average(), 8d, 2000d);
+        }
+        points.Add(points[0]);
+        BrushOverlayPolyline.Points = points;
+        BrushOverlayPolyline.Visibility = Visibility.Visible;
     }
+
+    private Point CreateFallbackBrushPoint(Point pointer, double angle, double radius, double boundaryRadius)
+    {
+        var relativeRadius = boundaryRadius / Math.Max(1d, radius);
+        var screenRadius = _lastBrushScreenRadius * relativeRadius;
+        return new Point(
+            pointer.X + (Math.Cos(angle) * screenRadius),
+            pointer.Y + (Math.Sin(angle) * screenRadius));
+    }
+
+    private void HideBrushOverlay()
+        => BrushOverlayPolyline.Visibility = Visibility.Collapsed;
 
     private void ApplyBrush(Vector3 center)
     {
@@ -731,6 +949,12 @@ public partial class Terrain3DGpuWindow : Window
         var mode = GetBrushMode();
         if (mode == GpuBrushMode.Navigation)
         {
+            return;
+        }
+
+        if (mode == GpuBrushMode.Trees)
+        {
+            PlaceTreeStamp(center);
             return;
         }
 
@@ -838,6 +1062,8 @@ public partial class Terrain3DGpuWindow : Window
             {
                 var source = sharedVertices[0].Vertex;
                 _geometry.Positions[positionIndex] = new Vector3(source.X, DecodedHeightToSceneY(source.DecodedHeight), source.Z);
+                if (_geometry.Colors is not null && positionIndex < _geometry.Colors.Count)
+                    _geometry.Colors[positionIndex] = HeightColor(source.DecodedHeight);
                 RecordChangedWorldPoint(GetSelectedLod(), source.X, source.Z);
             }
         }
@@ -848,6 +1074,7 @@ public partial class Terrain3DGpuWindow : Window
         }
 
         _geometry.UpdateVertices();
+        _geometry.UpdateColors();
         stopwatch.Stop();
         _lastUploadDuration = stopwatch.Elapsed;
         foreach (var pair in changedByPage)
@@ -861,37 +1088,9 @@ public partial class Terrain3DGpuWindow : Window
 
     private bool IsProtectedOuterOceanPosition(float worldX, float worldZ)
     {
-        var grid = _project.Root.ActiveMapGrid;
-        if (grid.X <= 0 || grid.Y <= 0 || _workingFootprintMask.Length < grid.X * grid.Y)
-        {
-            return false;
-        }
-
-        var worldWidth = (float)Math.Max(1d, _project.Rd3d.GridWidth > 0
-            ? _project.Rd3d.GridWidth
-            : _project.Root.MapSize * 32d);
-        var worldHeight = (float)Math.Max(1d, _project.Rd3d.GridHeight > 0
-            ? _project.Rd3d.GridHeight
-            : _project.Root.MapSize * 32d);
-        var touchesLeft = false;
-        var touchesRight = false;
-        for (var y = 0; y < grid.Y && (!touchesLeft || !touchesRight); y++)
-        {
-            touchesLeft |= _workingFootprintMask[y * grid.X];
-            touchesRight |= _workingFootprintMask[(y * grid.X) + grid.X - 1];
-        }
-        var touchesTop = false;
-        var touchesBottom = false;
-        for (var x = 0; x < grid.X && (!touchesTop || !touchesBottom); x++)
-        {
-            touchesTop |= _workingFootprintMask[x];
-            touchesBottom |= _workingFootprintMask[((grid.Y - 1) * grid.X) + x];
-        }
-
-        return (touchesLeft && worldX <= OuterOceanSafetyWidthWorld) ||
-               (touchesRight && worldX >= worldWidth - OuterOceanSafetyWidthWorld) ||
-               (touchesTop && worldZ <= OuterOceanSafetyWidthWorld) ||
-               (touchesBottom && worldZ >= worldHeight - OuterOceanSafetyWidthWorld);
+        var width = _project.Rd3d.GridWidth > 0 ? _project.Rd3d.GridWidth : _project.Root.MapSize * 32d;
+        var height = _project.Rd3d.GridHeight > 0 ? _project.Rd3d.GridHeight : _project.Root.MapSize * 32d;
+        return OceanSafetyBorder.Contains(worldX, worldZ, width, height);
     }
 
     private void BrushToolListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -910,15 +1109,15 @@ public partial class Terrain3DGpuWindow : Window
         // terrain a été retiré : le plan de fond fournit alors le point de clic dans l'eau.
         FootprintHitPlaneModel.IsHitTestVisible = mode is GpuBrushMode.AddFootprint or GpuBrushMode.RemoveFootprint or GpuBrushMode.Beach;
         GpuViewport.Cursor = mode == GpuBrushMode.Navigation ? Cursors.Hand : Cursors.Cross;
-        if (mode is GpuBrushMode.Navigation or GpuBrushMode.Beach)
+        if (mode == GpuBrushMode.Navigation)
         {
-            BrushRingModel.IsRendering = false;
+            HideBrushOverlay();
         }
         else if (_hasLastBrushPoint)
         {
             UpdateBrushRing(_lastBrushPoint);
         }
-        if (mode is not (GpuBrushMode.Navigation or GpuBrushMode.Beach))
+        if (mode != GpuBrushMode.Navigation)
         {
             ScheduleBrushRingRefresh();
         }
@@ -934,7 +1133,7 @@ public partial class Terrain3DGpuWindow : Window
                 : "Aplatir exactement : utilise le premier point touché et met tout le disque à cette hauteur.",
             GpuBrushMode.PickHeight => "Prélever : cliquez une fois sur le terrain pour mémoriser cette hauteur.",
             GpuBrushMode.Beach => BeachAutoStraightCheckBox?.IsChecked == true
-                ? "Plage : cliquez une fois près du bord souhaité, extérieur ou intérieur ; la ligne droite et le côté eau sont calculés depuis l’empreinte réelle."
+                ? "Plage : cliquez près du contour vert. Le tronçon orange suit l’empreinte ; étirez ses carrés ou déplacez le losange cyan."
                 : _beachSelectionStep == 0
                     ? "Plage : cliquez la première extrémité du rivage à créer."
                     : "Plage : cliquez la seconde extrémité ; le côté eau sera détecté depuis l’empreinte, y compris dans une baie.",
@@ -942,13 +1141,15 @@ public partial class Terrain3DGpuWindow : Window
                 ? "Ajouter une zone : peignez directement la forme voulue. Seule la partie dessinée est relevée ; le reste du chunk demeure sous l’eau."
                 : "Ajouter une zone : peignez l’emprise autorisée, puis cliquez sur Appliquer l’emprise. Le nouveau terrain démarre sous l’eau.",
             GpuBrushMode.RemoveFootprint => "Retirer une zone : peignez les parties à supprimer. Le mesh, les dérivés et le masque gameplay seront retirés à l’application.",
+            GpuBrushMode.Trees => "Arbres : cliquez ou peignez sur la terre. Le rayon, le motif et la densité déterminent la forêt créée.",
+            GpuBrushMode.MeshBeach => "Plage sur maillage : choisissez directement une ligne où le relief traverse le niveau de la mer, sans utiliser le contour vert de l'empreinte.",
             _ => "Déplacer : bouton gauche ou droit pour tourner, molette maintenue pour déplacer, roulette pour zoomer."
         };
     }
 
     private void BrushRadiusSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (BrushRingModel is not null && _hasLastBrushPoint && GetBrushMode() is not (GpuBrushMode.Navigation or GpuBrushMode.Beach))
+        if (BrushOverlayPolyline is not null && _hasLastBrushPoint && GetBrushMode() != GpuBrushMode.Navigation)
         {
             UpdateBrushRing(_lastBrushPoint);
         }
@@ -956,7 +1157,7 @@ public partial class Terrain3DGpuWindow : Window
 
     private void BrushPatternComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!_initializing && _hasLastBrushPoint && GetBrushMode() is not (GpuBrushMode.Navigation or GpuBrushMode.Beach))
+        if (!_initializing && _hasLastBrushPoint && GetBrushMode() != GpuBrushMode.Navigation)
         {
             UpdateBrushRing(_lastBrushPoint);
         }
@@ -1026,601 +1227,21 @@ public partial class Terrain3DGpuWindow : Window
             : "Aucune hauteur prélevée";
     }
 
-    private void SelectBeachPoint(Vector3 hitPoint)
-    {
-        if (_beachSelectionStep == 0 || !_hasBeachStartPoint)
-        {
-            _beachStartPoint = hitPoint;
-            _hasBeachStartPoint = true;
-            _hasBeachEndPoint = false;
-            _beachSelectionStep = 1;
-            BeachSelectionTextBlock.Text = "Première extrémité mémorisée. Cliquez maintenant la seconde extrémité du rivage.";
-            BeachPreviewFillModel.IsRendering = false;
-            BeachPreviewHaloModel.IsRendering = false;
-            BeachPreviewModel.IsRendering = false;
-            BeachStartHandleModel.IsRendering = false;
-            BeachEndHandleModel.IsRendering = false;
-            BeachMoveHandleModel.IsRendering = false;
-            RefreshActiveToolUi();
-            return;
-        }
-
-        var axis = new Vector2(hitPoint.X - _beachStartPoint.X, hitPoint.Z - _beachStartPoint.Z);
-        if (axis.Length() < 8f)
-        {
-            StatusTextBlock.Text = "Les deux extrémités de la plage doivent être suffisamment espacées.";
-            return;
-        }
-
-        _beachEndPoint = hitPoint;
-        _hasBeachEndPoint = true;
-        _beachSelectionStep = 0;
-        BeachSelectionTextBlock.Text = "Zone prête. Tirez les croix d’extrémité pour l’étendre ou la barre centrale pour la déplacer, puis créez la plage.";
-        UpdateBeachPreview();
-        RefreshActiveToolUi();
-    }
-
-    private void CreateAutomaticBeachSelection(Vector3 hitPoint)
-    {
-        if (!TryReadBeachSettings(out var beachHeight, out _, out _, out var waterWidth) ||
-            !TryReadBeachLength(out var requestedLength))
-        {
-            StatusTextBlock.Text = "Vérifiez la longueur et les dimensions de la plage.";
-            return;
-        }
-
-        var gridWidth = (float)Math.Max(1d, _project.Rd3d.GridWidth > 0 ? _project.Rd3d.GridWidth : _project.Root.MapSize * 32d);
-        var gridHeight = (float)Math.Max(1d, _project.Rd3d.GridHeight > 0 ? _project.Rd3d.GridHeight : _project.Root.MapSize * 32d);
-        var beachY = DecodedHeightToSceneY(beachHeight);
-
-        // v46.16 : sélectionner la frontière actif/inactif la plus proche permet de
-        // trouver aussi les côtes concaves (baies, chenaux et renfoncements). La
-        // version précédente cherchait depuis le centre de l'île et ne pouvait donc
-        // reconnaître que son enveloppe extérieure.
-        if (TryFindNearestFootprintBoundary(hitPoint, out var boundary))
-        {
-            var shorelinePoint = SnapBeachPointToOuterShoreline(hitPoint, force: true, out var snappedToActualShoreline);
-            var shift = snappedToActualShoreline
-                ? new Vector2(shorelinePoint.X, shorelinePoint.Z) - boundary.NearestPoint
-                : Vector2.Zero;
-            // v46.18 : un rivage en escalier est constitué de petits segments.
-            // Limiter la plage au seul segment touché superposait ses trois poignées
-            // en une petite étoile. La longueur demandée est désormais conservée.
-            var center = boundary.NearestPoint + shift;
-            var (start, end) = BuildCenteredBeachSegment(
-                center,
-                boundary.Tangent,
-                (float)requestedLength,
-                gridWidth,
-                gridHeight);
-            _beachStartPoint = new Vector3(start.X, beachY, start.Y);
-            _beachEndPoint = new Vector3(end.X, beachY, end.Y);
-            BeachSelectionTextBlock.Text = snappedToActualShoreline
-                ? "Plage accrochée au rivage réel, y compris dans un renfoncement. Carré vert/rose : étendre ; losange cyan : déplacer."
-                : "Plage accrochée à l’empreinte. Carré vert/rose : étendre ; losange cyan : déplacer.";
-        }
-        else
-        {
-            var shorelinePoint = SnapBeachPointToOuterShoreline(hitPoint, force: true, out _);
-            var side = FindNearestMapSide(shorelinePoint, gridWidth, gridHeight);
-            var tangentLimit = side is BeachMapSide.Left or BeachMapSide.Right ? gridHeight : gridWidth;
-            var length = (float)Math.Min(requestedLength, Math.Max(16f, tangentLimit - 64f));
-            var half = length * 0.5f;
-            if (side is BeachMapSide.Left or BeachMapSide.Right)
-            {
-                var x = side == BeachMapSide.Left ? 0f : gridWidth;
-                var centerZ = Math.Clamp(shorelinePoint.Z, half, gridHeight - half);
-                _beachStartPoint = new Vector3(x, beachY, centerZ - half);
-                _beachEndPoint = new Vector3(x, beachY, centerZ + half);
-            }
-            else
-            {
-                var z = side == BeachMapSide.Top ? 0f : gridHeight;
-                var centerX = Math.Clamp(shorelinePoint.X, half, gridWidth - half);
-                _beachStartPoint = new Vector3(centerX - half, beachY, z);
-                _beachEndPoint = new Vector3(centerX + half, beachY, z);
-            }
-            BeachSelectionTextBlock.Text = "Plage droite prête sur la bordure de secours. Cliquez plus près du contour vert pour utiliser l’empreinte réelle.";
-        }
-
-        _hasBeachStartPoint = true;
-        _hasBeachEndPoint = true;
-        _beachSelectionStep = 0;
-        UpdateBeachPreview();
-        RefreshActiveToolUi();
-    }
-
-    private static BeachMapSide FindNearestMapSide(Vector3 point, float gridWidth, float gridHeight)
-    {
-        var distances = new[]
-        {
-            (Side: BeachMapSide.Left, Distance: Math.Abs(point.X)),
-            (Side: BeachMapSide.Right, Distance: Math.Abs(gridWidth - point.X)),
-            (Side: BeachMapSide.Top, Distance: Math.Abs(point.Z)),
-            (Side: BeachMapSide.Bottom, Distance: Math.Abs(gridHeight - point.Z))
-        };
-        return distances.MinBy(item => item.Distance).Side;
-    }
-
-    private bool TryBeginBeachDrag(Vector3 hitPoint)
-    {
-        if (!_hasBeachStartPoint || !_hasBeachEndPoint)
-        {
-            return false;
-        }
-
-        var hit = new Vector2(hitPoint.X, hitPoint.Z);
-        var start = new Vector2(_beachStartPoint.X, _beachStartPoint.Z);
-        var end = new Vector2(_beachEndPoint.X, _beachEndPoint.Z);
-        var handleRadius = Math.Clamp(Math.Max(_sceneBounds.Size.X, _sceneBounds.Size.Z) / 80f, 48f, 256f);
-        if (Vector2.Distance(hit, start) <= handleRadius)
-        {
-            _beachDragMode = BeachDragMode.Start;
-        }
-        else if (Vector2.Distance(hit, end) <= handleRadius)
-        {
-            _beachDragMode = BeachDragMode.End;
-        }
-        else
-        {
-            var axis = end - start;
-            var lengthSquared = axis.LengthSquared();
-            var t = lengthSquared <= 0.001f ? 0f : Math.Clamp(Vector2.Dot(hit - start, axis) / lengthSquared, 0f, 1f);
-            var nearest = start + axis * t;
-            var moveBand = Math.Max(handleRadius, (float)Math.Min(512d, Math.Max(ReadBeachWidth(BeachLandWidthTextBox), ReadBeachWidth(BeachWaterWidthTextBox))));
-            if (Vector2.Distance(hit, nearest) > moveBand)
-            {
-                return false;
-            }
-            _beachDragMode = BeachDragMode.Move;
-        }
-
-        _beachDragAnchor = hitPoint;
-        _beachDragOriginalStart = _beachStartPoint;
-        _beachDragOriginalEnd = _beachEndPoint;
-        GpuViewport.CaptureMouse();
-        BeachSelectionTextBlock.Text = _beachDragMode == BeachDragMode.Move
-            ? "Déplacement de toute la plage : relâchez la souris à la position souhaitée."
-            : "Étirement de la plage : déplacez cette extrémité puis relâchez la souris.";
-        return true;
-    }
-
-    private void UpdateBeachDrag(Vector3 hitPoint)
-    {
-        var lockStraight = BeachAutoStraightCheckBox?.IsChecked == true;
-        var horizontal = Math.Abs(_beachEndPoint.X - _beachStartPoint.X) >= Math.Abs(_beachEndPoint.Z - _beachStartPoint.Z);
-        switch (_beachDragMode)
-        {
-            case BeachDragMode.Start:
-                _beachStartPoint = lockStraight
-                    ? horizontal
-                        ? new Vector3(hitPoint.X, _beachStartPoint.Y, _beachStartPoint.Z)
-                        : new Vector3(_beachStartPoint.X, _beachStartPoint.Y, hitPoint.Z)
-                    : hitPoint;
-                break;
-            case BeachDragMode.End:
-                _beachEndPoint = lockStraight
-                    ? horizontal
-                        ? new Vector3(hitPoint.X, _beachEndPoint.Y, _beachEndPoint.Z)
-                        : new Vector3(_beachEndPoint.X, _beachEndPoint.Y, hitPoint.Z)
-                    : hitPoint;
-                break;
-            case BeachDragMode.Move:
-                var originalMidpoint = (_beachDragOriginalStart + _beachDragOriginalEnd) * 0.5f;
-                var requestedMidpoint = originalMidpoint + (hitPoint - _beachDragAnchor);
-                var delta = requestedMidpoint - originalMidpoint;
-                // Le déplacement reste libre ; au relâchement, la plage se raccroche
-                // automatiquement au bord actif le plus proche, y compris à l'intérieur.
-                _beachStartPoint = _beachDragOriginalStart + delta;
-                _beachEndPoint = _beachDragOriginalEnd + delta;
-                break;
-        }
-        UpdateBeachPreview();
-    }
-
-    private void FinalizeBeachDrag()
-    {
-        if (BeachAutoStraightCheckBox?.IsChecked == true)
-        {
-            ClampAutomaticBeachSelectionToMap();
-            BeachSelectionTextBlock.Text = "Zone droite ajustée. Vous pouvez encore la déplacer/étirer, puis créer la plage.";
-            UpdateBeachPreview();
-            return;
-        }
-
-        if (BeachSnapToShoreCheckBox?.IsChecked != true)
-        {
-            UpdateBeachPreview();
-            return;
-        }
-
-        if (_beachDragMode == BeachDragMode.Start)
-        {
-            _beachStartPoint = SnapBeachPointToOuterShoreline(_beachStartPoint);
-        }
-        else if (_beachDragMode == BeachDragMode.End)
-        {
-            _beachEndPoint = SnapBeachPointToOuterShoreline(_beachEndPoint);
-        }
-        else if (_beachDragMode == BeachDragMode.Move)
-        {
-            var midpoint = (_beachStartPoint + _beachEndPoint) * 0.5f;
-            var snapped = SnapBeachPointToOuterShoreline(midpoint);
-            var delta = snapped - midpoint;
-            _beachStartPoint += delta;
-            _beachEndPoint += delta;
-        }
-        BeachSelectionTextBlock.Text = "Zone ajustée. Vous pouvez encore la déplacer/étirer, puis créer la plage.";
-        UpdateBeachPreview();
-    }
-
-    private void ClampAutomaticBeachSelectionToMap()
-    {
-        if (!_hasBeachStartPoint || !_hasBeachEndPoint ||
-            !TryReadBeachSettings(out var beachHeight, out _, out _, out var waterWidth))
-        {
-            return;
-        }
-
-        var midpoint = (_beachStartPoint + _beachEndPoint) * 0.5f;
-        if (!TryFindNearestFootprintBoundary(midpoint, out var boundary))
-        {
-            return;
-        }
-
-        var shorelineMidpoint = SnapBeachPointToOuterShoreline(midpoint, force: true, out _);
-        var beachY = DecodedHeightToSceneY(beachHeight);
-        var currentLength = Vector2.Distance(
-            new Vector2(_beachStartPoint.X, _beachStartPoint.Z),
-            new Vector2(_beachEndPoint.X, _beachEndPoint.Z));
-        var shift = new Vector2(shorelineMidpoint.X, shorelineMidpoint.Z) - boundary.NearestPoint;
-        var center = boundary.NearestPoint + shift;
-        var gridWidth = (float)Math.Max(1d, _project.Rd3d.GridWidth > 0 ? _project.Rd3d.GridWidth : _project.Root.MapSize * 32d);
-        var gridHeight = (float)Math.Max(1d, _project.Rd3d.GridHeight > 0 ? _project.Rd3d.GridHeight : _project.Root.MapSize * 32d);
-        var (start, end) = BuildCenteredBeachSegment(
-            center,
-            boundary.Tangent,
-            Math.Max(64f, currentLength),
-            gridWidth,
-            gridHeight);
-        _beachStartPoint = new Vector3(start.X, beachY, start.Y);
-        _beachEndPoint = new Vector3(end.X, beachY, end.Y);
-    }
-
-    private static (Vector2 Start, Vector2 End) BuildCenteredBeachSegment(
-        Vector2 center,
-        Vector2 tangent,
-        float requestedLength,
-        float gridWidth,
-        float gridHeight)
-    {
-        tangent = tangent.LengthSquared() <= 0.0001f
-            ? Vector2.UnitX
-            : Vector2.Normalize(tangent);
-
-        var half = Math.Max(32f, requestedLength * 0.5f);
-        var maximumHalf = half;
-        if (Math.Abs(tangent.X) > 0.0001f)
-        {
-            maximumHalf = Math.Min(maximumHalf, Math.Max(0f, center.X / Math.Abs(tangent.X)));
-            maximumHalf = Math.Min(maximumHalf, Math.Max(0f, (gridWidth - center.X) / Math.Abs(tangent.X)));
-        }
-        if (Math.Abs(tangent.Y) > 0.0001f)
-        {
-            maximumHalf = Math.Min(maximumHalf, Math.Max(0f, center.Y / Math.Abs(tangent.Y)));
-            maximumHalf = Math.Min(maximumHalf, Math.Max(0f, (gridHeight - center.Y) / Math.Abs(tangent.Y)));
-        }
-
-        half = Math.Max(16f, maximumHalf);
-        return (center - (tangent * half), center + (tangent * half));
-    }
-
-    private Vector3 SnapBeachPointToOuterShoreline(Vector3 point)
-        => SnapBeachPointToOuterShoreline(point, force: false, out _);
-
-    private Vector3 SnapBeachPointToOuterShoreline(Vector3 point, bool force, out bool snapped)
-    {
-        snapped = false;
-        if ((!force && BeachSnapToShoreCheckBox?.IsChecked != true) || _spatialIndex is null)
-        {
-            return point;
-        }
-
-        if (!TryFindNearestFootprintBoundary(point, out var boundary))
-        {
-            return point;
-        }
-
-        var hit = new Vector2(point.X, point.Z);
-        var outward = boundary.Outward;
-        var side = boundary.Tangent;
-        var searchRadius = Math.Clamp(Math.Max(_sceneBounds.Size.X, _sceneBounds.Size.Z) / 8f, 512f, 2048f);
-        var corridor = Math.Clamp(searchRadius / 6f, 96f, 384f);
-        var desiredHeight = TryReadBeachSettings(out var beachHeight, out _, out _, out _) ? beachHeight : 64f;
-        var queryCenter = new Vector3(boundary.NearestPoint.X, point.Y, boundary.NearestPoint.Y);
-        var candidates = _spatialIndex.QueryCircle(queryCenter.X, queryCenter.Z, searchRadius);
-        MeshVertex? best = null;
-        var bestScore = double.PositiveInfinity;
-        foreach (var candidate in candidates)
-        {
-            var vertex = candidate.Vertex;
-            var relative = new Vector2(vertex.X - boundary.NearestPoint.X, vertex.Z - boundary.NearestPoint.Y);
-            var along = Vector2.Dot(relative, outward);
-            var perpendicular = Math.Abs(Vector2.Dot(relative, side));
-            if (perpendicular > corridor || along < -searchRadius * 0.55f || along > searchRadius * 0.55f)
-            {
-                continue;
-            }
-
-            var heightDifference = Math.Abs(vertex.DecodedHeight - desiredHeight);
-            var hitDistance = Vector2.Distance(new Vector2(vertex.X, vertex.Z), hit);
-            // Le poids négatif sur "along" privilégie le dernier sommet côté eau.
-            // Contrairement à l'ancienne recherche radiale, la normale vient de la
-            // frontière locale : elle fonctionne donc aussi au fond d'une baie.
-            var score = (heightDifference * 2.5d) + (perpendicular * 0.7d) + (hitDistance * 0.35d) - (along * 0.4d);
-            if (score < bestScore)
-            {
-                bestScore = score;
-                best = vertex;
-            }
-        }
-
-        if (best is null)
-        {
-            // Ne jamais conserver le point de clic brut : dans une grande zone d'eau,
-            // cela décalait toute la plage loin de l'empreinte lorsque aucun sommet de
-            // hauteur compatible n'était trouvé.
-            return new Vector3(
-                boundary.NearestPoint.X,
-                DecodedHeightToSceneY(desiredHeight),
-                boundary.NearestPoint.Y);
-        }
-
-        var bestPoint = new Vector2(best.X, best.Z);
-        var maximumShorelineOffset = Math.Clamp(searchRadius * 0.45f, 256f, 768f);
-        if (Vector2.Distance(bestPoint, boundary.NearestPoint) > maximumShorelineOffset)
-        {
-            return new Vector3(
-                boundary.NearestPoint.X,
-                DecodedHeightToSceneY(desiredHeight),
-                boundary.NearestPoint.Y);
-        }
-
-        snapped = true;
-        return new Vector3(best.X, DecodedHeightToSceneY(best.DecodedHeight), best.Z);
-    }
-
-    private bool TryFindNearestFootprintBoundary(Vector3 point, out FootprintBoundarySelection selection)
-    {
-        selection = default;
-        var grid = _project.Root.ActiveMapGrid;
-        if (grid.X <= 0 || grid.Y <= 0 || _workingFootprintMask.Length < grid.X * grid.Y)
-        {
-            return false;
-        }
-
-        var worldWidth = (float)Math.Max(1d, _project.Rd3d.GridWidth > 0 ? _project.Rd3d.GridWidth : _project.Root.MapSize * 32d);
-        var worldHeight = (float)Math.Max(1d, _project.Rd3d.GridHeight > 0 ? _project.Rd3d.GridHeight : _project.Root.MapSize * 32d);
-        var cellWidth = worldWidth / grid.X;
-        var cellHeight = worldHeight / grid.Y;
-        var edges = new List<FootprintBoundaryEdge>();
-
-        bool Active(int x, int z)
-            => x >= 0 && z >= 0 && x < grid.X && z < grid.Y && _workingFootprintMask[(z * grid.X) + x];
-
-        for (var z = 0; z < grid.Y; z++)
-        {
-            for (var x = 0; x < grid.X; x++)
-            {
-                if (!Active(x, z))
-                {
-                    continue;
-                }
-
-                var x0 = x * cellWidth;
-                var x1 = (x + 1) * cellWidth;
-                var z0 = z * cellHeight;
-                var z1 = (z + 1) * cellHeight;
-                if (!Active(x - 1, z)) edges.Add(new FootprintBoundaryEdge(new Vector2(x0, z0), new Vector2(x0, z1), Vector2.UnitY, -Vector2.UnitX));
-                if (!Active(x + 1, z)) edges.Add(new FootprintBoundaryEdge(new Vector2(x1, z0), new Vector2(x1, z1), Vector2.UnitY, Vector2.UnitX));
-                if (!Active(x, z - 1)) edges.Add(new FootprintBoundaryEdge(new Vector2(x0, z0), new Vector2(x1, z0), Vector2.UnitX, -Vector2.UnitY));
-                if (!Active(x, z + 1)) edges.Add(new FootprintBoundaryEdge(new Vector2(x0, z1), new Vector2(x1, z1), Vector2.UnitX, Vector2.UnitY));
-            }
-        }
-
-        if (edges.Count == 0)
-        {
-            return false;
-        }
-
-        var hit = new Vector2(point.X, point.Z);
-        var bestIndex = -1;
-        var bestPoint = Vector2.Zero;
-        var bestDistanceSquared = float.PositiveInfinity;
-        for (var index = 0; index < edges.Count; index++)
-        {
-            var nearest = NearestPointOnSegment(hit, edges[index].Start, edges[index].End);
-            var distanceSquared = Vector2.DistanceSquared(hit, nearest);
-            if (distanceSquared < bestDistanceSquared)
-            {
-                bestDistanceSquared = distanceSquared;
-                bestIndex = index;
-                bestPoint = nearest;
-            }
-        }
-
-        if (bestIndex < 0)
-        {
-            return false;
-        }
-
-        var best = edges[bestIndex];
-        var horizontal = Math.Abs(best.Tangent.X) > 0.5f;
-        var lineCoordinate = horizontal ? best.Start.Y : best.Start.X;
-        var intervals = edges
-            .Where(edge =>
-                Math.Abs(Vector2.Dot(edge.Tangent, best.Tangent)) > 0.99f &&
-                Vector2.Dot(edge.Outward, best.Outward) > 0.99f &&
-                Math.Abs((horizontal ? edge.Start.Y : edge.Start.X) - lineCoordinate) < 0.01f)
-            .Select(edge => (
-                Min: horizontal ? Math.Min(edge.Start.X, edge.End.X) : Math.Min(edge.Start.Y, edge.End.Y),
-                Max: horizontal ? Math.Max(edge.Start.X, edge.End.X) : Math.Max(edge.Start.Y, edge.End.Y)))
-            .OrderBy(interval => interval.Min)
-            .ToList();
-        var selectedCoordinate = horizontal ? bestPoint.X : bestPoint.Y;
-        var runMin = horizontal ? Math.Min(best.Start.X, best.End.X) : Math.Min(best.Start.Y, best.End.Y);
-        var runMax = horizontal ? Math.Max(best.Start.X, best.End.X) : Math.Max(best.Start.Y, best.End.Y);
-        var changed = true;
-        while (changed)
-        {
-            changed = false;
-            foreach (var interval in intervals)
-            {
-                if (interval.Max < runMin - 0.01f || interval.Min > runMax + 0.01f)
-                {
-                    continue;
-                }
-                var nextMin = Math.Min(runMin, interval.Min);
-                var nextMax = Math.Max(runMax, interval.Max);
-                if (nextMin < runMin - 0.01f || nextMax > runMax + 0.01f)
-                {
-                    runMin = nextMin;
-                    runMax = nextMax;
-                    changed = true;
-                }
-            }
-        }
-
-        if (selectedCoordinate < runMin || selectedCoordinate > runMax)
-        {
-            runMin = selectedCoordinate;
-            runMax = selectedCoordinate;
-        }
-        var runStart = horizontal ? new Vector2(runMin, lineCoordinate) : new Vector2(lineCoordinate, runMin);
-        var runEnd = horizontal ? new Vector2(runMax, lineCoordinate) : new Vector2(lineCoordinate, runMax);
-        selection = new FootprintBoundarySelection(bestPoint, best.Tangent, best.Outward, runStart, runEnd);
-        return true;
-    }
-
-    private static Vector2 NearestPointOnSegment(Vector2 point, Vector2 start, Vector2 end)
-    {
-        var axis = end - start;
-        var lengthSquared = axis.LengthSquared();
-        if (lengthSquared <= 0.0001f)
-        {
-            return start;
-        }
-        var t = Math.Clamp(Vector2.Dot(point - start, axis) / lengthSquared, 0f, 1f);
-        return start + (axis * t);
-    }
-
     private static double ReadBeachWidth(TextBox? textBox)
         => TryParseFlexibleNumber(textBox?.Text, out var value) ? Math.Max(0d, value) : 0d;
 
     private void BeachSettingsTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
-        if (!_initializing && IsLoaded)
+        if (!_initializing && IsLoaded && !_refreshingCoastUi)
         {
+            if (ReferenceEquals(sender, BeachLengthTextBox) && _selectedCoast is not null && TryReadBeachLength(out var length))
+            {
+                var center = _coastStart + _coastLength * .5;
+                _coastLength = Math.Clamp(length, 16, _selectedCoast.Length - 1);
+                _coastStart = center - _coastLength * .5;
+            }
             UpdateBeachPreview();
         }
-    }
-
-    private void UpdateBeachPreview()
-    {
-        if (!_hasBeachStartPoint || !_hasBeachEndPoint ||
-            !TryReadBeachSettings(out var beachHeight, out var waterDepth, out var landWidth, out var waterWidth))
-        {
-            if (BeachPreviewModel is not null)
-            {
-                BeachPreviewFillModel.IsRendering = false;
-                BeachPreviewHaloModel.IsRendering = false;
-                BeachPreviewModel.IsRendering = false;
-                BeachStartHandleModel.IsRendering = false;
-                BeachEndHandleModel.IsRendering = false;
-                BeachMoveHandleModel.IsRendering = false;
-            }
-            return;
-        }
-
-        var start2 = new Vector2(_beachStartPoint.X, _beachStartPoint.Z);
-        var end2 = new Vector2(_beachEndPoint.X, _beachEndPoint.Z);
-        var tangent = Vector2.Normalize(end2 - start2);
-        var midpoint = (start2 + end2) * 0.5f;
-        var outward = ResolveBeachOutwardNormal(tangent, midpoint);
-        var landOffset = outward * -(float)landWidth;
-        var waterOffset = outward * (float)waterWidth;
-        // L'aperçu est un calque de positionnement et non le relief final. Il reste
-        // volontairement au-dessus du point culminant afin de ne jamais être masqué.
-        var sceneSpan = Math.Max(_sceneBounds.Size.X, _sceneBounds.Size.Z);
-        var overlayY = _sceneBounds.Max.Y + Math.Clamp(sceneSpan * 0.015f, 24f, 320f);
-        var beachY = overlayY;
-        var waterY = overlayY;
-        var landY = overlayY;
-        var positions = new Vector3Collection
-        {
-            new(start2.X, beachY, start2.Y), new(end2.X, beachY, end2.Y),
-            new(start2.X + landOffset.X, landY, start2.Y + landOffset.Y), new(end2.X + landOffset.X, landY, end2.Y + landOffset.Y),
-            new(start2.X + waterOffset.X, waterY, start2.Y + waterOffset.Y), new(end2.X + waterOffset.X, waterY, end2.Y + waterOffset.Y),
-            new(start2.X + landOffset.X, landY, start2.Y + landOffset.Y), new(start2.X + waterOffset.X, waterY, start2.Y + waterOffset.Y),
-            new(end2.X + landOffset.X, landY, end2.Y + landOffset.Y), new(end2.X + waterOffset.X, waterY, end2.Y + waterOffset.Y)
-        };
-        var previewGeometry = new LineGeometry3D
-        {
-            Positions = positions,
-            Indices = new IntCollection { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 }
-        };
-        BeachPreviewFillModel.Geometry = BuildBeachPreviewFillGeometry(
-            start2,
-            end2,
-            landOffset,
-            waterOffset,
-            overlayY - 1f);
-        BeachPreviewFillModel.IsRendering = true;
-        BeachPreviewHaloModel.Geometry = previewGeometry;
-        BeachPreviewHaloModel.IsRendering = true;
-        BeachPreviewModel.Geometry = previewGeometry;
-        BeachPreviewModel.IsRendering = true;
-
-        // Les poignées signalent les trois actions sans recouvrir la bande orange.
-        var handleSize = Math.Clamp(sceneSpan / 105f, 55f, 180f);
-        var handleY = overlayY + Math.Clamp(sceneSpan * 0.002f, 6f, 48f);
-        BeachStartHandleModel.Geometry = BuildBeachHandleGeometry(new Vector3(start2.X, handleY, start2.Y), handleSize, diamond: false);
-        BeachEndHandleModel.Geometry = BuildBeachHandleGeometry(new Vector3(end2.X, handleY, end2.Y), handleSize, diamond: false);
-        BeachMoveHandleModel.Geometry = BuildBeachHandleGeometry(new Vector3(midpoint.X, handleY + 2f, midpoint.Y), handleSize * 1.15f, diamond: true);
-        BeachStartHandleModel.IsRendering = true;
-        BeachEndHandleModel.IsRendering = true;
-        BeachMoveHandleModel.IsRendering = true;
-    }
-
-    private static HxMeshGeometry3D BuildBeachPreviewFillGeometry(
-        Vector2 start,
-        Vector2 end,
-        Vector2 landOffset,
-        Vector2 waterOffset,
-        float y)
-    {
-        var landStart = start + landOffset;
-        var landEnd = end + landOffset;
-        var waterStart = start + waterOffset;
-        var waterEnd = end + waterOffset;
-        return new HxMeshGeometry3D
-        {
-            Positions = new Vector3Collection
-            {
-                new(landStart.X, y, landStart.Y),
-                new(landEnd.X, y, landEnd.Y),
-                new(waterEnd.X, y, waterEnd.Y),
-                new(waterStart.X, y, waterStart.Y)
-            },
-            Normals = new Vector3Collection
-            {
-                Vector3.UnitY,
-                Vector3.UnitY,
-                Vector3.UnitY,
-                Vector3.UnitY
-            },
-            Indices = new IntCollection { 0, 1, 2, 0, 2, 3 }
-        };
     }
 
     private static LineGeometry3D BuildBeachHandleGeometry(Vector3 center, float size, bool diamond)
@@ -1657,181 +1278,9 @@ public partial class Terrain3DGpuWindow : Window
         return new LineGeometry3D { Positions = positions, Indices = indices };
     }
 
-    private async void ApplyBeachButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (BeachAutoStraightCheckBox?.IsChecked == true)
-        {
-            ClampAutomaticBeachSelectionToMap();
-        }
-        if (_geometry?.Positions is null || _spatialIndex is null || !_hasBeachStartPoint || !_hasBeachEndPoint)
-        {
-            StatusTextBlock.Text = "Cliquez d’abord les deux extrémités du rivage avec l’outil Plage.";
-            return;
-        }
-        if (!TryReadBeachSettings(out var beachHeight, out var waterDepth, out var landWidth, out var waterWidth))
-        {
-            StatusTextBlock.Text = "Vérifiez les quatre valeurs de la plage.";
-            return;
-        }
-
-        beachHeight = QuantizeDecodedHeight(beachHeight);
-        waterDepth = QuantizeDecodedHeight(waterDepth);
-        var start = new Vector2(_beachStartPoint.X, _beachStartPoint.Z);
-        var end = new Vector2(_beachEndPoint.X, _beachEndPoint.Z);
-        var axis = end - start;
-        var length = axis.Length();
-        if (length < 8f)
-        {
-            return;
-        }
-
-        var tangent = axis / length;
-        var midpoint = (start + end) * 0.5f;
-        var outward = ResolveBeachOutwardNormal(tangent, midpoint);
-        var radius = (length * 0.5f) + (float)Math.Max(landWidth, waterWidth);
-        var candidates = _spatialIndex.QueryCircle(midpoint.X, midpoint.Y, radius);
-        var positionIndices = new HashSet<int>();
-        foreach (var candidate in candidates)
-        {
-            if (_positionByVertex.TryGetValue(candidate.Vertex, out var positionIndex))
-            {
-                positionIndices.Add(positionIndex);
-            }
-        }
-
-        var changedByPage = new Dictionary<TerrainPageKey, int>();
-        foreach (var positionIndex in positionIndices)
-        {
-            var current = _geometry.Positions[positionIndex];
-            var relative = new Vector2(current.X - start.X, current.Z - start.Y);
-            var along = Vector2.Dot(relative, tangent);
-            if (along < 0f || along > length)
-            {
-                continue;
-            }
-
-            var lateral = Vector2.Dot(relative, outward);
-            if (lateral < -landWidth || lateral > waterWidth)
-            {
-                continue;
-            }
-
-            var original = SceneYToDecodedHeight(current.Y);
-            float target;
-            if (lateral <= 0f)
-            {
-                var t = SmoothStep((float)Math.Clamp((lateral + landWidth) / Math.Max(1d, landWidth), 0d, 1d));
-                target = Lerp(original, beachHeight, t);
-            }
-            else
-            {
-                var t = SmoothStep((float)Math.Clamp(lateral / Math.Max(1d, waterWidth), 0d, 1d));
-                target = Lerp(beachHeight, waterDepth, t);
-            }
-
-            var endWeight = 1f;
-            if (BeachFeatherEdgesCheckBox.IsChecked == true)
-            {
-                var featherLength = Math.Min(length * 0.2f, Math.Max(32f, (float)Math.Min(landWidth, waterWidth) * 0.5f));
-                endWeight = Math.Min(
-                    SmoothStep(Math.Clamp(along / featherLength, 0f, 1f)),
-                    SmoothStep(Math.Clamp((length - along) / featherLength, 0f, 1f)));
-            }
-
-            var nextRaw = MeshVertex.EncodeDecodedHeight(Lerp(original, target, endWeight));
-            if (!_bindingsByPosition.TryGetValue(positionIndex, out var sharedVertices))
-            {
-                continue;
-            }
-
-            var changed = false;
-            foreach (var binding in sharedVertices)
-            {
-                if (binding.Vertex.Raw1 == nextRaw)
-                {
-                    continue;
-                }
-                _originalRaw1.TryAdd(binding.Vertex, binding.Vertex.Raw1);
-                binding.Vertex.Raw1 = nextRaw;
-                changedByPage[binding.Page.Key] = changedByPage.TryGetValue(binding.Page.Key, out var count) ? count + 1 : 1;
-                _changedVertexWrites++;
-                changed = true;
-            }
-            if (changed)
-            {
-                var source = sharedVertices[0].Vertex;
-                _geometry.Positions[positionIndex] = new Vector3(source.X, DecodedHeightToSceneY(source.DecodedHeight), source.Z);
-                RecordChangedWorldPoint(GetSelectedLod(), source.X, source.Z);
-            }
-        }
-
-        if (changedByPage.Count == 0)
-        {
-            StatusTextBlock.Text = "Aucun sommet du maillage ne se trouve dans la zone de plage.";
-            return;
-        }
-
-        _geometry.UpdateVertices();
-        foreach (var pair in changedByPage)
-        {
-            _project.HeightEditState.MarkMeshPageTouched(pair.Key, pair.Value);
-        }
-        _project.IsModified = true;
-        _project.ModifiedSections.Add("TerrainMeshGpuD3D11Beach");
-        UpdateBeachPreview();
-        var definition = new GpuBeachDefinition(
-            GetSelectedLod(),
-            start.X,
-            start.Y,
-            end.X,
-            end.Y,
-            outward.X,
-            outward.Y,
-            landWidth,
-            waterWidth,
-            beachHeight,
-            waterDepth);
-        try
-        {
-            var projectSummary = _applyBeachToProject?.Invoke(definition, GetChangedWorldRegions());
-            if (_applyBeachToProject is not null)
-            {
-                _hasDirectProjectCommit = true;
-                RebaseTransactionAfterDirectCommit();
-                await ReloadGpuGeometryAsync();
-            }
-            StatusTextBlock.Text = string.IsNullOrWhiteSpace(projectSummary)
-                ? $"Plage créée sur {length:0} unités : transition douce vers le fond marin, côté extérieur de l’île."
-                : projectSummary;
-        }
-        catch (Exception ex)
-        {
-            StatusTextBlock.Text = $"Le relief de la plage est créé, mais ses matériaux/données de comptoir n’ont pas pu être appliqués : {ex.Message}";
-        }
-    }
-
-    private Vector2 ResolveBeachOutwardNormal(Vector2 tangent, Vector2 midpoint)
-    {
-        var normal = new Vector2(-tangent.Y, tangent.X);
-        if (TryFindNearestFootprintBoundary(new Vector3(midpoint.X, 0f, midpoint.Y), out var boundary) &&
-            Math.Abs(Vector2.Dot(boundary.Tangent, tangent)) >= 0.65f)
-        {
-            // La normale de la frontière pointe explicitement de la cellule active
-            // vers la cellule inactive. Elle est donc correcte aussi dans une baie,
-            // là où la direction depuis le centre de l'île donne le résultat inverse.
-            return boundary.Outward;
-        }
-
-        var fromCenter = midpoint - new Vector2(_sceneBounds.Center.X, _sceneBounds.Center.Z);
-        if (fromCenter.LengthSquared() > 1f && Vector2.Dot(normal, fromCenter) < 0f)
-        {
-            normal = -normal;
-        }
-        return normal;
-    }
-
     private void ResetBeachButton_Click(object sender, RoutedEventArgs e)
     {
+        if (!_creatingCoast) BeginToolHistoryAction();
         _hasBeachStartPoint = false;
         _hasBeachEndPoint = false;
         _beachSelectionStep = 0;
@@ -1845,6 +1294,7 @@ public partial class Terrain3DGpuWindow : Window
             ? "Sélectionnez l’outil Plage, puis cliquez une fois près du bord extérieur ou d’un renfoncement."
             : "Sélectionnez l’outil Plage, puis cliquez les deux extrémités du rivage.";
         RefreshActiveToolUi();
+        if (!_creatingCoast) CompleteToolHistoryAction();
     }
 
     private bool TryReadBeachLength(out double length)
@@ -1854,17 +1304,19 @@ public partial class Terrain3DGpuWindow : Window
         return valid && parsedLength >= 16d;
     }
 
-    private bool TryReadBeachSettings(out float beachHeight, out float waterDepth, out double landWidth, out double waterWidth)
+    private bool TryReadBeachSettings(out float beachHeight, out float waterDepth, out double landWidth, out double innerWidth, out double waterWidth)
     {
         var beachValid = TryParseFlexibleNumber(BeachHeightTextBox?.Text, out var parsedBeach);
         var waterValid = TryParseFlexibleNumber(BeachWaterDepthTextBox?.Text, out var parsedWater);
         var landValid = TryParseFlexibleNumber(BeachLandWidthTextBox?.Text, out var parsedLandWidth);
+        var innerValid = TryParseFlexibleNumber(BeachInnerWidthTextBox?.Text, out var parsedInnerWidth);
         var waterWidthValid = TryParseFlexibleNumber(BeachWaterWidthTextBox?.Text, out var parsedWaterWidth);
         beachHeight = (float)parsedBeach;
         waterDepth = (float)parsedWater;
         landWidth = Math.Clamp(parsedLandWidth, 8d, 4096d);
+        innerWidth = Math.Clamp(parsedInnerWidth, 8d, 1024d);
         waterWidth = Math.Clamp(parsedWaterWidth, 8d, 4096d);
-        return beachValid && waterValid && landValid && waterWidthValid;
+        return beachValid && waterValid && landValid && innerValid && waterWidthValid;
     }
 
     private static float SmoothStep(float value)
@@ -1927,6 +1379,7 @@ public partial class Terrain3DGpuWindow : Window
 
     private void RebaseTransactionAfterDirectCommit()
     {
+        ResetUndoHistory();
         _originalRaw1.Clear();
         _changedBoundsByLod.Clear();
         _originalTouchedPages.Clear();
@@ -1946,7 +1399,7 @@ public partial class Terrain3DGpuWindow : Window
     {
         var width = _project.Rd3d.GridWidth > 0 ? _project.Rd3d.GridWidth : Math.Max(1, _project.Root.MapSize * 32);
         var height = _project.Rd3d.GridHeight > 0 ? _project.Rd3d.GridHeight : Math.Max(1, _project.Root.MapSize * 32);
-        var y = 1.5f;
+        var y = DecodedHeightToSceneY(0);
         var positions = new Vector3Collection
         {
             new(0, y, 0), new(width, y, 0),
@@ -1975,6 +1428,7 @@ public partial class Terrain3DGpuWindow : Window
 
         _projectFootprintMask = ActiveMapGridMaskCodec.Decode(grid, _project.Root.ActiveMapGridBits, _project.Root.ActiveMapRect);
         _workingFootprintMask = _projectFootprintMask.ToArray();
+        _pendingFineTerrainStamps.Clear();
         _footprintDirty = false;
         UpdateFootprintStatus();
         if (FootprintPreviewModel is not null)
@@ -2022,6 +1476,7 @@ public partial class Terrain3DGpuWindow : Window
             for (var x = 0; x < grid.X; x++)
             {
                 var cellX = (x + 0.5) * cellWidth;
+                if (OceanSafetyBorder.IntersectsCell(x, y, grid.X, grid.Y, worldWidth, worldHeight)) continue;
                 var dx = Math.Max(0d, Math.Abs(cellX - center.X) - cellWidth * 0.5);
                 var dz = Math.Max(0d, Math.Abs(cellZ - center.Z) - cellHeight * 0.5);
                 if (GetBrushNormalizedDistance(dx, dz, radius) > 1d)
@@ -2084,17 +1539,13 @@ public partial class Terrain3DGpuWindow : Window
         var height = Math.Max(1d, _project.Rd3d.GridHeight > 0 ? _project.Rd3d.GridHeight : _project.Root.MapSize * 32d);
         var cellWidth = width / grid.X;
         var cellHeight = height / grid.Y;
-        var yOverlay = _sceneBounds.Min.Y + 1.5f;
+        _overlaySampler = null;
         var positions = new Vector3Collection();
         var indices = new IntCollection();
 
         void AddEdge(double x0, double z0, double x1, double z1)
         {
-            var start = positions.Count;
-            positions.Add(new Vector3((float)x0, yOverlay, (float)z0));
-            positions.Add(new Vector3((float)x1, yOverlay, (float)z1));
-            indices.Add(start);
-            indices.Add(start + 1);
+            AppendDrapedEdge(positions, new Vector2((float)x0, (float)z0), new Vector2((float)x1, (float)z1));
         }
 
         bool Active(int x, int z) => x >= 0 && z >= 0 && x < grid.X && z < grid.Y && _workingFootprintMask[(z * grid.X) + x];
@@ -2117,7 +1568,7 @@ public partial class Terrain3DGpuWindow : Window
             }
         }
 
-        FootprintPreviewModel.Geometry = new LineGeometry3D { Positions = positions, Indices = indices };
+        FootprintPreviewModel.Geometry = new LineGeometry3D { Positions = positions, Indices = new IntCollection(Enumerable.Range(0, positions.Count)) };
         FootprintPreviewModel.IsRendering = positions.Count > 0;
     }
 
@@ -2162,28 +1613,66 @@ public partial class Terrain3DGpuWindow : Window
 
     private void ResetFootprintButton_Click(object sender, RoutedEventArgs e)
     {
+        BeginToolHistoryAction();
         _workingFootprintMask = _projectFootprintMask.ToArray();
         _pendingFineTerrainStamps.Clear();
         _footprintDirty = false;
         UpdateFootprintPreview();
         UpdateFootprintStatus();
         StatusTextBlock.Text = "Dessin d’emprise annulé ; l’emprise actuellement appliquée est restaurée.";
+        CompleteToolHistoryAction();
     }
 
     private async void ValidateEntireTerrainButton_Click(object sender, RoutedEventArgs e)
+        => await ValidateProjectForExportAsync(closeAfterValidation: false);
+
+    private async Task ValidateProjectForExportAsync(bool closeAfterValidation)
     {
+        if (_isValidatingTerrain) return;
+        _isValidatingTerrain = true;
+        _loadCancellation?.Cancel();
+        EditorControlsPanel.IsEnabled = false;
+        GpuViewport.IsEnabled = false;
+        var validated = false;
         try
         {
+            if (_validateEntireTerrain is null)
+                throw new InvalidOperationException("Le service de validation complète n’est pas disponible.");
             StatusTextBlock.Text = "Validation complète de tous les LOD et dérivés en cours…";
-            var summary = _validateEntireTerrain?.Invoke() ?? "Validation complète demandée.";
-            _hasDirectProjectCommit = _validateEntireTerrain is not null;
+            await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+            if (_footprintDirty)
+            {
+                if (!ActiveMapGridMaskCodec.HasAnyActiveCell(_workingFootprintMask))
+                    throw new InvalidOperationException("Conservez au moins une cellule active dans l’empreinte.");
+                if (_applyFootprintToProject is null)
+                    throw new InvalidOperationException("Le service d’application de l’empreinte n’est pas disponible.");
+                _applyFootprintToProject(_workingFootprintMask.ToArray(), _pendingFineTerrainStamps.ToArray(), GetChangedWorldRegions());
+                _hasDirectProjectCommit = true;
+                RebaseTransactionAfterDirectCommit();
+                InitializeFootprintMask();
+            }
+            var summary = _validateEntireTerrain(GetSelectedLod(), GetChangedWorldRegions());
+            _hasDirectProjectCommit = true;
             RebaseTransactionAfterDirectCommit();
-            await ReloadGpuGeometryAsync();
-            StatusTextBlock.Text = summary;
+            InitializeFootprintMask();
+            if (!closeAfterValidation) await ReloadGpuGeometryAsync();
+            StatusTextBlock.Text = "Terrain validé — prêt pour l’export ZIP depuis la fenêtre principale.\n" + summary;
+            validated = true;
         }
         catch (Exception ex)
         {
-            StatusTextBlock.Text = $"La validation complète a échoué : {ex.Message}";
+            StatusTextBlock.Text = $"Validation incomplète : {ex.Message}\nLa fenêtre reste ouverte ; l’export n’est pas déclaré prêt.";
+        }
+        finally
+        {
+            _isValidatingTerrain = false;
+            EditorControlsPanel.IsEnabled = true;
+            GpuViewport.IsEnabled = true;
+        }
+        if (validated && closeAfterValidation)
+        {
+            _committed = true;
+            DialogResult = true;
         }
     }
 
@@ -2214,6 +1703,8 @@ public partial class Terrain3DGpuWindow : Window
         6 => GpuBrushMode.Beach,
         7 => GpuBrushMode.AddFootprint,
         8 => GpuBrushMode.RemoveFootprint,
+        9 => GpuBrushMode.Trees,
+        10 => GpuBrushMode.MeshBeach,
         _ => GpuBrushMode.Navigation
     };
 
@@ -2237,34 +1728,47 @@ public partial class Terrain3DGpuWindow : Window
 
     private void RefreshBrushRingAtPointerOrViewportCenter()
     {
-        if (GetBrushMode() is GpuBrushMode.Navigation or GpuBrushMode.Beach || TerrainModel.Geometry is null || GpuViewport.ActualWidth <= 0 || GpuViewport.ActualHeight <= 0)
+        if (GetBrushMode() == GpuBrushMode.Navigation || TerrainModel.Geometry is null || GpuViewport.ActualWidth <= 0 || GpuViewport.ActualHeight <= 0)
         {
-            BrushRingModel.IsRendering = false;
+            HideBrushOverlay();
             return;
         }
 
-        var pointer = Mouse.GetPosition(GpuViewport);
-        var center = new Point(GpuViewport.ActualWidth * 0.5, GpuViewport.ActualHeight * 0.5);
+        var pointer = GetActualViewportPointer();
         var pointerIsInside = pointer.X >= 0 && pointer.Y >= 0 && pointer.X <= GpuViewport.ActualWidth && pointer.Y <= GpuViewport.ActualHeight;
-        var candidates = pointerIsInside ? new[] { pointer, center } : new[] { center };
-        foreach (var candidate in candidates)
+        if (pointerIsInside)
         {
-            var hit = FindEditableSurfaceHit(candidate);
-            if (hit is null)
+            var hit = FindEditableSurfaceHit(pointer);
+            if (hit is not null)
             {
-                continue;
+                _lastBrushPoint = hit.PointHit;
+                _hasLastBrushPoint = true;
+                UpdateBrushRing(_lastBrushPoint);
+                return;
             }
-
-            _lastBrushPoint = hit.PointHit;
-            _hasLastBrushPoint = true;
-            UpdateBrushRing(_lastBrushPoint);
-            return;
         }
 
-        if (_hasLastBrushPoint)
+        if (!pointerIsInside)
         {
-            UpdateBrushRing(_lastBrushPoint);
+            HideBrushOverlay();
         }
+    }
+
+    private Point GetActualViewportPointer()
+    {
+        try
+        {
+            if (GetCursorPos(out var cursor))
+            {
+                return GpuViewport.PointFromScreen(new Point(cursor.X, cursor.Y));
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            // Le viewport peut être en cours de création ou de fermeture.
+        }
+
+        return Mouse.GetPosition(GpuViewport);
     }
 
     private void RecordChangedWorldPoint(int lod, double worldX, double worldZ)
@@ -2433,21 +1937,8 @@ public partial class Terrain3DGpuWindow : Window
         }
     }
 
-    private void ApplyButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_originalRaw1.Count == 0)
-        {
-            _committed = true;
-            DialogResult = true;
-            return;
-        }
-
-        _project.HeightEditState.MarkOperation($"Éditeur GPU Direct3D 11 : {_originalRaw1.Count} vertex/vertices uniques modifiés");
-        _project.ModifiedSections.Add("TerrainDirtyArea");
-        _project.IsModified = true;
-        _committed = true;
-        DialogResult = true;
-    }
+    private async void ApplyButton_Click(object sender, RoutedEventArgs e)
+        => await ValidateProjectForExportAsync(closeAfterValidation: true);
 
     private void CancelButton_Click(object sender, RoutedEventArgs e)
     {
@@ -2489,7 +1980,9 @@ public partial class Terrain3DGpuWindow : Window
         PickHeight,
         Beach,
         AddFootprint,
-        RemoveFootprint
+        RemoveFootprint,
+        Trees,
+        MeshBeach
     }
 
     private enum GpuBrushPattern
@@ -2512,6 +2005,7 @@ public partial class Terrain3DGpuWindow : Window
     private sealed record GpuBuildData(
         Vector3[] Positions,
         Vector3[] Normals,
+        Color4[] Colors,
         GpuVertexBinding[] Bindings,
         int[] Indices,
         TerrainBrushSpatialIndex SpatialIndex,
@@ -2583,9 +2077,14 @@ public sealed record GpuBeachDefinition(
     double OutwardX,
     double OutwardZ,
     double LandWidth,
+    double InnerWidth,
     double WaterWidth,
     float BeachDecodedHeight,
-    float WaterDecodedHeight);
+    float WaterDecodedHeight,
+    IReadOnlyList<CoastSpan>? Contour = null,
+    double? AnchorX = null,
+    double? AnchorZ = null,
+    bool FollowsMesh = false);
 
 public sealed record GpuFineTerrainStamp(
     double CenterX,
@@ -2594,3 +2093,12 @@ public sealed record GpuFineTerrainStamp(
     int Pattern,
     float TerrainDecodedHeight,
     bool SmoothEdge);
+
+public sealed record GpuTreeInstance(double X, double Z, double WorldHeight, double RotationRadians, double Scale);
+
+public sealed record GpuObjTerrainImportDefinition(
+    string Path,
+    int Lod,
+    bool FitToActiveFootprint,
+    int GridStepRaw,
+    int SmoothingPasses);

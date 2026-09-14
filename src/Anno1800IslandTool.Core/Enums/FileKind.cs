@@ -11,5 +11,6 @@ public enum FileKind
     NormalMapPageXml,
     TintMapDds,
     PreviewImage,
-    ShaderFile
+    ShaderFile,
+    AnnoEditorLevel
 }

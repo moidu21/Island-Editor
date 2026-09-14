@@ -13,5 +13,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Resources\MaterialSets\*.xml" />
+    <EmbeddedResource Include="Resources\EnvironmentAssets.txt" />
+    <EmbeddedResource Include="Resources\VanillaEnvironmentProfiles.txt" />
   </ItemGroup>
 </Project>

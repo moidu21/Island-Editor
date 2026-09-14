@@ -1,7 +1,8 @@
 <Window x:Class="Anno1800IslandTool.UI.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Anno1800IslandTool v46.19 aperçu de plage plein écran"
+        xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering"
+        Title="Anno1800IslandTool v46.46 — peinture par topologie"
         Height="980"
         Width="1760"
         WindowStartupLocation="CenterScreen">
@@ -20,7 +21,7 @@
             <Button Width="120" Height="34" Margin="8,0,0,0" Click="SaveLogButton_Click">Sauver rapport</Button>
             <Button Width="150" Height="34" Margin="8,0,0,0" Click="RegenerateTextsButton_Click">Régénérer textes</Button>
             <Button Width="160" Height="34" Margin="8,0,0,0" Click="OpenMap2DWindowButton_Click">Fenêtre vue 2D</Button>
-            <Button Width="170" Height="34" Margin="8,0,0,0" Click="OpenTerrain3DWindowButton_Click">Fenêtre terrain 3D</Button>
+            <Button Width="170" Height="34" Margin="8,0,0,0" Click="OpenTerrain3DWindowButton_Click">Éditeur terrain GPU 3D</Button>
             <Button Width="175" Height="34" Margin="8,0,0,0" Click="OpenMaterialMapWindowButton_Click">Éditeur matériaux</Button>
             <Button Width="195" Height="34" Margin="8,0,0,0" Click="OpenGlobalTintBaseWindowButton_Click">Teinte végétation</Button>
             <CheckBox x:Name="ReadPayloadsCheckBox"
@@ -36,7 +37,7 @@
                       ToolTip="v46.5 : décode directement les valeurs, limite les lots et évite les copies texte/binaires inutiles des pages. Décoche pour un compromis vitesse/RAM."
                       VerticalAlignment="Center"/>
             <TextBlock Margin="16,8,0,0"
-                       Text="v46.19 : bande de plage orange remplie et contrastée, poignées compactes et longueur conservée sur les rivages en escalier."
+                       Text="v46.46 : peinture automatique selon la pente, les crêtes et les creux."
                        FontWeight="SemiBold"/>
             <TextBlock Margin="16,8,0,0"
                        Text="Langue"
@@ -460,7 +461,7 @@
                                 <DockPanel>
                                     <TextBlock DockPanel.Dock="Top" Text="Coarse HeightMap" FontWeight="SemiBold" Margin="0,0,0,6"/>
                                     <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                                        <Image x:Name="HeightMapImage" Stretch="None"/>
+                                        <rendering:DirectX11Image x:Name="HeightMapImage" Stretch="None"/>
                                     </ScrollViewer>
                                 </DockPanel>
                             </Border>
@@ -470,7 +471,7 @@
                                     <TextBlock x:Name="MapHintTextBlock" DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,6"
                                                Text="Sélectionne un slot ou un spawn dans les tableaux, puis utilise les modes ci-dessus. Un clic sur l'image déplace ou ajoute l'élément, ou définit les coins de la PlayableArea."/>
                                     <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                                        <Canvas x:Name="MapEditCanvas"
+                                        <rendering:DirectX11Canvas x:Name="MapEditCanvas"
                                                 Background="#222"
                                                 MouseLeftButtonDown="MapEditCanvas_MouseLeftButtonDown"/>
                                     </ScrollViewer>

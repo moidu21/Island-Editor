@@ -26,13 +26,23 @@ public sealed class ProjectTextRegenerator
         project.RawContent.RootText = PseudoXmlSafety.EnsureSingleRootOrFallback(candidate, fallback);
     }
 
+    public void RegenerateAnnoEditorLevelText(IslandProject project)
+    {
+        if (!string.IsNullOrWhiteSpace(project.RawContent.AnnoEditorLevelText))
+            project.RawContent.AnnoEditorLevelText = AnnoEditorLevelTextRegenerator.Regenerate(
+                project.RawContent.AnnoEditorLevelText!, project.Root.MapSize);
+    }
+
     public void RegenerateRd3dText(IslandProject project)
     {
+        if (Anno1800IslandTool.Pipeline.Services.CoastalMaterialUnderlay.Ensure(project) > 0)
+            new IslandProjectEditor().ResynchronizeMeshUsedMaterialBitsFromMaterialMap(project);
         var fallback = _rd3dWriter.Write(project.Rd3d);
         var candidate = string.IsNullOrWhiteSpace(project.RawContent.Rd3dText)
             ? fallback
             : UpdateRd3dText(project.RawContent.Rd3dText!, project.Rd3d, project.GameData.TerrainHeightMap, project.Root, project.PreserveManualGlobalTintBaseTextureData);
-        project.RawContent.Rd3dText = PseudoXmlSafety.EnsureSingleRootOrFallback(candidate, fallback);
+        project.RawContent.Rd3dText = Anno1800IslandTool.Pipeline.Services.TerrainWaterMapSynchronizer.Synchronize(
+            PseudoXmlSafety.EnsureSingleRootOrFallback(candidate, fallback), project.GameData.TerrainHeightMap);
     }
 
     public void RegenerateGameDataText(IslandProject project)
@@ -42,7 +52,7 @@ public sealed class ProjectTextRegenerator
             ? fallback
             : project.RawContent.GameDataText!;
         var candidate = UpdateGameDataText(sourceText, project.Metadata.MapSize, project.GameData, project.Root);
-        project.RawContent.GameDataText = PseudoXmlSafety.EnsureSingleRootOrFallback(candidate, fallback);
+        project.RawContent.GameDataText = GeneratedCoastGeometry.RepairBounds(PseudoXmlSafety.EnsureSingleRootOrFallback(candidate, fallback));
     }
 
     public void RegenerateMaterialSetText(IslandProject project)
@@ -1091,7 +1101,7 @@ public sealed class ProjectTextRegenerator
         return Math.Max(1, activeGridHeight * ActiveMapGridMaskCodec.RootUnitsPerCell);
     }
 
-    private static GameDataTerrainMasks BuildGameDataTerrainMasks(CoarseHeightMap heightMap, int requestedWidth, int requestedHeight, int fallbackMapSize, IslandRootDefinition root)
+    private static GameDataTerrainMasks BuildGameDataTerrainMasks(CoarseHeightMap heightMap, int requestedWidth, int requestedHeight, int fallbackMapSize, IslandRootDefinition root, IReadOnlyList<GeneratedBeachZone>? beaches = null)
     {
         var width = requestedWidth > 0
             ? requestedWidth
@@ -1162,6 +1172,17 @@ public sealed class ProjectTextRegenerator
                 h >= GameDataBuildableMinWorld &&
                 h <= GameDataBuildableMaxWorld &&
                 slope <= GameDataBuildableMaxSlope;
+
+            // A harbor straddles land and shallow water. AreaIDs layer 32 must
+            // cover the full generated shore strip, not stop at the dry-land bit.
+            if (active[i] && beaches is { Count: > 0 } && h >= GameDataBuildableMinWorld)
+            {
+                var point = new System.Numerics.Vector2(
+                    (float)((i % width + .5) / width * rootWidth),
+                    (float)((i / width + .5) / height * rootHeight));
+                if (beaches.Any(b => b.Contains(point) && h <= b.Height + .1f))
+                    buildable[i] = true;
+            }
 
             treeAllowed[i] =
                 baseLand[i] &&
@@ -1310,7 +1331,7 @@ public sealed class ProjectTextRegenerator
             return text;
         }
 
-        var masks = BuildGameDataTerrainMasks(heightMap, width, height, mapSize, root);
+        var masks = BuildGameDataTerrainMasks(heightMap, width, height, mapSize, root, GeneratedBeachZones.Parse(text));
         var updatedValues = new int[cellCount * 2];
         for (var i = 0; i < cellCount; i++)
         {

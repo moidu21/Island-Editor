@@ -26,6 +26,8 @@ public sealed class TerrainLocalRegenerationState
     public bool IncludesHigherLods { get; set; }
     public int MaxHigherLods { get; set; } = 2;
     public int AnchorMeshLod { get; set; } = -1;
+    /// <summary>Use the consolidated heightmap instead of an individual source LOD.</summary>
+    public bool UseCoarseHeightMap { get; set; }
     public int BaseLodMeshPagesGenerated { get; set; }
     public int HigherLodMeshPagesGenerated { get; set; }
     public Dictionary<int, int> AffectedMeshPagesByLod { get; set; } = new();

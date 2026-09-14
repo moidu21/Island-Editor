@@ -23,10 +23,41 @@ public static class TerrainVertexAttributeCodec
 {
     public const float DefaultRawUnitScale = 1f / 32f;
 
+    /// <summary>Initialize an ordinary surface vertex before packing UVs. Zero bytes
+    /// encode a downward normal, not an empty/default upward normal.</summary>
+    public static void InitializeSurface(int[] raw)
+    {
+        EnsureLength(raw, 8);
+        raw[4] = PackSignedText(128, 255);
+        raw[5] = PackSignedText(128, HighByte(raw[5]));
+        raw[6] = PackSignedText(128, 128);
+        raw[7] = PackSignedText(0, HighByte(raw[7]));
+    }
+
     public static TerrainVertexAttributes Decode(MeshVertex vertex)
     {
         ArgumentNullException.ThrowIfNull(vertex);
         return Decode(vertex.RawValues);
+    }
+
+    /// <summary>Encode les UV 16 bits sans détruire les octets de normale et de tangente.</summary>
+    public static void EncodeTexCoord(MeshVertex vertex, float u, float v)
+    {
+        ArgumentNullException.ThrowIfNull(vertex);
+        var raw = vertex.RawValues;
+        EncodeTexCoord(raw, u, v);
+        vertex.RawValues = raw;
+    }
+
+    public static void EncodeTexCoord(int[] rawValues, float u, float v)
+    {
+        ArgumentNullException.ThrowIfNull(rawValues);
+        EnsureLength(rawValues, 8);
+        var rawU = (ushort)Math.Clamp((int)MathF.Round(Math.Clamp(float.IsFinite(u) ? u : 0f, 0f, 1f) * ushort.MaxValue), 0, ushort.MaxValue);
+        var rawV = (ushort)Math.Clamp((int)MathF.Round(Math.Clamp(float.IsFinite(v) ? v : 0f, 0f, 1f) * ushort.MaxValue), 0, ushort.MaxValue);
+        rawValues[3] = ToSignedText(rawU);
+        rawValues[5] = PackSignedText(LowByte(rawValues[5]), (byte)(rawV & 0xff));
+        rawValues[7] = PackSignedText(LowByte(rawValues[7]), (byte)(rawV >> 8));
     }
 
     public static TerrainVertexAttributes Decode(IReadOnlyList<int> rawValues)

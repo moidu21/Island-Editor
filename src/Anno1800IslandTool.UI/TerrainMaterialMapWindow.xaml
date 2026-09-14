@@ -1,14 +1,16 @@
 <Window x:Class="Anno1800IslandTool.UI.TerrainMaterialMapWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Anno1800IslandTool v44.9 - Hôte matériaux"
-        Height="1060"
+        xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering"
+        Title="Anno1800IslandTool v46.46 - peinture par topologie"
+        Height="1080"
         Width="1520"
         WindowStartupLocation="CenterOwner">
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="230"/>
+            <RowDefinition Height="270"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="260"/>
             <RowDefinition Height="*"/>
@@ -57,10 +59,29 @@
                                  IsReadOnly="True"
                                  VerticalContentAlignment="Center"/>
                     </DockPanel>
+                    <DockPanel Margin="0,6,0,0">
+                        <Button x:Name="UseEmbeddedMaterialSetButton"
+                                DockPanel.Dock="Right"
+                                Width="120"
+                                Height="28"
+                                Margin="8,0,0,0"
+                                Click="UseEmbeddedMaterialSetButton_Click">Utiliser</Button>
+                        <ComboBox x:Name="EmbeddedMaterialSetComboBox"
+                                  Height="28"
+                                  IsTextSearchEnabled="True"
+                                  IsEditable="True"
+                                  IsReadOnly="True"
+                                  SelectionChanged="EmbeddedMaterialSetComboBox_SelectionChanged"
+                                  ToolTip="Jeux de matériaux inclus dans le programme"/>
+                    </DockPanel>
+                    <TextBlock Margin="0,3,0,0" Text="Bibliothèque intégrée : la sélection met aussi à jour MaterialSetFileName dans le RD3D." TextWrapping="Wrap" Foreground="#315D31"/>
                     <CheckBox x:Name="UpdateRd3dMaterialSetCheckBox"
                               Content="Inscrire ce materialset dans rd3d.xml / export"
                               IsChecked="True"
                               Margin="0,6,0,0"/>
+                    <CheckBox x:Name="BeachProtectionCheckBox" Margin="0,6,0,0"
+                              IsChecked="{Binding ProtectBeachAreas, Mode=TwoWay}"
+                              Content="Protéger les zones de plage créées (sable ailleurs modifiable)"/>
                     <CheckBox x:Name="PaintModeCheckBox"
                               Content="Mode peinture activé : cliquer/glisser sur la carte peint le matériau sélectionné ou le pickup"
                               Margin="0,6,0,0"
@@ -167,7 +188,51 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Row="3" Margin="0,0,0,10">
+        <Border Grid.Row="3" BorderBrush="#B8D8B8" BorderThickness="1" Padding="8" Margin="0,0,0,10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="1.7*"/>
+                    <ColumnDefinition Width="1.5*"/>
+                    <ColumnDefinition Width="1.25*"/>
+                    <ColumnDefinition Width="1.55*"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Peinture automatique par topologie" FontWeight="SemiBold" FontSize="14"/>
+                    <TextBlock Text="Classe le relief par pente et courbure locale, sans utiliser son altitude." TextWrapping="Wrap" Margin="0,3,0,6"/>
+                    <DockPanel><TextBlock DockPanel.Dock="Left" Width="105" Text="Surface plate"/><ComboBox x:Name="TopologyFlatMaterialComboBox" Height="25" DisplayMemberPath="ComboLabel"/></DockPanel>
+                    <DockPanel Margin="0,4,0,0"><TextBlock DockPanel.Dock="Left" Width="105" Text="Pente douce"/><ComboBox x:Name="TopologyGentleMaterialComboBox" Height="25" DisplayMemberPath="ComboLabel"/></DockPanel>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Margin="12,0,0,0">
+                    <TextBlock Text="Matériaux selon la forme" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <DockPanel><TextBlock DockPanel.Dock="Left" Width="90" Text="Pente forte"/><ComboBox x:Name="TopologySteepMaterialComboBox" Height="25" DisplayMemberPath="ComboLabel"/></DockPanel>
+                    <DockPanel Margin="0,4,0,0"><TextBlock DockPanel.Dock="Left" Width="90" Text="Crête"/><ComboBox x:Name="TopologyRidgeMaterialComboBox" Height="25" DisplayMemberPath="ComboLabel"/></DockPanel>
+                    <DockPanel Margin="0,4,0,0"><TextBlock DockPanel.Dock="Left" Width="90" Text="Creux"/><ComboBox x:Name="TopologyHollowMaterialComboBox" Height="25" DisplayMemberPath="ComboLabel"/></DockPanel>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Margin="12,0,0,0">
+                    <TextBlock Text="Sensibilité topologique" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <DockPanel><TextBlock DockPanel.Dock="Left" Width="112" Text="Plat jusqu’à"/><TextBox x:Name="TopologyFlatSlopeTextBox" Text="0.18" Height="24"/></DockPanel>
+                    <DockPanel Margin="0,4,0,0"><TextBlock DockPanel.Dock="Left" Width="112" Text="Pente forte dès"/><TextBox x:Name="TopologySteepSlopeTextBox" Text="1.15" Height="24"/></DockPanel>
+                    <DockPanel Margin="0,4,0,0"><TextBlock DockPanel.Dock="Left" Width="112" Text="Crête/creux dès"/><TextBox x:Name="TopologyCurvatureTextBox" Text="0.35" Height="24"/></DockPanel>
+                    <DockPanel Margin="0,4,0,0"><TextBlock DockPanel.Dock="Left" Width="112" Text="Rayon analyse"/><TextBox x:Name="TopologyRadiusTextBox" Text="2" Height="24"/></DockPanel>
+                </StackPanel>
+
+                <StackPanel Grid.Column="3" Margin="12,0,0,0">
+                    <CheckBox x:Name="TopologyPreserveWaterBeachCheckBox" Content="Préserver l’eau et les plages existantes" IsChecked="True"/>
+                    <CheckBox x:Name="TopologyBlendCheckBox" Content="Mélanger au lieu de remplacer" Margin="0,4,0,0"/>
+                    <DockPanel Margin="0,4,0,0"><TextBlock DockPanel.Dock="Left" Width="55" Text="Force"/><Slider x:Name="TopologyStrengthSlider" Minimum="1" Maximum="31" Value="31" TickFrequency="1" IsSnapToTickEnabled="True"/></DockPanel>
+                    <DockPanel Margin="0,6,0,0">
+                        <Button x:Name="PreviewTopologyButton" Width="105" Height="28" Click="PreviewTopologyButton_Click">Prévisualiser</Button>
+                        <Button x:Name="ApplyTopologyButton" Margin="6,0,0,0" Height="28" Click="ApplyTopologyButton_Click">Mettre à jour l’image</Button>
+                    </DockPanel>
+                    <TextBlock x:Name="TopologyStatusTextBlock" Text="Prêt : aucune hauteur absolue utilisée." TextWrapping="Wrap" Margin="0,6,0,0"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="4" Margin="0,0,0,10">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="2.2*"/>
                 <ColumnDefinition Width="1.2*"/>
@@ -220,7 +285,7 @@
             </Border>
         </Grid>
 
-        <Border Grid.Row="4" BorderBrush="#CCC" BorderThickness="1" Padding="8">
+        <Border Grid.Row="5" BorderBrush="#CCC" BorderThickness="1" Padding="8">
             <DockPanel>
                 <TextBlock x:Name="ImageHintTextBlock"
                            DockPanel.Dock="Top"
@@ -228,7 +293,7 @@
                            Margin="0,0,0,8"/>
                 <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
                     <Grid x:Name="MaterialMapImageGrid">
-                        <Image x:Name="MaterialMapImage"
+                        <rendering:DirectX11Image x:Name="MaterialMapImage"
                                Stretch="None"
                                SnapsToDevicePixels="True"
                                MouseLeftButtonDown="MaterialMapImage_MouseLeftButtonDown"
@@ -236,7 +301,7 @@
                                MouseRightButtonDown="MaterialMapImage_MouseRightButtonDown"
                                MouseMove="MaterialMapImage_MouseMove"
                                MouseLeave="MaterialMapImage_MouseLeave"/>
-                        <Canvas x:Name="BrushOverlayCanvas"
+                        <rendering:DirectX11Canvas x:Name="BrushOverlayCanvas"
                                 IsHitTestVisible="False"
                                 Width="{Binding ActualWidth, ElementName=MaterialMapImage}"
                                 Height="{Binding ActualHeight, ElementName=MaterialMapImage}">
@@ -245,7 +310,7 @@
                                      Stroke="#FFFF4040"
                                      StrokeThickness="1.5"
                                      Fill="#22FF4040"/>
-                        </Canvas>
+                        </rendering:DirectX11Canvas>
                     </Grid>
                 </ScrollViewer>
             </DockPanel>

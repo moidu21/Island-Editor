@@ -247,11 +247,9 @@ public partial class MainWindow : Window
 
         try
         {
-            var window = new Terrain3DWindow(_currentProject)
-            {
-                Owner = this
-            };
-            window.Show();
+            SyncSlotsAndZonesIntoProject();
+            Terrain3DWindow.ShowGpuEditor(this, _currentProject);
+            RefreshProjectDisplay();
         }
         catch (Exception ex)
         {

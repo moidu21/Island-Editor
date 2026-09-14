@@ -6,4 +6,5 @@ public sealed class RawProjectContent
     public string? Rd3dText { get; set; }
     public string? GameDataText { get; set; }
     public string? MaterialSetText { get; set; }
+    public string? AnnoEditorLevelText { get; set; }
 }

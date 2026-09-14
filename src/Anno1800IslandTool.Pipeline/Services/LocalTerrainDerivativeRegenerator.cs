@@ -605,6 +605,7 @@ public sealed class LocalTerrainDerivativeRegenerator
 
     private static Func<double, double, float>? BuildHeightSampler(IslandProject project, CoarseHeightMap map, TerrainLocalRegenerationState? state)
     {
+        if (state?.UseCoarseHeightMap == true) return null;
         var anchorLod = state?.AnchorMeshLod ?? -1;
         if (anchorLod < 0 && state?.ResolvedEditableMeshAnchor is not null)
         {
@@ -1768,7 +1769,9 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
         .ThenBy(p => p.Key.Y)
         .ToList();
 
-    var heightSampler = BuildHeightSampler(project, workingMap, state);
+    // Après une modification d'emprise la heightmap contient aussi le fond marin
+    // et les nouvelles terres : l'ancien mesh ne doit pas les écraser.
+    Func<double, double, float>? heightSampler = null;
     var inputs = new List<(RegeneratedTerrainPageInfo Affected, MeshPage Page)>();
     foreach (var affected in meshPages)
     {
@@ -1930,11 +1933,6 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
     {
         var sourceCluster = clusterIndex < page.Clusters.Count ? page.Clusters[clusterIndex] : new MeshCluster();
         var rebuiltCluster = BuildHeightOnlyClusterFromOriginal(project, sourceCluster, map, options, heightSampler);
-        if (hasActiveMask && activeWorldPredicate is not null)
-        {
-            FilterClusterToActiveFootprint(rebuiltCluster, activeWorldPredicate);
-        }
-
         var col = clusterIndex % clusterGridWidth;
         var row = clusterIndex / clusterGridWidth;
         if (row < clusterGridHeight)
@@ -1944,13 +1942,45 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
             var clusterMinZ = pageMinZ + (row * clusterHeight);
             var clusterMaxZ = Math.Min(pageMaxZ, pageMinZ + ((row + 1) * clusterHeight));
 
-            if (clusterMaxX > clusterMinX + 1.0 &&
-                clusterMaxZ > clusterMinZ + 1.0 &&
-                (!hasActiveMask || ActiveMapGridMaskCodec.IntersectsWorldBounds(activeMask, activeGrid, clusterMinX, clusterMinZ, clusterMaxX, clusterMaxZ, gridWidth, gridHeight)))
+            var intersectsActive = !hasActiveMask || ActiveMapGridMaskCodec.IntersectsWorldBounds(
+                activeMask, activeGrid, clusterMinX, clusterMinZ, clusterMaxX, clusterMaxZ, gridWidth, gridHeight);
+            if (hasActiveMask && !intersectsActive)
             {
-                AppendExtensionGeometryToCluster(project, rebuiltCluster, sourceCluster, sourceVerticesForAttributes, clusterMinX, clusterMaxX, clusterMinZ, clusterMaxZ, page.Key.Lod, map, options, heightSampler, activeWorldPredicate, out var addedVertices, out var addedTriangles);
-                generatedExtensionVertices += addedVertices;
-                generatedExtensionTriangles += addedTriangles;
+                // Une zone retirée de l'empreinte ne doit plus conserver les grandes
+                // faces vanilla abaissées sous l'eau : elles restaient visibles en dalles.
+                rebuiltCluster.Vertices.Clear();
+                rebuiltCluster.Indices.Clear();
+                rebuiltCluster.GroundObjects.Clear();
+            }
+            else if (clusterMaxX > clusterMinX + 1.0 && clusterMaxZ > clusterMinZ + 1.0)
+            {
+                // Rebuild coastal clusters on a shared, fine grid. Keeping the old
+                // triangles and adding overlapping quads produced different shorelines
+                // at each LOD, and retained invalid generated skirt vertices on reload.
+                // Ne reconstruire que les clusters qui coupent réellement la limite.
+                // Les clusters entièrement actifs conservent leurs triangles vanilla,
+                // ce qui évite de rouvrir les fentes sur les montagnes.
+                var partiallyActive = hasActiveMask && !IsWorldBoundsFullyActive(
+                    activeMask, activeGrid, clusterMinX, clusterMinZ, clusterMaxX, clusterMaxZ, gridWidth, gridHeight);
+                var coastal = partiallyActive || RequiresCoastalRetessellation(project, map, clusterMinX, clusterMaxX, clusterMinZ, clusterMaxZ)
+                    || sourceCluster.Vertices.Any(v => TerrainVertexAttributeCodec.Decode(v).IsSkirtVertex);
+                var coverageCluster = sourceCluster;
+                if (coastal)
+                {
+                    rebuiltCluster.Vertices.Clear();
+                    rebuiltCluster.Indices.Clear();
+                    coverageCluster = new MeshCluster();
+                }
+                // Un cluster terrestre vanilla possède déjà une topologie complète.
+                // Lui superposer une grille générée créait des faces concurrentes et
+                // les décalages de hauteur visibles sur les montagnes. On génère une
+                // grille uniquement pour un cluster côtier reconstruit ou réellement vide.
+                if (coastal || sourceCluster.Vertices.Count == 0 || sourceCluster.Indices.Count == 0)
+                {
+                    AppendExtensionGeometryToCluster(project, rebuiltCluster, coverageCluster, sourceVerticesForAttributes, clusterMinX, clusterMaxX, clusterMinZ, clusterMaxZ, page.Key.Lod, map, options, heightSampler, activeWorldPredicate, out var addedVertices, out var addedTriangles, coastal);
+                    generatedExtensionVertices += addedVertices;
+                    generatedExtensionTriangles += addedTriangles;
+                }
             }
         }
 
@@ -1964,6 +1994,20 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
     rebuilt.DeclaredClusterCount = Math.Max(page.DeclaredClusterCount, rebuilt.Clusters.Count);
     rebuilt.DecodeNotes = (rebuilt.DecodeNotes + " v42 : extension injectée par cluster depuis ActiveMapGrid.bits, topologie source conservée.").Trim();
     return rebuilt;
+}
+
+private static bool IsWorldBoundsFullyActive(IReadOnlyList<bool> mask, Int2 grid,
+    double minX, double minZ, double maxX, double maxZ, int worldWidth, int worldHeight)
+{
+    if (grid.X <= 0 || grid.Y <= 0 || mask.Count < grid.X * grid.Y) return true;
+    var firstX = Math.Clamp((int)Math.Floor(minX / Math.Max(1, worldWidth) * grid.X), 0, grid.X - 1);
+    var lastX = Math.Clamp((int)Math.Ceiling(maxX / Math.Max(1, worldWidth) * grid.X) - 1, 0, grid.X - 1);
+    var firstZ = Math.Clamp((int)Math.Floor(minZ / Math.Max(1, worldHeight) * grid.Y), 0, grid.Y - 1);
+    var lastZ = Math.Clamp((int)Math.Ceiling(maxZ / Math.Max(1, worldHeight) * grid.Y) - 1, 0, grid.Y - 1);
+    for (var z = firstZ; z <= lastZ; z++)
+    for (var x = firstX; x <= lastX; x++)
+        if (!mask[z * grid.X + x]) return false;
+    return true;
 }
 
 private static void FilterClusterToActiveFootprint(MeshCluster cluster, Func<double, double, bool> isActive)
@@ -2086,7 +2130,7 @@ private static void FilterClusterToActiveFootprint(MeshCluster cluster, Func<dou
     Func<double, double, float>? heightSampler,
     Func<double, double, bool>? activeWorldPredicate,
     out int addedVertices,
-    out int addedTriangles)
+    out int addedTriangles, bool coastal = false)
 {
     addedVertices = 0;
     addedTriangles = 0;
@@ -2105,8 +2149,12 @@ private static void FilterClusterToActiveFootprint(MeshCluster cluster, Func<dou
             gridWorldHeight / (double)activeGrid.Y)));
         step = Math.Min(step, activeCellStep);
     }
-    var xCount = Math.Clamp((int)Math.Ceiling((maxX - minX) / step) + 1, 2, 33);
-    var zCount = Math.Clamp((int)Math.Ceiling((maxZ - minZ) / step) + 1, 2, 33);
+    // 32 raw units = one gameplay tile; even distant LODs need the beach
+    // plateau and underwater ramp. Bound the largest cluster below ushort indices.
+    if (coastal) step = Math.Max(32, (int)Math.Ceiling(Math.Max(maxX - minX, maxZ - minZ) / 128d / 32d) * 32);
+    var axisLimit = coastal ? 129 : 33;
+    var xCount = Math.Clamp((int)Math.Ceiling((maxX - minX) / step) + 1, 2, axisLimit);
+    var zCount = Math.Clamp((int)Math.Ceiling((maxZ - minZ) / step) + 1, 2, axisLimit);
     var xs = BuildRegularAxisValues((int)Math.Round(minX, MidpointRounding.AwayFromZero), (int)Math.Round(maxX, MidpointRounding.AwayFromZero), xCount);
     var zs = BuildRegularAxisValues((int)Math.Round(minZ, MidpointRounding.AwayFromZero), (int)Math.Round(maxZ, MidpointRounding.AwayFromZero), zCount);
     if (xs.Count < 2 || zs.Count < 2)
@@ -2232,11 +2280,13 @@ private static void FilterClusterToActiveFootprint(MeshCluster cluster, Func<dou
 
         var midX = (x0 + x1) * 0.5;
         var midZ = (z0 + z1) * 0.5;
-        // v46.16 : le précédent OR sur les quatre coins remplissait une cellule
-        // entière dès qu'un seul coin touchait l'île. Le centre est stable avec le
-        // pas désormais borné à la taille d'une cellule ActiveMapGrid et évite tout
-        // débordement dans l'eau.
-        return activeWorldPredicate(midX, midZ);
+        var insetX = Math.Max(0.001, Math.Abs(x1 - x0) * 0.002);
+        var insetZ = Math.Max(0.001, Math.Abs(z1 - z0) * 0.002);
+        return activeWorldPredicate(midX, midZ)
+            && activeWorldPredicate(Math.Min(x0, x1) + insetX, Math.Min(z0, z1) + insetZ)
+            && activeWorldPredicate(Math.Max(x0, x1) - insetX, Math.Min(z0, z1) + insetZ)
+            && activeWorldPredicate(Math.Min(x0, x1) + insetX, Math.Max(z0, z1) - insetZ)
+            && activeWorldPredicate(Math.Max(x0, x1) - insetX, Math.Max(z0, z1) - insetZ);
     }
 
     private static bool ShouldFillExtensionCell(double x0, double x1, double z0, double z1, IReadOnlyList<FootprintTriangle> footprint, bool useFootprint)
@@ -2280,11 +2330,32 @@ private static void FilterClusterToActiveFootprint(MeshCluster cluster, Func<dou
 
     raw[3] = ToSignedUInt16Storage(uRaw);
 
-    // Raw5 high byte = low byte of V, Raw7 high byte = high byte of V.
-    // Low bytes are normal.x / tangent.x and are intentionally left for
-    // TerrainVertexAttributeCodec.RebuildSurfaceAttributes to rebuild.
+    // UV bytes must never be mistaken for an initialized downward/skirt normal.
     raw[5] = PackSignedBytePair(0, vRaw & 0xFF);
     raw[7] = PackSignedBytePair(0, (vRaw >> 8) & 0xFF);
+    TerrainVertexAttributeCodec.InitializeSurface(raw);
+}
+
+private static bool RequiresCoastalRetessellation(IslandProject project, CoarseHeightMap map,
+    double minX, double maxX, double minZ, double maxZ)
+{
+    var dry = false;
+    var wet = false;
+    var width = Math.Max(1, project.Rd3d.GridWidth);
+    var height = Math.Max(1, project.Rd3d.GridHeight);
+    var x0 = Math.Clamp((int)Math.Floor(minX / width * (map.Width - 1)), 0, map.Width - 1);
+    var x1 = Math.Clamp((int)Math.Ceiling(maxX / width * (map.Width - 1)), 0, map.Width - 1);
+    var z0 = Math.Clamp((int)Math.Floor(minZ / height * (map.Height - 1)), 0, map.Height - 1);
+    var z1 = Math.Clamp((int)Math.Ceiling(maxZ / height * (map.Height - 1)), 0, map.Height - 1);
+    for (var z = z0; z <= z1; z++)
+    for (var x = x0; x <= x1; x++)
+    {
+        var h = TerrainHeightEncoding.CoarseSampleToWorldHeight(map, map.Samples[z * map.Width + x]);
+        dry |= h >= 0;
+        wet |= h < 0;
+        if (dry && wet) return true;
+    }
+    return false;
 }
 
 private static int ClampToUInt16(double normalized)

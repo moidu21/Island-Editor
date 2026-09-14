@@ -11,7 +11,7 @@ using System.Windows.Media;
 
 namespace Anno1800IslandTool.UI;
 
-public static class UiLocalizationManager
+public static partial class UiLocalizationManager
 {
     private static readonly string SettingsDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -712,5 +712,6 @@ public static class UiLocalizationManager
         Add("Exporter l'archive modifiée", "Export modified archive", "Geändertes Archiv exportieren");
         Add("Archives ZIP (*.zip)|*.zip|Tous les fichiers (*.*)|*.*", "ZIP archives (*.zip)|*.zip|All files (*.*)|*.*", "ZIP-Archive (*.zip)|*.zip|Alle Dateien (*.*)|*.*");
         Add("Archives ZIP (*.zip)|*.zip", "ZIP archives (*.zip)|*.zip", "ZIP-Archive (*.zip)|*.zip");
+        AddV4639Translations();
     }
 }

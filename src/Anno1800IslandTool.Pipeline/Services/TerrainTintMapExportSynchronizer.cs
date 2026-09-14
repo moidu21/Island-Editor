@@ -377,11 +377,13 @@ public static class TerrainTintMapExportSynchronizer
         grassWeight /= totalWeight;
         rockWeight /= totalWeight;
 
-        // Pentes et reliefs hauts tirent naturellement la teinte vers un tint de roche,
-        // même si la MaterialMap contient encore des slots herbeux sur une montagne.
+        // v46.26 : ne plus déduire la roche de la hauteur absolue. Cette transition
+        // 18..40 formait un anneau coloré continu à mi-hauteur des montagnes (la
+        // "liaison" rose visible en jeu). La pente et surtout la MaterialMap restent
+        // les sources fiables : deux sommets de même hauteur ne doivent pas recevoir
+        // artificiellement la même bande de teinte.
         var slopeRock = SmoothStep(0.75f, 3.0f, slope);
-        var highRock = SmoothStep(18.0f, 40.0f, height);
-        var terrainRock = MathF.Max(slopeRock, highRock * 0.8f);
+        var terrainRock = slopeRock;
         rockWeight = MathF.Max(rockWeight, terrainRock * (1f - waterWeight));
         var nonRock = waterWeight + beachWeight + grassWeight;
         if (nonRock > 0f && rockWeight > 0f)
@@ -399,7 +401,11 @@ public static class TerrainTintMapExportSynchronizer
         var waterColor = (R: 130f, G: Lerp(74f, 86f, SmoothStep(-5.0f, 0.0f, height)), B: 128f);
         var beachColor = (R: 132f, G: 126f + (broadNoise * 5f), B: 130f);
         var grassColor = (R: 126f + (broadNoise * 3f), G: 116f + (landHeight01 * 12f) + (broadNoise * 8f) + (fineNoise * 3f), B: 128f + (fineNoise * 2f));
-        var rockColor = (R: 129f + (broadNoise * 4f), G: 132f + (SmoothStep(12.0f, 42.0f, height) * 34f) + (broadNoise * 8f), B: 127f);
+        // Tint roche presque neutre : le matériau de falaise fournit sa couleur.
+        // Une dominante chromatique dans la tintmap YCC se transforme facilement
+        // en magenta sous l'éclairage du jeu.
+        var rockLuminance = 128f + (broadNoise * 8f) + (fineNoise * 2f);
+        var rockColor = (R: rockLuminance, G: rockLuminance, B: rockLuminance);
 
         var sum = waterWeight + beachWeight + grassWeight + rockWeight;
         if (sum <= 0.0001f)

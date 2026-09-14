@@ -1,6 +1,7 @@
 <Window x:Class="Anno1800IslandTool.UI.TerrainHeightmapWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering"
         Title="Terrain / Heightmap / Pages réelles v22"
         Height="980"
         Width="1760"
@@ -86,7 +87,7 @@
                             </Grid.ColumnDefinitions>
                             <Border BorderBrush="#BBB" BorderThickness="1" Background="#202020" Margin="0,0,8,0">
                                 <Viewbox Stretch="Uniform">
-                                    <Image x:Name="SelectedPagePreviewImage" Stretch="Uniform"/>
+                                    <rendering:DirectX11Image x:Name="SelectedPagePreviewImage" Stretch="Uniform"/>
                                 </Viewbox>
                             </Border>
                             <TextBox x:Name="PageDetailsTextBox" Grid.Column="1" FontFamily="Consolas" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
@@ -131,13 +132,13 @@
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
                             <GroupBox Header="Height synthétique" Margin="0,0,8,0">
-                                <Viewbox Stretch="Uniform"><Image x:Name="RegeneratedHeightPreviewImage" Stretch="Uniform"/></Viewbox>
+                                <Viewbox Stretch="Uniform"><rendering:DirectX11Image x:Name="RegeneratedHeightPreviewImage" Stretch="Uniform"/></Viewbox>
                             </GroupBox>
                             <GroupBox Header="Normal synthétique" Grid.Column="1" Margin="0,0,8,0">
-                                <Viewbox Stretch="Uniform"><Image x:Name="RegeneratedNormalPreviewImage" Stretch="Uniform"/></Viewbox>
+                                <Viewbox Stretch="Uniform"><rendering:DirectX11Image x:Name="RegeneratedNormalPreviewImage" Stretch="Uniform"/></Viewbox>
                             </GroupBox>
                             <GroupBox Header="Tint synthétique" Grid.Column="2">
-                                <Viewbox Stretch="Uniform"><Image x:Name="RegeneratedTintPreviewImage" Stretch="Uniform"/></Viewbox>
+                                <Viewbox Stretch="Uniform"><rendering:DirectX11Image x:Name="RegeneratedTintPreviewImage" Stretch="Uniform"/></Viewbox>
                             </GroupBox>
                         </Grid>
                         <TextBox x:Name="RegenerationSummaryTextBox" Grid.Row="3" FontFamily="Consolas" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
@@ -180,7 +181,7 @@
                             </Grid.RowDefinitions>
                             <Border BorderBrush="#444" BorderThickness="1" Background="#202020" Margin="0,0,0,8">
                                 <Viewbox Stretch="Uniform">
-                                    <Image x:Name="SelectedPagePreviewLargeImage" Stretch="Uniform"/>
+                                    <rendering:DirectX11Image x:Name="SelectedPagePreviewLargeImage" Stretch="Uniform"/>
                                 </Viewbox>
                             </Border>
                             <TextBox x:Name="SelectedPagePreviewTextBox" Grid.Row="1" FontFamily="Consolas" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>

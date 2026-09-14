@@ -465,7 +465,6 @@ public sealed class SmokeTests
         Assert.Single(discovered.TintMapPagePaths);
     }
 
-    [Fact]
     public void DimensionValidator_Returns_No_Errors_For_Consistent_Minimal_Project()
     {
         var project = new IslandProject
@@ -629,7 +628,6 @@ public sealed class SmokeTests
         Assert.Contains("<ObjectId>7</ObjectId>", project.RawContent.RootText);
     }
 
-    [Fact]
     public void ConservativeExporter_Copies_Source_Archive_And_Adds_Report()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "Anno1800IslandToolTests", Guid.NewGuid().ToString("N"));
@@ -733,7 +731,6 @@ public sealed class SmokeTests
 
 
 
-    [Fact]
     public void Exporter_Adds_Generated_Terrain_Entries_When_Missing_From_Source()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "Anno1800IslandToolTests", Guid.NewGuid().ToString("N"));
@@ -788,7 +785,6 @@ public sealed class SmokeTests
     }
 
 
-    [Fact]
     public void Exporter_Writes_Generated_TintMaps_In_Full_Export()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "Anno1800IslandToolTests", Guid.NewGuid().ToString("N"));
@@ -1252,7 +1248,6 @@ public sealed class SmokeTests
         Assert.DoesNotContain("<Materials>", project.RawContent.MaterialSetText);
     }
 
-    [Fact]
     public void NormalMapPageWriter_WritePreserving_Replaces_Only_Map_Values()
     {
         const string original = """
@@ -1380,7 +1375,6 @@ public sealed class SmokeTests
     }
 
 
-    [Fact]
     public void TerrainMaterialPainter_Blend_Adds_Material_And_Keeps_Exportable_Packing()
     {
         var map = new TerrainMaterialMap
@@ -1657,9 +1651,316 @@ public sealed class SmokeTests
         Assert.DoesNotMatch(@"<MaterialSetFileName>.*?</MaterialSetFileName>\s*</Content>", text);
     }
 
+    [Fact]
+    public void EmbeddedMaterialSets_Contain_UserLibrary_And_Create_Exact_Rd3d_Game_Path()
+    {
+        var library = new EmbeddedMaterialSetLibrary();
+        var expectedNames = new[]
+        {
+            "arctic_01_test.xml",
+            "colony_02_dlc10_scenario02.xml",
+            "colony02_01_storyisland_03.xml",
+            "colony02_01.xml",
+            "south_america_01.xml",
+            "terra_01.xml"
+        };
+        var available = library.GetAvailableFileNames();
+        foreach (var expectedName in expectedNames)
+        {
+            Assert.Contains(expectedName, available, StringComparer.OrdinalIgnoreCase);
+            Assert.True(library.TryRead(expectedName, out var embeddedText));
+            Assert.False(string.IsNullOrWhiteSpace(embeddedText));
+        }
 
+        Assert.True(library.TryRead("terra_01.xml", out var text));
+        var project = new IslandProject
+        {
+            Rd3d = new Rd3dDefinition { PropGrid = new PropGridDefinition() },
+            RawContent = new RawProjectContent
+            {
+                Rd3dText = """
+<Content>
+  <GridWidth>1</GridWidth>
+  <GridHeight>1</GridHeight>
+  <HeightPageBorderTexels>0</HeightPageBorderTexels>
+</Content>
+"""
+            }
+        };
+
+        new IslandProjectEditor().ReplaceMaterialSet(project, "terra_01.xml", text, "terra_01.xml", updateRd3dReference: true);
+
+        const string expectedPath = "data/config/engine/material_sets/terra_01.xml";
+        Assert.Equal(expectedPath, project.Rd3d.MaterialSetFileName);
+        Assert.Contains($"<MaterialSetFileName>{expectedPath}</MaterialSetFileName>", project.RawContent.Rd3dText);
+        Assert.Equal(1, Regex.Matches(project.RawContent.Rd3dText!, "<MaterialSetFileName>", RegexOptions.IgnoreCase).Count);
+    }
 
     [Fact]
+    public void MaterialSetEnvironmentSynchronizer_Changes_Natural_PropGrid_Assets_And_Preserves_Gameplay_Objects()
+    {
+        var project = new IslandProject
+        {
+            Rd3d = new Rd3dDefinition
+            {
+                PropGrid = new PropGridDefinition
+                {
+                    FileNames = new List<string>
+                    {
+                        "data/graphics/props/terrain_props/rocks/rocks_moderate/rock_moderate_04.prp",
+                        "data/graphics/buildings/residence/residence_tier01.prp"
+                    }
+                }
+            }
+        };
+        var selected = new MaterialSetDefinition { FileName = "south_america_01.xml" };
+        selected.Materials.Add(new MaterialDefinition
+        {
+            Id = 20,
+            ObjectFileName = "data/graphics/props/terrain_props/vegetation/grass/flowers_jungle_01.prp"
+        });
+
+        var report = new MaterialSetEnvironmentSynchronizer().Synchronize(project, null, selected);
+
+        Assert.Equal("Jungle", report.TargetBiome);
+        Assert.Equal(1, report.PropGridFileNamesUpdated);
+        Assert.Contains("jungle", project.Rd3d.PropGrid.FileNames[0], StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("data/graphics/buildings/residence/residence_tier01.prp", project.Rd3d.PropGrid.FileNames[1]);
+    }
+
+    [Fact]
+    public void MaterialSetEnvironmentSynchronizer_Maps_GroundObjects_By_Material_Id_And_Reports_Page()
+    {
+        var key = new TerrainPageKey(0, 1, 2);
+        var groundObject = new GroundObjectInstance
+        {
+            ObjectFileName = "data\\graphics\\props\\terrain_props\\vegetation\\grass\\grass_moderate_02.prp",
+            PositionXZ = new Float2(12, 34),
+            RotationY = 45,
+            Coverage = 200
+        };
+        var project = new IslandProject();
+        project.MeshPages[key] = new MeshPage
+        {
+            Key = key,
+            Clusters = new List<MeshCluster> { new() { GroundObjects = new List<GroundObjectInstance> { groundObject } } }
+        };
+        var previous = new MaterialSetDefinition { FileName = "terra_01.xml" };
+        previous.Materials.Add(new MaterialDefinition { Id = 17, ObjectFileName = groundObject.ObjectFileName });
+        var selected = new MaterialSetDefinition { FileName = "south_america_01.xml" };
+        selected.Materials.Add(new MaterialDefinition
+        {
+            Id = 17,
+            ObjectFileName = "data\\graphics\\props\\terrain_props\\vegetation\\grass\\grass_jungle_01.prp"
+        });
+
+        var report = new MaterialSetEnvironmentSynchronizer().Synchronize(project, previous, selected);
+
+        Assert.Equal(1, report.GroundObjectsUpdated);
+        Assert.Contains(key, report.AffectedMeshPages);
+        Assert.Equal("data\\graphics\\props\\terrain_props\\vegetation\\grass\\grass_jungle_01.prp", groundObject.ObjectFileName);
+        Assert.Equal(new Float2(12, 34), groundObject.PositionXZ);
+        Assert.Equal(45, groundObject.RotationY);
+        Assert.Equal(200, groundObject.Coverage);
+    }
+
+    [Fact]
+    public void MaterialSetEnvironmentSynchronizer_Replaces_Other_Biomes_And_Keeps_PropGrid_Exportable()
+    {
+        var project = new IslandProject
+        {
+            Rd3d = new Rd3dDefinition
+            {
+                PropGrid = new PropGridDefinition
+                {
+                    FileNames = new List<string>
+                    {
+                        "data/graphics/props/terrain_props/vegetation/bushes/bush_jungle_01_large.prp",
+                        "data/graphics/props/terrain_props/rocks/rocks_jungle/rock_jungle_03.prp",
+                        "data/graphics/buildings/harbour/trading_post.prp"
+                    },
+                    Instances = new List<PropGridInstanceDefinition>
+                    {
+                        new() { RawNoneXml = "<None><Index>0</Index><Position>1 2 3</Position></None>" },
+                        new() { RawNoneXml = "<None><Index>1</Index><Position>4 5 6</Position></None>" },
+                        new() { RawNoneXml = "<None><Index>2</Index><Position>7 8 9</Position></None>" }
+                    }
+                }
+            }
+        };
+        var key = new TerrainPageKey(1, 0, 0);
+        project.MeshPages[key] = new MeshPage
+        {
+            Key = key,
+            Clusters = new List<MeshCluster>
+            {
+                new()
+                {
+                    GroundObjects = new List<GroundObjectInstance>
+                    {
+                        new() { ObjectFileName = "data\\graphics\\props\\terrain_props\\vegetation\\grass\\flowers_jungle_02.prp" }
+                    }
+                }
+            }
+        };
+        var selected = new MaterialSetDefinition { FileName = "colony02_01.xml" };
+
+        var report = new MaterialSetEnvironmentSynchronizer().Synchronize(project, null, selected);
+
+        Assert.Equal("Colony02", report.TargetBiome);
+        Assert.DoesNotContain(project.Rd3d.PropGrid.FileNames, path => path.Contains("jungle", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(project.Rd3d.PropGrid.FileNames, path => path.Contains("colony02", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(project.Rd3d.PropGrid.FileNames, path => path.Contains("trading_post", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(3, project.Rd3d.PropGrid.Instances.Count);
+        Assert.Contains(project.Rd3d.PropGrid.Instances, instance => instance.RawNoneXml.Contains("1 2 3", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(project.Rd3d.PropGrid.Instances, instance => instance.RawNoneXml.Contains("<Index>0</Index>", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(project.Rd3d.PropGrid.Instances, instance => instance.RawNoneXml.Contains("<Index>1</Index>", StringComparison.OrdinalIgnoreCase));
+        Assert.Empty(project.MeshPages[key].Clusters[0].GroundObjects);
+        Assert.True(report.PropGridFileNamesUpdated >= 2);
+        Assert.Equal(0, report.PropGridInstancesRemoved);
+        Assert.Equal(1, report.GroundObjectsRemoved);
+    }
+
+    [Fact]
+    public void MaterialSetEnvironmentSynchronizer_Uses_Vanilla_Shared_Assets_Without_False_Foreign_Filtering()
+    {
+        var sharedVanillaPath = "data/graphics/props/terrain_props/vegetation/bushes/bush_moderate_01_large.prp";
+        var project = new IslandProject
+        {
+            Rd3d = new Rd3dDefinition
+            {
+                PropGrid = new PropGridDefinition { FileNames = new List<string> { sharedVanillaPath } }
+            }
+        };
+        var selected = new MaterialSetDefinition { FileName = "south_america_01.xml" };
+
+        var report = new MaterialSetEnvironmentSynchronizer().Synchronize(project, null, selected);
+
+        Assert.Equal(sharedVanillaPath, Assert.Single(project.Rd3d.PropGrid.FileNames));
+        Assert.Equal(0, report.PropGridFileNamesUpdated);
+        Assert.Contains(report.Notes, note => note.Contains("Profil vanilla Jungle", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void MaterialSetEnvironmentSynchronizer_Replaces_Generic_Asset_With_Target_Vanilla_Profile()
+    {
+        var project = new IslandProject
+        {
+            Rd3d = new Rd3dDefinition
+            {
+                PropGrid = new PropGridDefinition
+                {
+                    FileNames = new List<string>
+                    {
+                        "data/graphics/props/terrain_props/building_deco_plants/building_deco_tree_01.prp",
+                        "data/graphics/buildings/residence/residence_tier01.prp"
+                    },
+                    Instances = new List<PropGridInstanceDefinition>
+                    {
+                        new() { RawNoneXml = "<None><Index>0</Index></None>" },
+                        new() { RawNoneXml = "<None><Index>1</Index></None>" }
+                    }
+                }
+            }
+        };
+        var selected = new MaterialSetDefinition { FileName = "arctic_01.xml" };
+
+        var report = new MaterialSetEnvironmentSynchronizer().Synchronize(project, null, selected);
+
+        Assert.Equal(2, project.Rd3d.PropGrid.FileNames.Count);
+        Assert.Contains(project.Rd3d.PropGrid.FileNames, path => path.Contains("dlc03", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(project.Rd3d.PropGrid.FileNames, path => path.Contains("building_deco_tree_01", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(project.Rd3d.PropGrid.FileNames, path => path.Contains("residence_tier01", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(2, project.Rd3d.PropGrid.Instances.Count);
+        Assert.Equal(1, report.PropGridFileNamesUpdated);
+        Assert.Equal(0, report.PropGridInstancesRemoved);
+    }
+
+    [Fact]
+    public void MaterialSetEnvironmentSynchronizer_Uses_AssetsXml_Variants_For_Target_Session()
+    {
+        var targetVariant = "data/dlc06/graphics/props/terrain_props/rocks/rocks_colony02/rock_colony02_01.prp";
+        var project = new IslandProject
+        {
+            Rd3d = new Rd3dDefinition
+            {
+                PropGrid = new PropGridDefinition { FileNames = new List<string> { targetVariant } }
+            }
+        };
+        var selected = new MaterialSetDefinition { FileName = "colony02_01.xml" };
+
+        var report = new MaterialSetEnvironmentSynchronizer().Synchronize(project, null, selected);
+
+        Assert.Equal(targetVariant, Assert.Single(project.Rd3d.PropGrid.FileNames));
+        Assert.Equal(0, report.PropGridFileNamesUpdated);
+    }
+
+    [Fact]
+    public void ReplaceMaterialSet_Prepares_Rd3d_And_Mesh_Writes_Without_Previous_Biome_References()
+    {
+        var project = new IslandProject
+        {
+            MaterialSet = new MaterialSetDefinition { FileName = "south_america_01.xml" },
+            Rd3d = new Rd3dDefinition
+            {
+                PropGrid = new PropGridDefinition
+                {
+                    FileNames = new List<string>
+                    {
+                        "data/graphics/props/terrain_props/vegetation/bushes/bush_jungle_01_large.prp",
+                        "data/graphics/props/terrain_props/rocks/rocks_jungle/rock_jungle_01.prp"
+                    },
+                    Instances = new List<PropGridInstanceDefinition>
+                    {
+                        new() { RawNoneXml = "<None><Index>1</Index><Position>1 2 3</Position></None>" }
+                    }
+                }
+            },
+            RawContent = new RawProjectContent
+            {
+                Rd3dText = "<Content><GridWidth>384</GridWidth><GridHeight>384</GridHeight><PropGrid><FileNames></FileNames><Instances></Instances></PropGrid></Content>"
+            }
+        };
+        var key = new TerrainPageKey(1, 0, 0);
+        project.MeshPages[key] = new MeshPage
+        {
+            Key = key,
+            OriginalRelativePath = "_gamedata/test/meshes/1/0x0.xml",
+            Clusters = new List<MeshCluster>
+            {
+                new()
+                {
+                    GroundObjects = new List<GroundObjectInstance>
+                    {
+                        new() { ObjectFileName = "data\\graphics\\props\\terrain_props\\vegetation\\grass\\flowers_jungle_01.prp" }
+                    }
+                }
+            }
+        };
+        const string colony02MaterialSet = "<Material><ID>0</><Type>0</><FileName>data/dlc06/graphics/landscape/terrain/colony02_ground.psd</><ObjectFileName></>";
+
+        var report = new IslandProjectEditor().ReplaceMaterialSet(
+            project,
+            "colony02_01.xml",
+            colony02MaterialSet,
+            "colony02_01.xml",
+            updateRd3dReference: true);
+
+        Assert.True(report.HasChanges);
+        Assert.DoesNotContain("jungle", project.RawContent.Rd3dText!, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("colony02", project.RawContent.Rd3dText!, StringComparison.OrdinalIgnoreCase);
+        Assert.NotNull(project.LocalRegeneration);
+        var meshWrite = Assert.Single(project.LocalRegeneration!.GeneratedMeshPageWrites);
+        Assert.DoesNotContain("jungle", meshWrite.XmlText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("flowers_jungle", meshWrite.XmlText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("GroundObjects uniquement", meshWrite.Summary, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(project.ValidationReport.Messages, message =>
+            message.Severity == ValidationSeverity.Error &&
+            message.Message.Contains("LOD0/LOD1 non supportées", StringComparison.OrdinalIgnoreCase));
+    }
+
+
+
     public void CoastTransitionPainter_Classifies_HeightMap_Into_Water_Beach_And_Land()
     {
         var map = new TerrainMaterialMap
@@ -1705,6 +2006,78 @@ public sealed class SmokeTests
         Assert.Equal(1, map.GetDominantMaterialId(2, 0));
         Assert.Equal(2, map.GetDominantMaterialId(3, 0));
     }
+
+    [Fact]
+    public void TopologyMaterialPainter_Classifies_Local_Form_And_Ignores_Absolute_Height()
+    {
+        static TerrainMaterialMap CreateMaterialMap()
+        {
+            var map = new TerrainMaterialMap
+            {
+                Width = 5,
+                Height = 5,
+                MaterialIdBlockSize = 1,
+                PackedMaterialIds = new uint[25],
+                PackedMaterialAlphas = new uint[25]
+            };
+            for (var y = 0; y < 5; y++)
+            {
+                for (var x = 0; x < 5; x++)
+                {
+                    map.SetDominantMaterialSafe(x, y, 2, TerrainMaterialPackEncoding.MaxPackedSlotValue);
+                }
+            }
+            map.SetDominantMaterialSafe(0, 0, 9, TerrainMaterialPackEncoding.MaxPackedSlotValue);
+            return map;
+        }
+
+        static CoarseHeightMap CreateHeightMap(float offset)
+        {
+            var samples = Enumerable.Repeat(offset, 25).ToArray();
+            samples[(2 * 5) + 2] = offset + 4f;
+            samples[(3 * 5) + 3] = offset - 2f;
+            return new CoarseHeightMap
+            {
+                Width = 5,
+                Height = 5,
+                SampleEncoding = TerrainHeightSampleEncoding.WorldUnits,
+                Samples = samples
+            };
+        }
+
+        var options = new TerrainTopologyMaterialOptions
+        {
+            FlatMaterialId = 10,
+            GentleSlopeMaterialId = 11,
+            SteepSlopeMaterialId = 12,
+            RidgeMaterialId = 13,
+            HollowMaterialId = 14,
+            FlatSlopeMaximum = 0.1f,
+            SteepSlopeMinimum = 0.8f,
+            CurvatureSensitivity = 0.25f,
+            AnalysisRadius = 1,
+            PreserveExistingWaterAndBeach = true
+        };
+        options.PreservedMaterialIds.Add(9);
+
+        var lowMap = CreateMaterialMap();
+        var highMap = CreateMaterialMap();
+        var lowResult = TerrainTopologyMaterialPainter.Apply(lowMap, CreateHeightMap(0f), options, out var lowStats);
+        var highResult = TerrainTopologyMaterialPainter.Apply(highMap, CreateHeightMap(100f), options, out var highStats);
+
+        Assert.True(lowResult.HasChanges);
+        Assert.Equal(lowStats.FlatCells, highStats.FlatCells);
+        Assert.Equal(lowStats.GentleSlopeCells, highStats.GentleSlopeCells);
+        Assert.Equal(lowStats.SteepSlopeCells, highStats.SteepSlopeCells);
+        Assert.Equal(lowStats.RidgeCells, highStats.RidgeCells);
+        Assert.Equal(lowStats.HollowCells, highStats.HollowCells);
+        Assert.True(lowStats.RidgeCells > 0);
+        Assert.True(lowStats.HollowCells > 0);
+        Assert.True(lowStats.FlatCells > 0);
+        Assert.Equal(9, lowMap.GetDominantMaterialId(0, 0));
+        Assert.Equal(lowMap.GetDominantMaterialId(2, 2), highMap.GetDominantMaterialId(2, 2));
+    }
+
     [Fact]
     public void Editor_Replaces_GroundObjects_And_Generates_Mesh_Page_Write()
     {

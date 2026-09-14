@@ -6,6 +6,7 @@ public sealed class DiscoveredIslandFiles
     public string? Rd3dPath { get; set; }
     public string? GameDataPath { get; set; }
     public string? MaterialSetPath { get; set; }
+    public string? AnnoEditorLevelPath { get; set; }
 
     public List<string> MeshPagePaths { get; } = new();
     public List<string> NormalMapPagePaths { get; } = new();

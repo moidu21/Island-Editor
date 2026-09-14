@@ -29,11 +29,10 @@ namespace Anno1800IslandTool.UI;
 
 public partial class Terrain3DWindow : Window
 {
+    private readonly bool _gpuControllerOnly;
     private readonly IslandProject _project;
     private readonly ObservableCollection<MeshPage3DRow> _meshPageRows = new();
     private Model3DGroup _sceneRoot = new();
-    private readonly ModelVisual3D _sceneVisual = new();
-    private readonly ModelVisual3D _overlayVisual = new();
     private readonly PerspectiveCamera _camera = new();
     private IReadOnlyList<TerrainHitGeometry> _activeTerrainHitGeometries = Array.Empty<TerrainHitGeometry>();
     private static readonly ParallelOptions CpuParallelOptions = TerrainComputeScheduler.ParallelOptions;
@@ -122,20 +121,21 @@ public partial class Terrain3DWindow : Window
     private bool _pendingInteractivePageRowsRefresh;
     private readonly TerrainComputeCapabilities _computeCapabilities = TerrainComputeCapabilities.DetectCpuOnly();
 
-    public Terrain3DWindow(IslandProject project)
+    public Terrain3DWindow(IslandProject project, bool gpuControllerOnly = false)
     {
+        _gpuControllerOnly = gpuControllerOnly;
         _project = project ?? throw new ArgumentNullException(nameof(project));
         InitializeComponent();
         Loaded += (_, _) => UiLocalizationManager.ApplyTo(this);
 
-        _sceneVisual.Content = _sceneRoot;
-        _overlayVisual.Content = new Model3DGroup();
-        SceneViewport.Children.Add(_sceneVisual);
-        SceneViewport.Children.Add(_overlayVisual);
-        SceneViewport.Camera = _camera;
-
-        _rebuildTimer.Interval = TimeSpan.FromMilliseconds(120);
-        _rebuildTimer.Tick += RebuildTimer_Tick;
+        if (!_gpuControllerOnly)
+        {
+            SceneViewport.Scene = _sceneRoot;
+            SceneViewport.OverlayScene = new Model3DGroup();
+            SceneViewport.EditorCamera = _camera;
+            _rebuildTimer.Interval = TimeSpan.FromMilliseconds(120);
+            _rebuildTimer.Tick += RebuildTimer_Tick;
+        }
 
         SourceModeComboBox.SelectedIndex = 0;
         BrushModeComboBox.SelectedIndex = 0;
@@ -151,6 +151,12 @@ public partial class Terrain3DWindow : Window
         _originalActiveMapMaskForMaterialPreserve = _activeMapMask.ToArray();
         _originalMaterialMapForExtensionPreserve = _project.Rd3d.MaterialMap.Clone();
         InitializeHeightEditState();
+        if (_gpuControllerOnly)
+        {
+            // Reuse terrain operations without showing or building a legacy scene.
+            PopulateLods();
+            return;
+        }
         foreach (var pair in _project.MeshPages)
         {
             _originalMeshPagesSnapshot[pair.Key] = CloneMeshPage(pair.Value);
@@ -186,10 +192,8 @@ public partial class Terrain3DWindow : Window
     {
         try
         {
-            SceneViewport.Children.Clear();
-            _sceneVisual.Content = null;
-            _overlayVisual.Content = null;
-            _sceneRoot.Children.Clear();
+            SceneViewport.ClearScene();
+            if (!_sceneRoot.IsFrozen) _sceneRoot.Children.Clear();
             _activeTerrainHitGeometries = Array.Empty<TerrainHitGeometry>();
             _meshPageRows.Clear();
             _originalMeshPagesForCompare.Clear();
@@ -268,6 +272,7 @@ public partial class Terrain3DWindow : Window
 
     private void PopulatePageRows(TerrainPageKey? preferredSelection = null)
     {
+        if (_gpuControllerOnly) return;
         var previous = preferredSelection ?? GetSelectedPageRow()?.Page.Key;
         _meshPageRows.Clear();
 
@@ -411,7 +416,9 @@ public partial class Terrain3DWindow : Window
                 ApplyMaximumExpansionFromGpu,
                 ApplyBeachFromGpu,
                 ApplyFootprintFromGpu,
-                ValidateEntireTerrainFromGpu)
+                ApplyTreesFromGpu,
+                ValidateEntireTerrainFromGpu,
+                ApplyObjTerrainFromGpu)
             {
                 Owner = this
             };
@@ -444,7 +451,7 @@ public partial class Terrain3DWindow : Window
         {
             MessageBox.Show(
                 this,
-                $"Le viewport Direct3D 11 n'a pas pu démarrer : {ex.Message}\n\nL'éditeur WPF actuel reste disponible.",
+                $"Le viewport Direct3D 11 n'a pas pu démarrer : {ex.Message}\n\nL'éditeur terrain principal actuel reste disponible.",
                 "Éditeur GPU Direct3D 11",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
@@ -548,6 +555,13 @@ public partial class Terrain3DWindow : Window
         {
             Array.Resize(ref before, expectedCellCount);
         }
+
+        var borderWidth = _project.Rd3d.GridWidth > 0 ? _project.Rd3d.GridWidth : _project.Root.MapSize * 32d;
+        var borderHeight = _project.Rd3d.GridHeight > 0 ? _project.Rd3d.GridHeight : _project.Root.MapSize * 32d;
+        for (var z = 0; z < grid.Y; z++)
+        for (var x = 0; x < grid.X; x++)
+            if (OceanSafetyBorder.IntersectsCell(x, z, grid.X, grid.Y, borderWidth, borderHeight))
+                next[z * grid.X + x] = before[z * grid.X + x];
 
         var addedCells = 0;
         var removedCells = 0;
@@ -697,6 +711,7 @@ public partial class Terrain3DWindow : Window
                 for (var x = left; x <= right; x++)
                 {
                     var worldX = x / (double)Math.Max(1, map.Width - 1) * worldWidth;
+                    if (OceanSafetyBorder.Contains(worldX, worldZ, worldWidth, worldHeight)) continue;
                     var normalized = FineStampNormalizedDistance(worldX - stamp.CenterX, worldZ - stamp.CenterZ, radius, stamp.Pattern);
                     if (normalized > 1d)
                     {
@@ -1135,7 +1150,7 @@ public partial class Terrain3DWindow : Window
         return false;
     }
 
-    private string ApplyBeachFromGpu(
+    private string ApplyStraightBeachFromGpu(
         GpuBeachDefinition beach,
         IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)> pendingChangedRegions)
     {
@@ -1387,11 +1402,9 @@ public partial class Terrain3DWindow : Window
         var allIds = Regex.Matches(text, @"<ID>\s*(?<id>-?\d+)\s*</ID>", RegexOptions.IgnoreCase)
             .Select(match => long.TryParse(match.Groups["id"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : 0L)
             .ToHashSet();
-        // v46.16 : dans Anno, la Position d'un objet CoastLine sert également de
-        // point d'ancrage au placement du comptoir. Une seule CoastLine très longue
-        // dessinait correctement le rivage, mais ne rendait constructible que son
-        // unique point d'origine. Découper la ligne en tronçons continus fournit des
-        // ancrages régulièrement espacés sur toute la plage, sans changer le tracé.
+        // v46.27 : les îles vanilla utilisent une CoastLine continue, munie de
+        // points intermédiaires. Les petits objets successifs créaient en jeu les
+        // dalles de construction séparées visibles entre chaque segment.
         var beachSegments = SplitBeachForGameplayAnchors(beach);
         var generatedObjects = new List<string>(beachSegments.Count);
         var objectId = long.MinValue + 1024;
@@ -1419,35 +1432,9 @@ public partial class Terrain3DWindow : Window
         return generatedObjects.Count;
     }
 
+    // Un objet continu par tronçon, comme sur l'île originale.
     private static IReadOnlyList<GpuBeachDefinition> SplitBeachForGameplayAnchors(GpuBeachDefinition beach)
-    {
-        var dx = beach.EndX - beach.StartX;
-        var dz = beach.EndZ - beach.StartZ;
-        var length = Math.Sqrt((dx * dx) + (dz * dz));
-        if (length <= 192d)
-        {
-            return new[] { beach };
-        }
-
-        // 192 unités RD3D correspondent à environ 6 cases root sur les îles
-        // standards. L'espacement reste inférieur à la largeur utile d'un comptoir,
-        // afin que les zones constructibles se recouvrent le long de toute la plage.
-        var segmentCount = Math.Clamp((int)Math.Ceiling(length / 192d), 1, 96);
-        var segments = new List<GpuBeachDefinition>(segmentCount);
-        for (var index = 0; index < segmentCount; index++)
-        {
-            var t0 = index / (double)segmentCount;
-            var t1 = (index + 1) / (double)segmentCount;
-            segments.Add(beach with
-            {
-                StartX = beach.StartX + (dx * t0),
-                StartZ = beach.StartZ + (dz * t0),
-                EndX = beach.StartX + (dx * t1),
-                EndZ = beach.StartZ + (dz * t1)
-            });
-        }
-        return segments;
-    }
+        => new[] { beach with { AnchorX = null, AnchorZ = null } };
 
     private static string RemoveGeneratedCoastLines(string text, string objectGroupName)
     {
@@ -1457,7 +1444,10 @@ public partial class Terrain3DWindow : Window
             return text;
         }
 
-        var generatedIdLimit = long.MinValue + 1_000_000;
+        // Inclure aussi les IDs v46.20+ recréés par la réparation automatique
+        // (plage long.MinValue+2 000 000). Sinon une nouvelle plage conservait
+        // l'ancienne série courte et superposait deux définitions incompatibles.
+        var generatedIdLimit = long.MinValue + 3_000_000;
         var edits = new List<AreaObjectEdit>();
         var removed = false;
         foreach (var container in snapshot.Containers)
@@ -1482,106 +1472,6 @@ public partial class Terrain3DWindow : Window
         return removed ? GameDataAreaObjectsXmlEditor.ReplaceObjects(text, snapshot, edits) : text;
     }
 
-    private int RepairGeneratedPlayableCoastLine()
-    {
-        var text = _project.RawContent.GameDataText;
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return 0;
-        }
-
-        var snapshot = GameDataAreaObjectsXmlEditor.Extract(text, "EditorObject");
-        var generatedIdLimit = long.MinValue + 1_000_000;
-        var generated = snapshot.Containers
-            .SelectMany(container => container.Objects)
-            .Where(item =>
-            {
-                var idMatch = Regex.Match(item.RawXml, @"<ID>\s*(?<id>-?\d+)\s*</ID>", RegexOptions.IgnoreCase);
-                return item.RawXml.Contains("<guid>1003910</guid>", StringComparison.OrdinalIgnoreCase) &&
-                       idMatch.Success &&
-                       long.TryParse(idMatch.Groups["id"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) &&
-                       id >= long.MinValue + 1024 && id <= generatedIdLimit;
-            })
-            .ToList();
-        if (generated.Count == 0)
-        {
-            return 0;
-        }
-
-        var points = Regex.Matches(
-                string.Join(Environment.NewLine, generated.Select(item => item.RawXml)),
-                @"<p>\s*(?<x>[-+0-9.,Ee]+)\s+(?<y>[-+0-9.,Ee]+)\s+(?<z>[-+0-9.,Ee]+)\s*</p>",
-                RegexOptions.IgnoreCase)
-            .Select(match => (
-                X: ParseGameDataDouble(match.Groups["x"].Value),
-                Y: ParseGameDataDouble(match.Groups["y"].Value),
-                Z: ParseGameDataDouble(match.Groups["z"].Value)))
-            .Where(point => point.X.HasValue && point.Y.HasValue && point.Z.HasValue)
-            .Select(point => (X: point.X!.Value, Y: point.Y!.Value, Z: point.Z!.Value))
-            .ToList();
-        if (points.Count < 2)
-        {
-            return 0;
-        }
-
-        var mapSize = Math.Max(1d, _project.Root.MapSize > 0 ? _project.Root.MapSize : _project.Metadata.MapSize);
-        var gridWidth = Math.Max(1d, _project.Rd3d.GridWidth > 0 ? _project.Rd3d.GridWidth : mapSize * 32d);
-        var gridHeight = Math.Max(1d, _project.Rd3d.GridHeight > 0 ? _project.Rd3d.GridHeight : mapSize * 32d);
-        // Les tronçons v46.16 partagent leurs extrémités. Retrouver les deux points
-        // les plus éloignés permet de réparer toute la plage, pas seulement le
-        // premier tronçon.
-        var start = points[0];
-        var end = points[^1];
-        var bestDistanceSquared = -1d;
-        foreach (var first in points)
-        {
-            foreach (var second in points)
-            {
-                var distanceSquared = ((second.X - first.X) * (second.X - first.X)) +
-                                      ((second.Z - first.Z) * (second.Z - first.Z));
-                if (distanceSquared > bestDistanceSquared)
-                {
-                    bestDistanceSquared = distanceSquared;
-                    start = first;
-                    end = second;
-                }
-            }
-        }
-        var marginRoot = Math.Min(mapSize * 0.20d, (OuterOceanSafetyWidthWorld + 64d) / Math.Max(1d, gridWidth / mapSize));
-        if (Math.Abs(end.X - start.X) >= Math.Abs(end.Z - start.Z))
-        {
-            start.X = Math.Clamp(start.X, marginRoot, mapSize - marginRoot);
-            end.X = Math.Clamp(end.X, marginRoot, mapSize - marginRoot);
-        }
-        else
-        {
-            start.Z = Math.Clamp(start.Z, marginRoot, mapSize - marginRoot);
-            end.Z = Math.Clamp(end.Z, marginRoot, mapSize - marginRoot);
-        }
-
-        var directionMatch = Regex.Match(generated[0].RawXml, @"<d>\s*(?<x>[-+0-9.,Ee]+)\s+(?<z>[-+0-9.,Ee]+)\s*</d>", RegexOptions.IgnoreCase);
-        var outwardX = directionMatch.Success ? ParseGameDataDouble(directionMatch.Groups["x"].Value) ?? 0d : 0d;
-        var outwardZ = directionMatch.Success ? ParseGameDataDouble(directionMatch.Groups["z"].Value) ?? 0d : 0d;
-        if (Math.Abs(outwardX) + Math.Abs(outwardZ) < 0.5d)
-        {
-            outwardX = Math.Abs(end.X - start.X) < Math.Abs(end.Z - start.Z) ? (start.X >= mapSize * 0.5d ? 1d : -1d) : 0d;
-            outwardZ = Math.Abs(end.Z - start.Z) <= Math.Abs(end.X - start.X) ? (start.Z >= mapSize * 0.5d ? 1d : -1d) : 0d;
-        }
-
-        var definition = new GpuBeachDefinition(
-            FindMostDetailedEditableLod(),
-            start.X / mapSize * gridWidth,
-            start.Z / mapSize * gridHeight,
-            end.X / mapSize * gridWidth,
-            end.Z / mapSize * gridHeight,
-            outwardX,
-            outwardZ,
-            256d,
-            384d,
-            TerrainHeightEncoding.WorldHeightToLegacyFineHeight((float)start.Y),
-            -2047f);
-        return AddPlayableCoastLineToGameData(definition);
-    }
 
     private static double? ParseGameDataDouble(string value)
     {
@@ -1599,30 +1489,39 @@ public partial class Terrain3DWindow : Window
         var startZ = beach.StartZ / gridHeight * mapHeight;
         var endX = beach.EndX / gridWidth * mapWidth;
         var endZ = beach.EndZ / gridHeight * mapHeight;
+        var anchorX = (beach.AnchorX ?? beach.StartX) / gridWidth * mapWidth;
+        var anchorZ = (beach.AnchorZ ?? beach.StartZ) / gridHeight * mapHeight;
         var height = TerrainHeightEncoding.LegacyFineHeightToWorldHeight(beach.BeachDecodedHeight);
-        var mapLength = Math.Sqrt(((endX - startX) * (endX - startX)) + ((endZ - startZ) * (endZ - startZ)));
-        var pointCount = Math.Clamp((int)Math.Ceiling(mapLength / 4d) + 1, 2, 96);
-        var points = Enumerable.Range(0, pointCount)
-            .Select(index =>
-            {
-                var t = index / (double)(pointCount - 1);
-                return (X: startX + ((endX - startX) * t), Z: startZ + ((endZ - startZ) * t));
-            })
-            .ToList();
-        var minX = points.Min(point => point.X);
-        var minZ = points.Min(point => point.Z);
-        var maxX = points.Max(point => point.X);
-        var maxZ = points.Max(point => point.Z);
-        var direction = Math.Abs(beach.OutwardX) >= Math.Abs(beach.OutwardZ)
-            ? (beach.OutwardX >= 0d ? "1 0" : "-1 0")
-            : (beach.OutwardZ >= 0d ? "0 1" : "0 -1");
+        var points = beach.Contour is { Count: > 0 }
+            ? beach.Contour.Select(span => (
+                    X: span.Start.X / gridWidth * mapWidth,
+                    Z: span.Start.Y / gridHeight * mapHeight,
+                    DX: (double)span.Outward.X,
+                    DZ: (double)span.Outward.Y))
+                .Append((
+                    X: beach.Contour[^1].End.X / gridWidth * mapWidth,
+                    Z: beach.Contour[^1].End.Y / gridHeight * mapHeight,
+                    DX: (double)beach.Contour[^1].Outward.X,
+                    DZ: (double)beach.Contour[^1].Outward.Y))
+                .ToList()
+            : Enumerable.Range(0, Math.Clamp((int)Math.Ceiling(Math.Sqrt(((endX - startX) * (endX - startX)) + ((endZ - startZ) * (endZ - startZ))) / 4d) + 1, 2, 256))
+                .Select(index =>
+                {
+                    var count = Math.Clamp((int)Math.Ceiling(Math.Sqrt(((endX - startX) * (endX - startX)) + ((endZ - startZ) * (endZ - startZ))) / 4d) + 1, 2, 256);
+                    var t = index / (double)(count - 1);
+                    return (X: startX + ((endX - startX) * t), Z: startZ + ((endZ - startZ) * t), DX: beach.OutwardX, DZ: beach.OutwardZ);
+                }).ToList();
+        var minX = points.Min(point => point.X) - .5;
+        var minZ = points.Min(point => point.Z) - .5;
+        var maxX = points.Max(point => point.X) + .5;
+        var maxZ = points.Max(point => point.Z) + .5;
 
         var sb = new StringBuilder();
         sb.AppendLine("<None>");
         sb.AppendLine("  <guid>1003910</guid>");
         sb.AppendLine($"  <ID>{objectId.ToString(CultureInfo.InvariantCulture)}</ID>");
         sb.AppendLine("  <ObjectFolderID>0</ObjectFolderID>");
-        sb.AppendLine($"  <Position>{FormatGameDataNumber(startX)} {FormatGameDataNumber(height)} {FormatGameDataNumber(startZ)}</Position>");
+        sb.AppendLine($"  <Position>{FormatGameDataNumber(anchorX)} {FormatGameDataNumber(height)} {FormatGameDataNumber(anchorZ)}</Position>");
         sb.AppendLine("  <ParticipantID><id>8</id></ParticipantID>");
         sb.AppendLine("  <Mesh>");
         sb.AppendLine("    <Flags><flags>1</flags></Flags>");
@@ -1641,6 +1540,9 @@ public partial class Terrain3DWindow : Window
             var tangentX = (next.X - previous.X) / 6d;
             var tangentZ = (next.Z - previous.Z) / 6d;
             var point = points[index];
+            var direction = Math.Abs(point.DX) >= Math.Abs(point.DZ)
+                ? (point.DX >= 0d ? "1 0" : "-1 0")
+                : (point.DZ >= 0d ? "0 1" : "0 -1");
             sb.AppendLine("        <None>");
             sb.AppendLine($"          <p>{FormatGameDataNumber(point.X)} {FormatGameDataNumber(height)} {FormatGameDataNumber(point.Z)}</p>");
             sb.AppendLine($"          <i>{FormatGameDataNumber(-tangentX)} 0 {FormatGameDataNumber(-tangentZ)}</i>");
@@ -1757,7 +1659,7 @@ public partial class Terrain3DWindow : Window
                 ? "toutes les height/normal pages forcées, pour éviter le retour du relief en caméra proche"
                 : "height/normal pages affectées";
             MessageBox.Show(this,
-                $"Validation mesh terminée.\nCoarse dérivée des meshes, {meshWrites.Count} mesh page(s) ({meshScopeText}), {normalWrites.Count} normalmap(s) ({normalScopeText}) et {tintWrites.Count} tintmap(s) régénérées automatiquement.\nAnneau océanique : {oceanRingSamples + restoredOceanRingSamples} hauteur(s) protégée(s). {materialSyncSummary}\nMode v46.19 : topologie source conservée ; empreinte et LOD bornés strictement ; matériaux, teintes, vues 2D, objets et aperçu Normal local synchronisés ; aperçu de plage rempli et contrasté.\n\n{(_lastTerrainDependencySyncReport?.ToDisplayText() ?? string.Empty)}",
+                $"Validation mesh terminée.\nCoarse dérivée des meshes, {meshWrites.Count} mesh page(s) ({meshScopeText}), {normalWrites.Count} normalmap(s) ({normalScopeText}) et {tintWrites.Count} tintmap(s) régénérées automatiquement.\nAnneau océanique : {oceanRingSamples + restoredOceanRingSamples} hauteur(s) protégée(s). {materialSyncSummary}\nMode v46.20 : interpolation des triangles, normales de surface recalculées et plage extérieure sur le contour.\n\n{(_lastTerrainDependencySyncReport?.ToDisplayText() ?? string.Empty)}",
                 "Validation LOD",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
@@ -1946,14 +1848,36 @@ public partial class Terrain3DWindow : Window
         }
     }
 
-    private string ValidateEntireTerrainFromGpu()
-        => ValidateEntireTerrainCore();
+    private string ValidateEntireTerrainFromGpu(int selectedLod, IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)> changedRegions)
+    {
+        LodComboBox.SelectedItem = LodComboBox.Items.OfType<ComboBoxItem>()
+            .FirstOrDefault(item => item.Tag is int lod && lod == selectedLod);
+        var mergeMultipleLods = changedRegions.Select(r => r.Lod).Distinct().Count() > 1;
+        if (mergeMultipleLods && !IsIslandExpansionModeEnabled() && !_activeMapMaskDirty)
+        {
+            // Start from the detailed surface, then merge pending regions from each
+            // edited LOD. Do not regenerate everything from the last/coarsest LOD.
+            _editedCoarseSamples = _localRegenerator.BuildMeshBackedCoarseHeightMap(
+                _project, BuildWorkingMap(), changedRegions.Min(r => r.Lod)).Samples.ToArray();
+        }
+        // Le bouton DX11 validait la coarse d'avant le pinceau, puis rechargeait
+        // ces vieilles hauteurs dans les LOD. Transférer les changements avant tout.
+        foreach (var region in changedRegions)
+        {
+            UpdateCoarseFromEditedMeshRegion(region.Lod, region.MinX, region.MinZ, region.MaxX, region.MaxZ);
+            MergeDirtyRegionFromWorldBounds(region.MinX, region.MinZ, region.MaxX, region.MaxZ);
+        }
+        return ValidateEntireTerrainCore(changedRegions.Count == 1 ? changedRegions[0].Lod : selectedLod, mergeMultipleLods);
+    }
 
-    private string ValidateEntireTerrainCore()
+    private string ValidateEntireTerrainCore(int? sourceLod = null, bool useCoarseHeightMap = false)
     {
             // v42.3 : capturer le mode extension AVANT toute régénération. L'extension
             // d'emprise ne doit pas être traitée comme une reconstruction globale de hauteur.
-            var usesIslandExpansion = IsIslandExpansionModeEnabled() || _activeMapMaskDirty;
+            var repairedCoastAnchors = RepairGeneratedPlayableCoastLine();
+            var hasInvalidGeneratedSkirts = _project.MeshPages.Values.SelectMany(p => p.Clusters)
+                .SelectMany(c => c.Vertices).Any(v => TerrainVertexAttributeCodec.Decode(v).IsSkirtVertex);
+            var usesIslandExpansion = IsIslandExpansionModeEnabled() || _activeMapMaskDirty || repairedCoastAnchors > 0 || hasInvalidGeneratedSkirts;
 
             ApplyActiveMapMaskToProject(regenerateText: true);
             var oceanRingSamples = EnforceOuterOceanSafetyRing();
@@ -1993,7 +1917,8 @@ public partial class Terrain3DWindow : Window
             var selectedKey = ResolveAnchorPageKeyForCurrentLod();
             var selectedLod = GetSelectedLod();
             var state = _localRegenerator.RegenerateAroundBounds(_project, workingMap, "Mesh", selectedKey, fullBounds, fullBounds, 0);
-            state.AnchorMeshLod = selectedLod;
+            state.AnchorMeshLod = sourceLod ?? selectedLod;
+            state.UseCoarseHeightMap = useCoarseHeightMap || usesIslandExpansion;
             var meshWrites = usesIslandExpansion
                 ? _localRegenerator.GenerateExpandedActiveMeshPageWrites(_project, workingMap, state, BuildMeshRegenerationOptions())
                 : _localRegenerator.GenerateMeshPageWrites(_project, workingMap, state, true, 99, BuildMeshRegenerationOptions());
@@ -2006,7 +1931,7 @@ public partial class Terrain3DWindow : Window
             // la heightmap GameData vanilla.
             var authoritativeMap = workingMap;
             var restoredOceanRingSamples = 0;
-            if (!usesIslandExpansion)
+            if (!usesIslandExpansion && !useCoarseHeightMap)
             {
                 var meshBackedMap = _localRegenerator.BuildMeshBackedCoarseHeightMap(_project, workingMap, ResolveMeshBackedSourceLod(state, selectedLod), fullBounds);
                 _editedCoarseSamples = meshBackedMap.Samples.ToArray();
@@ -2017,7 +1942,6 @@ public partial class Terrain3DWindow : Window
 
             var normalWrites = _localRegenerator.GenerateAllInterpretedNormalMapWrites(_project, authoritativeMap, state);
             var oceanMaterialSummary = PaintOuterOceanSafetyRingMaterials();
-            var repairedCoastAnchors = RepairGeneratedPlayableCoastLine();
             var usedMaterialPages = _editor.ResynchronizeMeshUsedMaterialBitsFromMaterialMap(_project);
             var materialSyncSummary = $"MaterialMap intérieure conservée ; {oceanMaterialSummary} UsedMaterialBits resynchronisés sur {usedMaterialPages} page(s).";
             // v42.1 : "Valider tout le terrain" force maintenant une régénération complète
@@ -2037,7 +1961,7 @@ public partial class Terrain3DWindow : Window
             var coastInfo = repairedCoastAnchors > 0
                 ? $"Côte du comptoir réparée : {repairedCoastAnchors} emplacement(s) réparti(s) sur toute la plage."
                 : "Aucune côte de comptoir générée à réparer.";
-            return $"Validation globale terrain terminée.\nMeshes régénérés sur tous les LOD éditables en topologie source, {meshWrites.Count} mesh page(s), {normalWrites.Count} normalmap(s) et {tintWrites.Count} tintmap(s) régénérées complètement en format DDS DXT1 vanilla-like.\nAnneau océanique : {oceanRingSamples + restoredOceanRingSamples} hauteur(s) protégée(s). {materialSyncSummary}\n{coastInfo}\nX/Z, indices, ordre/nombre de vertices et Raw3..7 sont conservés/validés depuis le mesh courant/édité ; seuls les matériaux de l’anneau extérieur sont forcés en eau.\nLes pages normalmap/tintmap manquantes sont ajoutées seulement quand elles recoupent ActiveMapGrid.bits ; LOD0/LOD1 restent sans géométrie et ne sont pas utilisés comme source de hauteur.\n{presetInfo}.\n\n{(_lastTerrainDependencySyncReport?.ToDisplayText() ?? string.Empty)}";
+            return $"Validation globale terrain terminée.\nMeshes régénérés sur tous les LOD éditables, {meshWrites.Count} mesh page(s), {normalWrites.Count} normalmap(s) et {tintWrites.Count} tintmap(s) régénérées complètement en format DDS DXT1 vanilla-like.\nAnneau océanique : {oceanRingSamples + restoredOceanRingSamples} hauteur(s) protégée(s). {materialSyncSummary}\n{coastInfo}\nHauteurs propagées depuis la surface éditée ; normales de surface recalculées, UV conservés. La topologie est adaptée en cas de modification d’empreinte.\nLes pages normalmap/tintmap manquantes sont ajoutées seulement quand elles recoupent ActiveMapGrid.bits ; LOD0/LOD1 restent sans géométrie et ne sont pas utilisés comme source de hauteur.\n{presetInfo}.\n\n{(_lastTerrainDependencySyncReport?.ToDisplayText() ?? string.Empty)}";
     }
 
     private void PickRawPresetButton_Click(object sender, RoutedEventArgs e)
@@ -3016,10 +2940,8 @@ public partial class Terrain3DWindow : Window
             AdaptiveVertexBudgetMultiplier = 1.15d,
             AdaptiveVertexBudgetPadding = 8,
             PreserveOriginalFootprint = true,
-            // v34 : la fenêtre 3D ne modifie plus Raw3..Raw7.
-            // Les attributs shader sont préservés par copie nearest ; la fenêtre matériau
-            // reste responsable des opérations Raw spécifiques.
-            RebuildSurfaceAttributes = false,
+            // Les UV restent intacts, les normales suivent le relief modifié.
+            RebuildSurfaceAttributes = true,
             RawAttributePreset = null,
         };
     }
@@ -3033,7 +2955,7 @@ public partial class Terrain3DWindow : Window
                 continue;
             }
 
-            if (_project.MeshPages.TryGetValue(write.Key, out var original) && !_originalMeshPagesForCompare.ContainsKey(write.Key))
+            if (!_gpuControllerOnly && _project.MeshPages.TryGetValue(write.Key, out var original) && !_originalMeshPagesForCompare.ContainsKey(write.Key))
             {
                 _originalMeshPagesForCompare[write.Key] = CloneMeshPage(original);
             }
@@ -3272,8 +3194,7 @@ public partial class Terrain3DWindow : Window
     private int EnforceOuterOceanSafetyRing()
     {
         var map = _project.GameData.TerrainHeightMap;
-        if (!ActiveFootprintTouchesOuterMapBoundary() ||
-            map.Width <= 1 || map.Height <= 1 ||
+        if (map.Width <= 1 || map.Height <= 1 ||
             _editedCoarseSamples.Length < map.Width * map.Height)
         {
             return 0;
@@ -3325,7 +3246,7 @@ public partial class Terrain3DWindow : Window
 
     private string PaintOuterOceanSafetyRingMaterials()
     {
-        var touchesOuterBoundary = ActiveFootprintTouchesOuterMapBoundary();
+        var touchesOuterBoundary = true; // The reserved ocean border cannot be disabled by editing the mask.
 
         var source = _project.Rd3d.MaterialMap;
         if (source.Width <= 0 || source.Height <= 0 || !source.HasAnyData)
@@ -3549,6 +3470,11 @@ public partial class Terrain3DWindow : Window
     private void InitializeHeightEditState()
     {
         var map = _project.GameData.TerrainHeightMap;
+        if (_gpuControllerOnly && _project.HeightEditState.MapWidth == map.Width
+            && _project.HeightEditState.MapHeight == map.Height)
+        {
+            return; // Reopening GPU must preserve the pending export/dirty history.
+        }
         _project.HeightEditState.Reset(
             map.Width,
             map.Height,
@@ -4725,11 +4651,8 @@ public partial class Terrain3DWindow : Window
             }
         }
 
-        var spacingX = gridWidth / Math.Max(1.0, map.Width - 1);
-        var spacingZ = gridHeight / Math.Max(1.0, map.Height - 1);
-        var searchRadius = Math.Max(2.0, Math.Max(spacingX, spacingZ) * 4.0);
-        var spatialIndex = GetBrushSpatialIndex(lod, GetEditablePagesForBrush(lod), searchRadius);
-        if (spatialIndex.VertexCount == 0)
+        var surfaceSampler = MeshBackedHeightSampler.Create(_project, lod);
+        if (surfaceSampler is null)
         {
             return;
         }
@@ -4742,7 +4665,7 @@ public partial class Terrain3DWindow : Window
             for (var sx = sx0; sx <= sx1; sx++)
             {
                 var worldX = (sx / (double)Math.Max(1, map.Width - 1)) * gridWidth;
-                if (spatialIndex.TrySampleWorldHeightFromNearest(worldX, worldZ, searchRadius, out var sampledWorldHeight))
+                if (surfaceSampler.TrySample(worldX, worldZ, out var sampledWorldHeight))
                 {
                     _editedCoarseSamples[(sy * map.Width) + sx] = TerrainHeightEncoding.WorldHeightToGameDataRaw((float)sampledWorldHeight);
                 }
@@ -4853,14 +4776,7 @@ public partial class Terrain3DWindow : Window
             return false;
         }
 
-        // WPF connaît déjà la projection exacte du Viewport3D. On l'utilise en priorité
-        // pour ancrer le brush au triangle réellement sous la souris, puis on garde
-        // le raycast manuel comme fallback pour les scènes/états transitoires.
-        if (TryHitTestViewportTerrain(viewportPoint, out intersection, out normal))
-        {
-            return true;
-        }
-
+        // CPU picking uses the same projection as the Direct3D 11 camera.
         var ray = BuildRay(viewportPoint);
         if (TryIntersectTerrain(ray.origin, ray.direction, out var hit))
         {
@@ -4925,93 +4841,6 @@ public partial class Terrain3DWindow : Window
 
         intersection = new Point3D();
         normal = new Vector3D(0, 1, 0);
-        return false;
-    }
-
-    private bool TryHitTestViewportTerrain(Point viewportPoint, out Point3D intersection, out Vector3D normal)
-    {
-        intersection = new Point3D();
-        normal = new Vector3D(0, 1, 0);
-
-        if (_activeTerrainHitGeometries.Count == 0 || SceneViewport.ActualWidth <= 0 || SceneViewport.ActualHeight <= 0)
-        {
-            return false;
-        }
-
-        RayMeshGeometry3DHitTestResult? bestHit = null;
-        VisualTreeHelper.HitTest(
-            SceneViewport,
-            null,
-            result =>
-            {
-                if (result is RayMeshGeometry3DHitTestResult meshHit && IsActiveTerrainMesh(meshHit.MeshHit))
-                {
-                    if (bestHit is null || meshHit.DistanceToRayOrigin < bestHit.DistanceToRayOrigin)
-                    {
-                        bestHit = meshHit;
-                    }
-                }
-
-                return HitTestResultBehavior.Continue;
-            },
-            new PointHitTestParameters(viewportPoint));
-
-        if (bestHit is null)
-        {
-            return false;
-        }
-
-        intersection = bestHit.PointHit;
-        normal = InterpolateViewportHitNormal(bestHit);
-        return true;
-    }
-
-    private static Vector3D InterpolateViewportHitNormal(RayMeshGeometry3DHitTestResult hit)
-    {
-        var mesh = hit.MeshHit;
-        var i0 = hit.VertexIndex1;
-        var i1 = hit.VertexIndex2;
-        var i2 = hit.VertexIndex3;
-
-        if (mesh.Normals is { Count: > 0 } normals
-            && i0 >= 0 && i1 >= 0 && i2 >= 0
-            && i0 < normals.Count && i1 < normals.Count && i2 < normals.Count)
-        {
-            var blended = (normals[i0] * hit.VertexWeight1)
-                + (normals[i1] * hit.VertexWeight2)
-                + (normals[i2] * hit.VertexWeight3);
-            if (blended.LengthSquared > 1e-9)
-            {
-                blended.Normalize();
-                return blended;
-            }
-        }
-
-        if (mesh.Positions is { Count: > 0 } positions
-            && i0 >= 0 && i1 >= 0 && i2 >= 0
-            && i0 < positions.Count && i1 < positions.Count && i2 < positions.Count)
-        {
-            var hitNormal = Vector3D.CrossProduct(positions[i1] - positions[i0], positions[i2] - positions[i0]);
-            if (hitNormal.LengthSquared > 1e-9)
-            {
-                hitNormal.Normalize();
-                return hitNormal;
-            }
-        }
-
-        return new Vector3D(0, 1, 0);
-    }
-
-    private bool IsActiveTerrainMesh(MeshGeometry3D geometry)
-    {
-        foreach (var terrain in _activeTerrainHitGeometries)
-        {
-            if (ReferenceEquals(terrain.Geometry, geometry))
-            {
-                return true;
-            }
-        }
-
         return false;
     }
 
@@ -5247,6 +5076,7 @@ public partial class Terrain3DWindow : Window
 
     private void RequestSceneRebuild(bool immediate = false)
     {
+        if (_gpuControllerOnly) return;
         if (!IsLoaded)
         {
             return;
@@ -5291,6 +5121,7 @@ public partial class Terrain3DWindow : Window
 
     private void RebuildScene()
     {
+        if (_gpuControllerOnly) return;
         // v40.3 : coalescer les rebuilds. Avant, chaque mouvement pouvait démarrer
         // une nouvelle tâche de rebuild en annulant l'ancienne, ce qui occupait du CPU
         // pour des scènes qui ne seraient jamais affichées. On annule la tâche courante,
@@ -5484,8 +5315,8 @@ public partial class Terrain3DWindow : Window
     {
         var previousRoot = _sceneRoot;
         _sceneRoot = result.SceneRoot;
-        _sceneVisual.Content = _sceneRoot;
-        if (!ReferenceEquals(previousRoot, _sceneRoot))
+        SceneViewport.Scene = _sceneRoot;
+        if (!ReferenceEquals(previousRoot, _sceneRoot) && !previousRoot.IsFrozen)
         {
             previousRoot.Children.Clear();
         }
@@ -6674,7 +6505,7 @@ public partial class Terrain3DWindow : Window
         // 1) un anneau 3D légèrement relevé qui suit la surface réelle du terrain ;
         // 2) un contour 2D projeté en surimpression pour rester lisible même en vue rasante.
         var overlayGroup = new Model3DGroup();
-        _overlayVisual.Content = overlayGroup;
+        SceneViewport.OverlayScene = overlayGroup;
         BrushOverlayCanvas?.Children.Clear();
 
         if (BrushOverlayCanvas is null)
@@ -7343,6 +7174,7 @@ public partial class Terrain3DWindow : Window
 
     private void UpdateNormalPreview()
     {
+        if (_gpuControllerOnly) return;
         if (RegeneratedNormalPreviewImage is null)
         {
             return;
@@ -7588,7 +7420,7 @@ public partial class Terrain3DWindow : Window
         var interaction = IsFastLargeIslandModeEnabled()
             ? "grande île : rendu GPU maintenu, calculs différés pendant le pinceau"
             : "grande île : désactivé, aperçu recalculé pendant le pinceau";
-        return $"Calcul terrain : {TerrainComputeScheduler.DescribeCpuBackend()} | rendu WPF/Direct3D : {DescribeWpfRenderTier()}\nCompute shaders : {_computeCapabilities.GpuComputeBackendName} | {interaction}\n{spatial} | {preview}\n{TerrainMemoryMonitor.Capture().ToShortDisplay()}";
+        return $"Calcul terrain : {TerrainComputeScheduler.DescribeCpuBackend()} | rendu : {SceneViewport.RendererDescription}\nCompute shaders : {_computeCapabilities.GpuComputeBackendName} | {interaction}\n{spatial} | {preview}\n{TerrainMemoryMonitor.Capture().ToShortDisplay()}";
     }
 
     private void UpdateComputeStatusDisplay()
@@ -7597,17 +7429,6 @@ public partial class Terrain3DWindow : Window
         {
             ComputeStatusTextBlock.Text = BuildComputeStatusLine();
         }
-    }
-
-    private static string DescribeWpfRenderTier()
-    {
-        var tier = RenderCapability.Tier >> 16;
-        return tier switch
-        {
-            >= 2 => $"Tier {tier} matériel",
-            1 => "Tier 1 partiel",
-            _ => "software/indéterminé",
-        };
     }
 
     private static string DescribeSourceMode(Terrain3DSourceMode mode) => mode switch
@@ -7651,6 +7472,7 @@ public partial class Terrain3DWindow : Window
 
     private void RefreshPropagationInfo()
     {
+        if (_gpuControllerOnly) return;
         if (MeshPropagationTextBox is null)
         {
             return;

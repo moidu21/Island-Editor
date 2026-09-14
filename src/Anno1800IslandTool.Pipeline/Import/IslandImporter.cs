@@ -62,7 +62,8 @@ public sealed class IslandImporter : IIslandReader
             RootFilePath = discovered.RootIslandXmlPath,
             Rd3dFilePath = discovered.Rd3dPath,
             GameDataFilePath = discovered.GameDataPath,
-            MaterialSetFilePath = discovered.MaterialSetPath
+            MaterialSetFilePath = discovered.MaterialSetPath,
+            AnnoEditorLevelFilePath = discovered.AnnoEditorLevelPath
         };
 
         if (!string.IsNullOrWhiteSpace(discovered.RootIslandXmlPath))
@@ -92,6 +93,12 @@ public sealed class IslandImporter : IIslandReader
             var gameDataText = archive.ReadEntryText(discovered.GameDataPath);
             project.RawContent.GameDataText = gameDataText;
             project.GameData = _gameDataReader.Read(gameDataText);
+        }
+
+
+        if (!string.IsNullOrWhiteSpace(discovered.AnnoEditorLevelPath))
+        {
+            project.RawContent.AnnoEditorLevelText = archive.ReadEntryText(discovered.AnnoEditorLevelPath);
         }
 
         project.EffectiveMaterialSetName = _materialResolver.ResolveEffectiveName(project.Rd3d);

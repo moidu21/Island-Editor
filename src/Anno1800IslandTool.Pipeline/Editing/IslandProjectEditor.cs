@@ -10,7 +10,7 @@ namespace Anno1800IslandTool.Pipeline.Editing;
 
 public sealed class IslandProjectEditor
 {
-    private const string MaterialSetGameDirectory = "data\\config\\engine\\material_sets";
+    private const string MaterialSetGameDirectory = "data/config/engine/material_sets";
 
     private readonly DimensionInferenceService _dimensions = new();
     private readonly ProjectTextRegenerator _regenerator = new();
@@ -21,6 +21,7 @@ public sealed class IslandProjectEditor
     private readonly DefaultMaterialSetResolver _materialResolver = new();
     private readonly IslandValidator _validator = new();
     private readonly TerrainDependencySynchronizer _terrainDependencySynchronizer = new();
+    private readonly MaterialSetEnvironmentSynchronizer _materialSetEnvironmentSynchronizer = new();
     private readonly MeshPageXmlWriter _meshPageXmlWriter = new();
 
     public void ApplyMetadataEdits(IslandProject project, MetadataEditModel edits, bool syncDerivedDimensions)
@@ -54,6 +55,7 @@ public sealed class IslandProjectEditor
         if (!string.IsNullOrWhiteSpace(project.Metadata.IslandInternalName) && !string.Equals(oldInternalName, project.Metadata.IslandInternalName, StringComparison.OrdinalIgnoreCase))
         {
             project.Metadata.RootIslandFileName = RemapInternalNameInPath(project.Metadata.RootIslandFileName, oldInternalName, project.Metadata.IslandInternalName);
+            project.AnnoEditorLevelFilePath = RemapInternalNameInPath(project.AnnoEditorLevelFilePath, oldInternalName, project.Metadata.IslandInternalName);
         }
 
         if (syncDerivedDimensions)
@@ -62,9 +64,10 @@ public sealed class IslandProjectEditor
         }
 
         _regenerator.RegenerateRootText(project);
+        _regenerator.RegenerateAnnoEditorLevelText(project);
         _regenerator.RegenerateRd3dText(project);
         _regenerator.RegenerateGameDataText(project);
-        MarkDirty(project, "Root", "RD3D", "GameData", "Metadata");
+        MarkDirty(project, "Root", "RD3D", "GameData", "AnnoEditorLevel", "Metadata");
         project.ValidationReport = _validator.Validate(project);
     }
 
@@ -372,7 +375,7 @@ public sealed class IslandProjectEditor
     }
 
 
-    public void ReplaceMaterialSet(IslandProject project, string displayFileName, string text, string? sourcePath = null, bool updateRd3dReference = true)
+    public MaterialSetEnvironmentSyncReport ReplaceMaterialSet(IslandProject project, string displayFileName, string text, string? sourcePath = null, bool updateRd3dReference = true)
     {
         ArgumentNullException.ThrowIfNull(project);
         if (string.IsNullOrWhiteSpace(text))
@@ -384,10 +387,16 @@ public sealed class IslandProjectEditor
             ? "terra_01.xml"
             : Path.GetFileName(displayFileName.Replace('\\', '/'));
 
+        var previousMaterialSet = project.MaterialSet;
         project.MaterialSet = _materialSetReader.Read(fileName, text);
         project.RawContent.MaterialSetText = text;
         project.MaterialSetFilePath = string.IsNullOrWhiteSpace(sourcePath) ? fileName : sourcePath;
         project.EffectiveMaterialSetName = fileName;
+        var environmentReport = _materialSetEnvironmentSynchronizer.Synchronize(project, previousMaterialSet, project.MaterialSet);
+        if (environmentReport.HasGroundObjectChanges)
+        {
+            RegenerateGroundObjectPages(project, environmentReport.AffectedMeshPages, environmentReport.ToString());
+        }
 
         if (updateRd3dReference)
         {
@@ -408,7 +417,66 @@ public sealed class IslandProjectEditor
             MarkDirty(project, "MaterialSet", "MaterialSetSelection");
         }
 
+        if (environmentReport.HasPropGridChanges)
+        {
+            _regenerator.RegenerateRd3dText(project);
+            MarkDirty(project, "RD3D", "PropGrid", "EnvironmentAssets");
+        }
+
+        if (environmentReport.HasGroundObjectChanges)
+        {
+            MarkDirty(project, "LocalDerivatives", "GroundObjects", "EnvironmentAssets");
+        }
+
         project.ValidationReport = _validator.Validate(project);
+        return environmentReport;
+    }
+
+    private void RegenerateGroundObjectPages(
+        IslandProject project,
+        IReadOnlyCollection<TerrainPageKey> affectedKeys,
+        string summary)
+    {
+        if (affectedKeys.Count == 0)
+        {
+            return;
+        }
+
+        project.LocalRegeneration ??= new TerrainLocalRegenerationState
+        {
+            AnchorFamily = "GroundObjects",
+            Summary = summary
+        };
+
+        var generated = affectedKeys
+            .Where(project.MeshPages.ContainsKey)
+            .Select(key => (Key: key, Page: project.MeshPages[key]))
+            .Where(item => !string.IsNullOrWhiteSpace(item.Page.OriginalRelativePath))
+            .Select(item => new RegeneratedMeshPageWrite
+            {
+                Key = item.Key,
+                TargetPath = item.Page.OriginalRelativePath,
+                XmlText = _meshPageXmlWriter.WriteGroundObjectsPreservingMesh(item.Page),
+                // Le marqueur GroundObjects est contractuel : le validateur et l'exporteur
+                // reconnaissent ainsi les écritures LOD0/LOD1 qui ne changent que les objets
+                // de sol et conservent la géométrie vanilla.
+                Summary = $"GroundObjects uniquement — ressources naturelles synchronisées avec le materialset : LOD {item.Key.Lod}, page {item.Key.X}x{item.Key.Y} ; vertices/indices inchangés."
+            })
+            .ToList();
+
+        var existing = project.LocalRegeneration.GeneratedMeshPageWrites
+            .Where(write => !generated.Any(item => string.Equals(item.TargetPath, write.TargetPath, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+        existing.AddRange(generated);
+        project.LocalRegeneration.GeneratedMeshPageWrites = existing
+            .GroupBy(write => write.TargetPath, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Last())
+            .ToList();
+        project.LocalRegeneration.GeneratedMeshPagesByLod = project.LocalRegeneration.GeneratedMeshPageWrites
+            .GroupBy(write => write.Key.Lod)
+            .ToDictionary(group => group.Key, group => group.Count());
+        project.LocalRegeneration.GeneratedEditableMeshPageWrites = project.LocalRegeneration.GeneratedMeshPageWrites.Count;
+        project.LocalRegeneration.Summary = summary;
     }
 
     private static string BuildMaterialSetGamePath(string fileName)
@@ -419,7 +487,7 @@ public sealed class IslandProjectEditor
             normalizedFileName = DefaultMaterialSetResolver.VanillaFallbackMaterialSet;
         }
 
-        return $"{MaterialSetGameDirectory}\\{normalizedFileName}";
+        return $"{MaterialSetGameDirectory}/{normalizedFileName}";
     }
 
     public void ReplaceGroundObjects(IslandProject project, IReadOnlyList<GroundObjectPlacement> placements)
@@ -617,6 +685,7 @@ public sealed class IslandProjectEditor
     public void RegenerateAllTexts(IslandProject project)
     {
         _regenerator.RegenerateRootText(project);
+        _regenerator.RegenerateAnnoEditorLevelText(project);
         _regenerator.RegenerateRd3dText(project);
         _regenerator.RegenerateGameDataText(project);
         if (project.MaterialSet is not null)
@@ -624,7 +693,7 @@ public sealed class IslandProjectEditor
             _regenerator.RegenerateMaterialSetText(project);
         }
 
-        MarkDirty(project, "Root", "RD3D", "GameData", "MaterialSet");
+        MarkDirty(project, "Root", "RD3D", "GameData", "AnnoEditorLevel", "MaterialSet");
         project.ValidationReport = _validator.Validate(project);
     }
 

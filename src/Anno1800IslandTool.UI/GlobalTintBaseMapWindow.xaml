@@ -1,7 +1,8 @@
 <Window x:Class="Anno1800IslandTool.UI.GlobalTintBaseMapWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Anno1800IslandTool v44.8 - Éditeur teinte végétation / BaseTextureData"
+        xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering"
+        Title="Anno1800IslandTool v46.46 - peinture par topologie"
         Height="940"
         Width="1450"
         WindowStartupLocation="CenterOwner">
@@ -20,7 +21,9 @@
                     <Separator Margin="0,12,0,12"/>
 
                     <TextBlock Text="Outil pinceau" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                    <ComboBox x:Name="ToolComboBox" Height="28" SelectedIndex="0">
+                    <ComboBox x:Name="ToolComboBox" Height="28" SelectedIndex="0"
+                              IsEditable="True" IsReadOnly="True"
+                              SelectionChanged="ToolComboBox_SelectionChanged">
                         <ComboBoxItem Content="Anti-rouge / garder orange max" Tag="anti-red"/>
                         <ComboBoxItem Content="Verdir" Tag="green"/>
                         <ComboBoxItem Content="Oranger doux" Tag="orange"/>
@@ -29,6 +32,8 @@
                         <ComboBoxItem Content="Désaturer" Tag="desaturate"/>
                         <ComboBoxItem Content="Neutraliser chroma" Tag="neutral"/>
                     </ComboBox>
+                    <TextBlock x:Name="ActiveToolTextBlock" Text="Outil actif : Anti-rouge / garder orange max"
+                               Foreground="#315D31" Margin="0,4,0,0"/>
 
                     <DockPanel Margin="0,10,0,0">
                         <TextBlock DockPanel.Dock="Left" Text="Rayon" FontWeight="SemiBold"/>
@@ -67,7 +72,7 @@
 
         <Border Grid.Column="1" BorderBrush="#CCC" BorderThickness="1" Background="#111" Padding="8">
             <ScrollViewer x:Name="PreviewScrollViewer" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                <Image x:Name="TintPreviewImage"
+                <rendering:DirectX11Image x:Name="TintPreviewImage"
                        Stretch="Fill"
                        RenderOptions.BitmapScalingMode="NearestNeighbor"
                        MouseDown="TintPreviewImage_MouseDown"

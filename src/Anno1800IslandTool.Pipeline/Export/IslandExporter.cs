@@ -22,8 +22,20 @@ public sealed class IslandExporter : IIslandWriter
             File.Delete(outputArchivePath);
         }
 
+        var previousMeshTexts = (project.LocalRegeneration?.GeneratedMeshPageWrites ?? new List<RegeneratedMeshPageWrite>())
+            .GroupBy(w => w.TargetPath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Last().XmlText, StringComparer.OrdinalIgnoreCase);
+        TerrainMaterialMapCoverageSanitizer.EnsureNoZeroCoverageTexels(project.Rd3d.MaterialMap);
+        var textRegenerator = new ProjectTextRegenerator();
+        textRegenerator.RegenerateRootText(project);
+        textRegenerator.RegenerateAnnoEditorLevelText(project);
+        textRegenerator.RegenerateRd3dText(project);
+        textRegenerator.RegenerateGameDataText(project);
+        // RD3D is global, including in a targeted patch. Include material metadata
+        // updated by its regeneration, even outside the selected geometry page.
         var meshWrites = (project.LocalRegeneration?.GeneratedMeshPageWrites ?? new List<RegeneratedMeshPageWrite>())
-            .Where(w => w.HasContent && !IsSuppressedTerrainPath(project, w.TargetPath) && MatchesTargetedPage(onlyPageKey, w.Key) && IsSupportedGeneratedMeshWrite(w))
+            .Where(w => w.HasContent && !IsSuppressedTerrainPath(project, w.TargetPath) &&
+                (MatchesTargetedPage(onlyPageKey, w.Key) || !previousMeshTexts.TryGetValue(w.TargetPath, out var previous) || previous != w.XmlText) && IsSupportedGeneratedMeshWrite(w))
             .ToList();
         var normalWrites = (project.LocalRegeneration?.GeneratedNormalMapWrites ?? new List<RegeneratedNormalMapWrite>())
             .Where(w => w.HasContent && !IsSuppressedTerrainPath(project, w.TargetPath) && MatchesTargetedPage(onlyPageKey, w.Key))
@@ -34,12 +46,6 @@ public sealed class IslandExporter : IIslandWriter
             .Where(w => w.HasContent && !IsSuppressedTerrainPath(project, w.TargetPath) && MatchesTargetedPage(onlyPageKey, w.Key))
             .ToList();
 
-        TerrainMaterialMapCoverageSanitizer.EnsureNoZeroCoverageTexels(project.Rd3d.MaterialMap);
-
-        var textRegenerator = new ProjectTextRegenerator();
-        textRegenerator.RegenerateRootText(project);
-        textRegenerator.RegenerateRd3dText(project);
-        textRegenerator.RegenerateGameDataText(project);
         var coreWrites = BuildTargetedCoreWrites(project);
 
         using var outputArchive = ZipFile.Open(outputArchivePath, ZipArchiveMode.Create);
@@ -145,6 +151,10 @@ public sealed class IslandExporter : IIslandWriter
         if (!string.IsNullOrWhiteSpace(project.GameDataFilePath) && !string.IsNullOrWhiteSpace(project.RawContent.GameDataText))
         {
             core.Add((project.GameDataFilePath, project.RawContent.GameDataText!));
+        }
+        if (!string.IsNullOrWhiteSpace(project.AnnoEditorLevelFilePath) && !string.IsNullOrWhiteSpace(project.RawContent.AnnoEditorLevelText))
+        {
+            core.Add((project.AnnoEditorLevelFilePath, project.RawContent.AnnoEditorLevelText!));
         }
         return core;
     }
@@ -399,6 +409,7 @@ public sealed class IslandExporter : IIslandWriter
 
         var textRegenerator = new ProjectTextRegenerator();
         textRegenerator.RegenerateRootText(project);
+        textRegenerator.RegenerateAnnoEditorLevelText(project);
         textRegenerator.RegenerateRd3dText(project);
         textRegenerator.RegenerateGameDataText(project);
         if (project.MaterialSet is not null)
@@ -446,6 +457,7 @@ public sealed class IslandExporter : IIslandWriter
 
         var textRegenerator = new ProjectTextRegenerator();
         textRegenerator.RegenerateRootText(project);
+        textRegenerator.RegenerateAnnoEditorLevelText(project);
         textRegenerator.RegenerateRd3dText(project);
         textRegenerator.RegenerateGameDataText(project);
         if (project.MaterialSet is not null)
@@ -456,6 +468,7 @@ public sealed class IslandExporter : IIslandWriter
         AddReplacement(replacements, project.RootFilePath, project.RawContent.RootText, options.AddMissingCoreFilesWhenPossible);
         AddReplacement(replacements, project.Rd3dFilePath, project.RawContent.Rd3dText, options.AddMissingCoreFilesWhenPossible);
         AddReplacement(replacements, project.GameDataFilePath, project.RawContent.GameDataText, options.AddMissingCoreFilesWhenPossible);
+        AddReplacement(replacements, project.AnnoEditorLevelFilePath, project.RawContent.AnnoEditorLevelText, options.AddMissingCoreFilesWhenPossible);
         AddReplacement(replacements, project.MaterialSetFilePath, project.RawContent.MaterialSetText, options.AddMissingCoreFilesWhenPossible);
 
         foreach (var pair in project.GeneratedBinaryFileReplacements)

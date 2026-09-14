@@ -10,23 +10,32 @@ using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Performance;
 using Anno1800IslandTool.Core.Terrain;
 using Anno1800IslandTool.Pipeline.Editing;
+using Anno1800IslandTool.Pipeline.Services;
 using Microsoft.Win32;
 
 namespace Anno1800IslandTool.UI;
 
 public partial class TerrainMaterialMapWindow : Window
 {
+    public bool ProtectBeachAreas { get => _project.ProtectBeachMaterial; set => _project.ProtectBeachMaterial = value; }
     private readonly IslandProject _project;
     private readonly IslandProjectEditor _editor;
+    private readonly EmbeddedMaterialSetLibrary _embeddedMaterialSets = new();
     private Dictionary<int, MaterialDefinition> _materialsById = new();
     private List<MaterialPaletteRow> _paletteRows = new();
     private TerrainMaterialMap _workingMap;
     private TerrainMaterialEditState _editState = new();
     private TerrainMaterialCellPattern? _pickedCellPattern;
     private TerrainMaterialMap? _coastTransitionBaseMap;
+    private TerrainMaterialMap? _topologyPaintBaseMap;
     private TerrainMaterialMapLargeWindow? _largeWindow;
     private bool _isPainting;
     private bool _isShowingCoastPreview;
+    private bool _isApplyingEmbeddedMaterialSet;
+    private const int MaterialUndoHistoryLimit = 20;
+    private readonly Stack<MaterialToolSnapshot> _materialUndoHistory = new();
+    private readonly Stack<MaterialToolSnapshot> _materialRedoHistory = new();
+    private MaterialToolSnapshot? _activeMaterialHistoryAction;
 
     public event EventHandler? ProjectApplied;
 
@@ -35,9 +44,11 @@ public partial class TerrainMaterialMapWindow : Window
         InitializeComponent();
         Loaded += (_, _) => UiLocalizationManager.ApplyTo(this);
         _project = project ?? throw new ArgumentNullException(nameof(project));
+        BeachProtectionCheckBox.DataContext = this;
         _editor = editor ?? throw new ArgumentNullException(nameof(editor));
         _workingMap = _project.Rd3d.MaterialMap.Clone();
 
+        PopulateEmbeddedMaterialSets();
         RefreshMaterialSetPaletteFromProject();
         BrushModeComboBox.ItemsSource = Enum.GetValues(typeof(TerrainMaterialBrushMode));
         BrushModeComboBox.SelectedItem = TerrainMaterialBrushMode.Blend;
@@ -45,6 +56,105 @@ public partial class TerrainMaterialMapWindow : Window
         RefreshMaterialMapDisplay(refreshTables: true);
         CellDetailsTextBox.Text = "Aucune cellule sélectionnée.";
         PickupStatusTextBlock.Text = "Pickup : aucun. Clic droit sur la carte pour prélever une cellule complète.";
+    }
+
+    private void PopulateEmbeddedMaterialSets()
+    {
+        var names = _embeddedMaterialSets.GetAvailableFileNames();
+        EmbeddedMaterialSetComboBox.ItemsSource = names;
+        var current = EmbeddedMaterialSetLibrary.NormalizeFileName(_project.EffectiveMaterialSetName);
+        EmbeddedMaterialSetComboBox.SelectedItem = names.FirstOrDefault(name =>
+            string.Equals(name, current, StringComparison.OrdinalIgnoreCase));
+        if (EmbeddedMaterialSetComboBox.SelectedItem is null)
+        {
+            EmbeddedMaterialSetComboBox.SelectedItem = names.FirstOrDefault(name =>
+                string.Equals(name, "terra_01.xml", StringComparison.OrdinalIgnoreCase)) ?? names.FirstOrDefault();
+        }
+
+        RefreshEmbeddedMaterialSetSelectionDisplay();
+    }
+
+    private void UseEmbeddedMaterialSetButton_Click(object sender, RoutedEventArgs e)
+        => ApplySelectedEmbeddedMaterialSet();
+
+    private void EmbeddedMaterialSetComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        RefreshEmbeddedMaterialSetSelectionDisplay();
+        if (IsLoaded && !_isApplyingEmbeddedMaterialSet)
+        {
+            ApplySelectedEmbeddedMaterialSet();
+        }
+    }
+
+    private void RefreshEmbeddedMaterialSetSelectionDisplay()
+    {
+        if (EmbeddedMaterialSetComboBox.SelectedItem is string fileName)
+        {
+            EmbeddedMaterialSetComboBox.Text = fileName;
+        }
+    }
+
+    private void ApplySelectedEmbeddedMaterialSet()
+    {
+        if (_isApplyingEmbeddedMaterialSet || EmbeddedMaterialSetComboBox.SelectedItem is not string fileName)
+        {
+            return;
+        }
+
+        _isApplyingEmbeddedMaterialSet = true;
+        try
+        {
+            var status = UseEmbeddedMaterialSet(fileName);
+            PaintStatusTextBlock.Text = status;
+            CellDetailsTextBox.Text = status;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.ToString(), "Chargement du materialset intégré", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            _isApplyingEmbeddedMaterialSet = false;
+        }
+    }
+
+    internal IReadOnlyList<string> GetEmbeddedMaterialSetNames()
+        => _embeddedMaterialSets.GetAvailableFileNames();
+
+    internal string GetEffectiveMaterialSetName()
+        => EmbeddedMaterialSetLibrary.NormalizeFileName(_project.EffectiveMaterialSetName);
+
+    internal string UseEmbeddedMaterialSet(string fileName)
+    {
+        if (!_embeddedMaterialSets.TryRead(fileName, out var text))
+        {
+            throw new InvalidOperationException($"Le materialset intégré {fileName} est introuvable.");
+        }
+
+        var environmentReport = _editor.ReplaceMaterialSet(_project, fileName, text, fileName, updateRd3dReference: true);
+        var matchingName = GetEmbeddedMaterialSetNames().FirstOrDefault(name =>
+            string.Equals(name, fileName, StringComparison.OrdinalIgnoreCase));
+        if (matchingName is not null && !Equals(EmbeddedMaterialSetComboBox.SelectedItem, matchingName))
+        {
+            var wasApplying = _isApplyingEmbeddedMaterialSet;
+            _isApplyingEmbeddedMaterialSet = true;
+            try
+            {
+                EmbeddedMaterialSetComboBox.SelectedItem = matchingName;
+                EmbeddedMaterialSetComboBox.Text = matchingName;
+            }
+            finally
+            {
+                _isApplyingEmbeddedMaterialSet = wasApplying;
+            }
+        }
+        ResetMaterialHistory();
+        UpdateRd3dMaterialSetCheckBox.IsChecked = true;
+        RefreshMaterialSetPaletteFromProject();
+        RefreshMaterialMapDisplay(refreshTables: true);
+        ProjectApplied?.Invoke(this, EventArgs.Empty);
+        var gamePath = $"data/config/engine/material_sets/{fileName}";
+        return $"Materialset intégré chargé : {fileName}. Le RD3D pointera vers {gamePath} à l’export. {environmentReport}";
     }
 
 
@@ -69,6 +179,7 @@ public partial class TerrainMaterialMapWindow : Window
 
         MaterialSetPathTextBox.Text = BuildMaterialSetPathStatus();
         RefreshCoastMaterialSelectors();
+        RefreshTopologyMaterialSelectors();
         _largeWindow?.RefreshFromParentData(refreshPalette: true);
     }
 
@@ -90,6 +201,7 @@ public partial class TerrainMaterialMapWindow : Window
     private void InvalidateCoastTransitionBase()
     {
         _coastTransitionBaseMap = null;
+        _topologyPaintBaseMap = null;
     }
 
     private void OpenLargeMaterialMapWindowButton_Click(object sender, RoutedEventArgs e)
@@ -171,19 +283,20 @@ public partial class TerrainMaterialMapWindow : Window
         var text = File.ReadAllText(path);
         var fileName = Path.GetFileName(path);
 
-        _editor.ReplaceMaterialSet(_project, fileName, text, path, updateRd3dReference: updateRd3dReference);
+        var environmentReport = _editor.ReplaceMaterialSet(_project, fileName, text, path, updateRd3dReference: updateRd3dReference);
+        ResetMaterialHistory();
         RefreshMaterialSetPaletteFromProject();
         RefreshMaterialMapDisplay(refreshTables: true);
         ProjectApplied?.Invoke(this, EventArgs.Empty);
 
         var terrainCount = _paletteRows.Count(r => r.IsTerrain);
         var objectCount = _paletteRows.Count(r => !r.IsTerrain);
-        var gameMaterialSetPath = $"data\\config\\engine\\material_sets\\{fileName}";
+        var gameMaterialSetPath = $"data/config/engine/material_sets/{fileName}";
         var message = updateRd3dReference
             ? $"Materialset chargé : {fileName}. rd3d.xml pointera vers {gameMaterialSetPath} à l'export."
             : $"Materialset chargé : {fileName}. rd3d.xml n'a pas été modifié.";
 
-        return $"{message} {terrainCount} matériau(x) terrain Type=0 disponible(s), {objectCount} autre(s). Les palettes peinture et seuils hauteur sont actualisées.";
+        return $"{message} {terrainCount} matériau(x) terrain Type=0 disponible(s), {objectCount} autre(s). Les palettes peinture et seuils hauteur sont actualisées. {environmentReport}";
     }
 
     private void MaterialMapImage_MouseMove(object sender, MouseEventArgs e)
@@ -238,6 +351,7 @@ public partial class TerrainMaterialMapWindow : Window
 
         if (PaintModeCheckBox.IsChecked == true)
         {
+            BeginMaterialHistoryAction();
             _isPainting = true;
             MaterialMapImage.CaptureMouse();
             PaintAt(x, y);
@@ -254,6 +368,7 @@ public partial class TerrainMaterialMapWindow : Window
         {
             MaterialMapImage.ReleaseMouseCapture();
         }
+        CompleteMaterialHistoryAction();
     }
 
     private void MaterialMapImage_MouseRightButtonDown(object sender, MouseButtonEventArgs e)
@@ -308,6 +423,7 @@ public partial class TerrainMaterialMapWindow : Window
             _editor.ReplaceTerrainMaterialMap(_project, _workingMap.Clone(), _editState);
             var usedBitsPages = _editor.ResynchronizeMeshUsedMaterialBitsFromMaterialMap(_project);
             ProjectApplied?.Invoke(this, EventArgs.Empty);
+            ResetMaterialHistory();
             InvalidateCoastTransitionBase();
             SummaryTextBox.Text = BuildSummaryText(_project, _workingMap, _editState);
             PaintStatusTextBlock.Text = $"Peinture appliquée au projet. L'export ZIP remplacera rd3d.xml avec MaterialIDs2 / MaterialAlphas2, puis régénérera les tintmaps depuis cette MaterialMap. UsedMaterialBits resynchronisés sur {usedBitsPages} page(s) mesh. Texels sans coverage corrigés : {fixedZeroCoverage}.";
@@ -346,6 +462,7 @@ public partial class TerrainMaterialMapWindow : Window
 
         _workingMap = _project.Rd3d.MaterialMap.Clone();
         _editState = new TerrainMaterialEditState();
+        ResetMaterialHistory();
         InvalidateCoastTransitionBase();
         _isShowingCoastPreview = false;
         BrushPreviewEllipse.Visibility = Visibility.Collapsed;
@@ -359,12 +476,14 @@ public partial class TerrainMaterialMapWindow : Window
 
     private void ResetWorkingMapFromProject()
     {
+        BeginMaterialHistoryAction();
         _workingMap = _project.Rd3d.MaterialMap.Clone();
         _editState = new TerrainMaterialEditState();
         InvalidateCoastTransitionBase();
         RefreshMaterialMapDisplay(refreshTables: true);
         CellDetailsTextBox.Text = "Copie de travail réinitialisée depuis le projet.";
         PaintStatusTextBlock.Text = "Aucune peinture appliquée.";
+        CompleteMaterialHistoryAction();
     }
 
     private void RefreshStatsButton_Click(object sender, RoutedEventArgs e)
@@ -575,40 +694,8 @@ public partial class TerrainMaterialMapWindow : Window
         int centerY,
         TerrainMaterialBrushOptions options)
     {
-        var activePredicate = BuildActiveMaterialCellPredicate(map);
-        var paintsBeach = options.MaterialId == 1 || options.CellPattern?.ActiveMaterialIds.Contains(1) == true;
-        var protectedBeach = new List<(int X, int Y, TerrainMaterialCellPattern Pattern)>();
-        if (_project.ProtectBeachMaterial && !paintsBeach)
-        {
-            var radius = options.ClampedRadius;
-            for (var y = Math.Max(0, centerY - radius); y <= Math.Min(map.Height - 1, centerY + radius); y++)
-            {
-                for (var x = Math.Max(0, centerX - radius); x <= Math.Min(map.Width - 1, centerX + radius); x++)
-                {
-                    var dx = x - centerX;
-                    var dy = y - centerY;
-                    if ((dx * dx) + (dy * dy) <= radius * radius && map.GetDominantMaterialId(x, y) == 1)
-                    {
-                        protectedBeach.Add((x, y, TerrainMaterialCellPattern.FromCell(map.GetCell(x, y))));
-                    }
-                }
-            }
-        }
-
-        options.CellPredicate = (x, y) =>
-            (activePredicate is null || activePredicate(x, y)) &&
-            (!_project.ProtectBeachMaterial || paintsBeach || map.GetDominantMaterialId(x, y) != 1);
-        var result = TerrainMaterialPainter.PaintBrush(map, centerX, centerY, options);
-        foreach (var protectedCell in protectedBeach)
-        {
-            map.StampCellPattern(protectedCell.X, protectedCell.Y, protectedCell.Pattern, TerrainMaterialPackEncoding.MaxPackedSlotValue);
-        }
-
-        if (protectedBeach.Count > 0)
-        {
-            result.Messages.Add($"Protection plage : {protectedBeach.Count} texel(s) de sable conservé(s).");
-        }
-        return result;
+        options.CellPredicate = BuildWritableMaterialCellPredicate(map);
+        return TerrainMaterialPainter.PaintBrush(map, centerX, centerY, options);
     }
 
     internal void SetStatusFromLargeWindow(string status, bool refreshTables = false)
@@ -635,7 +722,7 @@ public partial class TerrainMaterialMapWindow : Window
     {
         options.NormalizeThresholds();
         var previewMap = _workingMap.Clone();
-        var result = TerrainCoastTransitionPainter.ApplyHeightToMaterialTransition(previewMap, _project.GameData.TerrainHeightMap, options, out var stats, activeMaterialCellPredicate: BuildActiveMaterialCellPredicate(previewMap));
+        var result = TerrainCoastTransitionPainter.ApplyHeightToMaterialTransition(previewMap, _project.GameData.TerrainHeightMap, options, out var stats, activeMaterialCellPredicate: BuildWritableMaterialCellPredicate(previewMap));
         status = $"Vue seuils : {result.CellsChanged} cellule(s), {result.BlocksChanged} bloc(s). {BuildCoastStatsText(stats)}";
         details = BuildCoastPreviewDetails(options, result, stats);
         return BuildDominantMaterialBitmap(previewMap, BuildActiveMaterialCellPredicate(previewMap));
@@ -643,11 +730,12 @@ public partial class TerrainMaterialMapWindow : Window
 
     internal string ApplyCoastTransitionFromLargeWindow(TerrainCoastTransitionOptions options, out string status)
     {
+        BeginMaterialHistoryAction();
         SetCoastTransitionControls(options);
         options = ReadCoastTransitionOptions();
         _coastTransitionBaseMap ??= _workingMap.Clone();
         _workingMap = _coastTransitionBaseMap.Clone();
-        var result = TerrainCoastTransitionPainter.ApplyHeightToMaterialTransition(_workingMap, _project.GameData.TerrainHeightMap, options, out var stats, activeMaterialCellPredicate: BuildActiveMaterialCellPredicate(_workingMap));
+        var result = TerrainCoastTransitionPainter.ApplyHeightToMaterialTransition(_workingMap, _project.GameData.TerrainHeightMap, options, out var stats, activeMaterialCellPredicate: BuildWritableMaterialCellPredicate(_workingMap));
         var fixedZeroCoverage = TerrainMaterialMapCoverageSanitizer.EnsureNoZeroCoverageTexels(_workingMap, BuildActiveMaterialCellPredicate(_workingMap));
         if (fixedZeroCoverage > 0)
         {
@@ -659,6 +747,7 @@ public partial class TerrainMaterialMapWindow : Window
         status = $"Appliqué à la copie depuis une base fixe : {result.CellsChanged} cellule(s), {result.BlocksChanged} bloc(s). {BuildCoastStatsText(stats)}";
         CoastStatusTextBlock.Text = status;
         PaintStatusTextBlock.Text = "Image Matériaux/peinture recalculée depuis les seuils hauteur sur une base fixe. Les clics répétés ne s'empilent plus. Clique ensuite sur Appliquer au projet pour l'export ZIP.";
+        CompleteMaterialHistoryAction();
         return BuildCoastPreviewDetails(options, result, stats);
     }
 
@@ -668,6 +757,59 @@ public partial class TerrainMaterialMapWindow : Window
     internal string BuildCoastCellDetailsForLargeWindow(int x, int y, TerrainCoastTransitionOptions options)
         => BuildCoastCellDetails(x, y, options);
 
+    internal TerrainTopologyMaterialOptions GetTopologyOptionsForLargeWindow()
+        => ReadTopologyOptions();
+
+    internal BitmapSource? CreateTopologyPreviewBitmapForLargeWindow(TerrainTopologyMaterialOptions options, out string status, out string details)
+    {
+        options.Normalize();
+        var previewMap = _workingMap.Clone();
+        var result = TerrainTopologyMaterialPainter.Apply(previewMap, _project.GameData.TerrainHeightMap, options, out var stats, activeMaterialCellPredicate: BuildWritableMaterialCellPredicate(previewMap));
+        status = FormatTopologyText("Vue topologie : {0} cellule(s), {1} bloc(s). {2}", result.CellsChanged, result.BlocksChanged, BuildTopologyStatsText(stats));
+        details = BuildTopologyDetails(options, result, stats);
+        return BuildDominantMaterialBitmap(previewMap, BuildActiveMaterialCellPredicate(previewMap));
+    }
+
+    internal string ApplyTopologyFromLargeWindow(TerrainTopologyMaterialOptions options, out string status)
+    {
+        BeginMaterialHistoryAction();
+        try
+        {
+            _coastTransitionBaseMap = null;
+            SetTopologyControls(options);
+            options = ReadTopologyOptions();
+            _topologyPaintBaseMap ??= _workingMap.Clone();
+            _workingMap = _topologyPaintBaseMap.Clone();
+            var result = TerrainTopologyMaterialPainter.Apply(_workingMap, _project.GameData.TerrainHeightMap, options, out var stats, activeMaterialCellPredicate: BuildWritableMaterialCellPredicate(_workingMap));
+            var fixedZeroCoverage = TerrainMaterialMapCoverageSanitizer.EnsureNoZeroCoverageTexels(_workingMap, BuildActiveMaterialCellPredicate(_workingMap));
+            if (fixedZeroCoverage > 0)
+            {
+                result.Messages.Add(FormatTopologyText("{0} texel(s) sans couverture corrigé(s) après peinture topologique.", fixedZeroCoverage));
+            }
+            _editState = new TerrainMaterialEditState();
+            _editState.AddGeneratedOperation(result, "Peinture automatique par topologie depuis vue agrandie");
+            RefreshMaterialMapDisplay(refreshTables: true);
+            status = FormatTopologyText("Appliqué à la copie : {0} cellule(s), {1} bloc(s). {2}", result.CellsChanged, result.BlocksChanged, BuildTopologyStatsText(stats));
+            TopologyStatusTextBlock.Text = status;
+            PaintStatusTextBlock.Text = UiLocalizationManager.T("Image recalculée depuis la pente et la courbure locales. Clique ensuite sur Appliquer au projet pour préparer l’export ZIP.");
+            CompleteMaterialHistoryAction();
+            return BuildTopologyDetails(options, result, stats);
+        }
+        catch
+        {
+            CancelMaterialHistoryAction();
+            throw;
+        }
+    }
+
+
+    private Func<int, int, bool> BuildWritableMaterialCellPredicate(TerrainMaterialMap map)
+    {
+        var active = BuildActiveMaterialCellPredicate(map);
+        var blocked = _project.ProtectBeachMaterial
+            ? GeneratedBeachZones.ProtectedMaterialBlocks(_project, map) : new HashSet<int>();
+        return (x, y) => (active is null || active(x, y)) && !blocked.Contains(map.GetMaterialIdBlockIndex(x, y));
+    }
 
     private Func<int, int, bool>? BuildActiveMaterialCellPredicate(TerrainMaterialMap materialMap)
     {
@@ -838,7 +980,7 @@ public partial class TerrainMaterialMapWindow : Window
         {
             var options = ReadCoastTransitionOptions();
             var previewMap = _workingMap.Clone();
-            var result = TerrainCoastTransitionPainter.ApplyHeightToMaterialTransition(previewMap, _project.GameData.TerrainHeightMap, options, out var stats, activeMaterialCellPredicate: BuildActiveMaterialCellPredicate(previewMap));
+            var result = TerrainCoastTransitionPainter.ApplyHeightToMaterialTransition(previewMap, _project.GameData.TerrainHeightMap, options, out var stats, activeMaterialCellPredicate: BuildWritableMaterialCellPredicate(previewMap));
             _isShowingCoastPreview = true;
             BrushPreviewEllipse.Visibility = Visibility.Collapsed;
             MaterialMapImage.Source = BuildDominantMaterialBitmap(previewMap, BuildActiveMaterialCellPredicate(previewMap));
@@ -856,10 +998,12 @@ public partial class TerrainMaterialMapWindow : Window
     {
         try
         {
+            BeginMaterialHistoryAction();
+            _topologyPaintBaseMap = null;
             var options = ReadCoastTransitionOptions();
             _coastTransitionBaseMap ??= _workingMap.Clone();
             _workingMap = _coastTransitionBaseMap.Clone();
-            var result = TerrainCoastTransitionPainter.ApplyHeightToMaterialTransition(_workingMap, _project.GameData.TerrainHeightMap, options, out var stats, activeMaterialCellPredicate: BuildActiveMaterialCellPredicate(_workingMap));
+            var result = TerrainCoastTransitionPainter.ApplyHeightToMaterialTransition(_workingMap, _project.GameData.TerrainHeightMap, options, out var stats, activeMaterialCellPredicate: BuildWritableMaterialCellPredicate(_workingMap));
             var fixedZeroCoverage = TerrainMaterialMapCoverageSanitizer.EnsureNoZeroCoverageTexels(_workingMap, BuildActiveMaterialCellPredicate(_workingMap));
             if (fixedZeroCoverage > 0)
             {
@@ -871,9 +1015,11 @@ public partial class TerrainMaterialMapWindow : Window
             CoastStatusTextBlock.Text = $"Appliqué à la copie depuis une base fixe : {result.CellsChanged} cellule(s), {result.BlocksChanged} bloc(s). {BuildCoastStatsText(stats)}";
             PaintStatusTextBlock.Text = "Image Matériaux/peinture recalculée depuis les seuils hauteur sur une base fixe. Les clics répétés ne s'empilent plus. Clique ensuite sur Appliquer au projet pour l'export ZIP.";
             CellDetailsTextBox.Text = BuildCoastPreviewDetails(options, result, stats);
+            CompleteMaterialHistoryAction();
         }
         catch (Exception ex)
         {
+            CancelMaterialHistoryAction();
             MessageBox.Show(this, ex.ToString(), "Transition côte/plage/eau", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
@@ -909,6 +1055,159 @@ public partial class TerrainMaterialMapWindow : Window
         var text = textBox.Text?.Trim().Replace(',', '.');
         return float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ? value : fallback;
     }
+
+    private void RefreshTopologyMaterialSelectors()
+    {
+        var rows = _paletteRows.Where(r => r.IsTerrain).ToList();
+        SetCoastComboItems(TopologyFlatMaterialComboBox, rows, SelectMaterialByKeywords(rows, new[] { "grass", "meadow", "earth" }, 2));
+        SetCoastComboItems(TopologyGentleMaterialComboBox, rows, SelectMaterialByKeywords(rows, new[] { "grass", "earth", "dirt" }, 2));
+        SetCoastComboItems(TopologySteepMaterialComboBox, rows, SelectMaterialByKeywords(rows, new[] { "rock", "cliff", "stone" }, 16));
+        SetCoastComboItems(TopologyRidgeMaterialComboBox, rows, SelectMaterialByKeywords(rows, new[] { "rock", "cliff", "snow", "stone" }, 16));
+        SetCoastComboItems(TopologyHollowMaterialComboBox, rows, SelectMaterialByKeywords(rows, new[] { "dirt", "mud", "earth", "grass" }, 2));
+    }
+
+    private void SetTopologyControls(TerrainTopologyMaterialOptions options)
+    {
+        SetCoastComboById(TopologyFlatMaterialComboBox, options.FlatMaterialId);
+        SetCoastComboById(TopologyGentleMaterialComboBox, options.GentleSlopeMaterialId);
+        SetCoastComboById(TopologySteepMaterialComboBox, options.SteepSlopeMaterialId);
+        SetCoastComboById(TopologyRidgeMaterialComboBox, options.RidgeMaterialId);
+        SetCoastComboById(TopologyHollowMaterialComboBox, options.HollowMaterialId);
+        TopologyFlatSlopeTextBox.Text = options.FlatSlopeMaximum.ToString("0.###", CultureInfo.InvariantCulture);
+        TopologySteepSlopeTextBox.Text = options.SteepSlopeMinimum.ToString("0.###", CultureInfo.InvariantCulture);
+        TopologyCurvatureTextBox.Text = options.CurvatureSensitivity.ToString("0.###", CultureInfo.InvariantCulture);
+        TopologyRadiusTextBox.Text = options.AnalysisRadius.ToString(CultureInfo.InvariantCulture);
+        TopologyStrengthSlider.Value = Math.Clamp(options.Strength, (int)TopologyStrengthSlider.Minimum, (int)TopologyStrengthSlider.Maximum);
+        TopologyBlendCheckBox.IsChecked = options.UseBlend;
+        TopologyPreserveWaterBeachCheckBox.IsChecked = options.PreserveExistingWaterAndBeach;
+    }
+
+    private TerrainTopologyMaterialOptions ReadTopologyOptions()
+    {
+        var options = new TerrainTopologyMaterialOptions
+        {
+            FlatMaterialId = SelectedCoastMaterialId(TopologyFlatMaterialComboBox, 2),
+            GentleSlopeMaterialId = SelectedCoastMaterialId(TopologyGentleMaterialComboBox, 2),
+            SteepSlopeMaterialId = SelectedCoastMaterialId(TopologySteepMaterialComboBox, 16),
+            RidgeMaterialId = SelectedCoastMaterialId(TopologyRidgeMaterialComboBox, 16),
+            HollowMaterialId = SelectedCoastMaterialId(TopologyHollowMaterialComboBox, 2),
+            FlatSlopeMaximum = ParseFloatTextBox(TopologyFlatSlopeTextBox, 0.18f),
+            SteepSlopeMinimum = ParseFloatTextBox(TopologySteepSlopeTextBox, 1.15f),
+            CurvatureSensitivity = ParseFloatTextBox(TopologyCurvatureTextBox, 0.35f),
+            AnalysisRadius = ParseIntTextBox(TopologyRadiusTextBox, 2),
+            Strength = (int)Math.Round(TopologyStrengthSlider.Value),
+            UseBlend = TopologyBlendCheckBox.IsChecked == true,
+            PreserveExistingWaterAndBeach = TopologyPreserveWaterBeachCheckBox.IsChecked == true
+        };
+
+        if (options.PreserveExistingWaterAndBeach)
+        {
+            options.PreservedMaterialIds.Add(SelectedCoastMaterialId(DeepWaterMaterialComboBox, 3));
+            options.PreservedMaterialIds.Add(SelectedCoastMaterialId(ShallowWaterMaterialComboBox, 4));
+            options.PreservedMaterialIds.Add(SelectedCoastMaterialId(BeachMaterialComboBox, 1));
+            foreach (var row in _paletteRows.Where(row =>
+                         row.Label.Contains("water", StringComparison.OrdinalIgnoreCase) ||
+                         row.Label.Contains("underwater", StringComparison.OrdinalIgnoreCase) ||
+                         row.Label.Contains("coral", StringComparison.OrdinalIgnoreCase) ||
+                         row.Label.Contains("beach", StringComparison.OrdinalIgnoreCase) ||
+                         row.Label.Contains("sand", StringComparison.OrdinalIgnoreCase)))
+            {
+                options.PreservedMaterialIds.Add(row.Id);
+            }
+        }
+
+        options.Normalize();
+        return options;
+    }
+
+    private static int ParseIntTextBox(TextBox textBox, int fallback)
+        => int.TryParse(textBox.Text?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : fallback;
+
+    private void PreviewTopologyButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var options = ReadTopologyOptions();
+            var previewMap = _workingMap.Clone();
+            var result = TerrainTopologyMaterialPainter.Apply(previewMap, _project.GameData.TerrainHeightMap, options, out var stats, activeMaterialCellPredicate: BuildWritableMaterialCellPredicate(previewMap));
+            _isShowingCoastPreview = true;
+            BrushPreviewEllipse.Visibility = Visibility.Collapsed;
+            MaterialMapImage.Source = BuildDominantMaterialBitmap(previewMap, BuildActiveMaterialCellPredicate(previewMap));
+            TopologyStatusTextBlock.Text = FormatTopologyText("Prévisualisation : {0} cellule(s). {1}", result.CellsChanged, BuildTopologyStatsText(stats));
+            PaintStatusTextBlock.Text = UiLocalizationManager.T("Prévisualisation topologique affichée seulement. Utilise Rafraîchir stats pour revenir à la copie actuelle.");
+            CellDetailsTextBox.Text = BuildTopologyDetails(options, result, stats);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.ToString(), UiLocalizationManager.T("Peinture par topologie"), MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void ApplyTopologyButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            BeginMaterialHistoryAction();
+            _coastTransitionBaseMap = null;
+            var options = ReadTopologyOptions();
+            _topologyPaintBaseMap ??= _workingMap.Clone();
+            _workingMap = _topologyPaintBaseMap.Clone();
+            var result = TerrainTopologyMaterialPainter.Apply(_workingMap, _project.GameData.TerrainHeightMap, options, out var stats, activeMaterialCellPredicate: BuildWritableMaterialCellPredicate(_workingMap));
+            var fixedZeroCoverage = TerrainMaterialMapCoverageSanitizer.EnsureNoZeroCoverageTexels(_workingMap, BuildActiveMaterialCellPredicate(_workingMap));
+            if (fixedZeroCoverage > 0)
+            {
+                result.Messages.Add(FormatTopologyText("{0} texel(s) sans couverture corrigé(s) après peinture topologique.", fixedZeroCoverage));
+            }
+            _editState = new TerrainMaterialEditState();
+            _editState.AddGeneratedOperation(result, "Peinture automatique par topologie");
+            RefreshMaterialMapDisplay(refreshTables: true);
+            TopologyStatusTextBlock.Text = FormatTopologyText("Appliqué à la copie : {0} cellule(s). {1}", result.CellsChanged, BuildTopologyStatsText(stats));
+            PaintStatusTextBlock.Text = UiLocalizationManager.T("Image recalculée depuis la pente et la courbure locales. Clique ensuite sur Appliquer au projet pour préparer l’export ZIP.");
+            CellDetailsTextBox.Text = BuildTopologyDetails(options, result, stats);
+            CompleteMaterialHistoryAction();
+        }
+        catch (Exception ex)
+        {
+            CancelMaterialHistoryAction();
+            MessageBox.Show(this, ex.ToString(), UiLocalizationManager.T("Peinture par topologie"), MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private string BuildTopologyDetails(TerrainTopologyMaterialOptions options, TerrainMaterialPaintResult result, TerrainTopologyMaterialStats stats)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine(UiLocalizationManager.T("Peinture automatique par topologie (sans altitude absolue)"));
+        sb.AppendLine(FormatTopologyText("Plat : ID {0} | pente <= {1:0.###}", options.FlatMaterialId, options.FlatSlopeMaximum));
+        sb.AppendLine(FormatTopologyText("Pente douce : ID {0}", options.GentleSlopeMaterialId));
+        sb.AppendLine(FormatTopologyText("Pente forte : ID {0} | pente >= {1:0.###}", options.SteepSlopeMaterialId, options.SteepSlopeMinimum));
+        sb.AppendLine(FormatTopologyText("Crête convexe : ID {0} | courbure >= {1:0.###}", options.RidgeMaterialId, options.CurvatureSensitivity));
+        sb.AppendLine(FormatTopologyText("Creux concave : ID {0} | courbure <= -{1:0.###}", options.HollowMaterialId, options.CurvatureSensitivity));
+        sb.AppendLine(FormatTopologyText("Rayon d’analyse : {0} | force={1}/31 | eau/plages préservées={2}", options.AnalysisRadius, options.ClampedStrength, UiLocalizationManager.T(options.PreserveExistingWaterAndBeach ? "oui" : "non")));
+        sb.AppendLine(BuildTopologyStatsText(stats));
+        sb.AppendLine(FormatTopologyText("Cellules changées : {0}, blocs MaterialIDs2 changés : {1}", result.CellsChanged, result.BlocksChanged));
+        foreach (var message in result.Messages)
+        {
+            if (!message.StartsWith("Peinture topologique :", StringComparison.Ordinal))
+            {
+                sb.AppendLine(LocalizeTopologyResultMessage(message));
+            }
+        }
+        return sb.ToString();
+    }
+
+    private static string BuildTopologyStatsText(TerrainTopologyMaterialStats stats)
+        => FormatTopologyText("zones : plats={0}, douces={1}, fortes={2}, crêtes={3}, creux={4}, préservées={5}, ignorées={6}", stats.FlatCells, stats.GentleSlopeCells, stats.SteepSlopeCells, stats.RidgeCells, stats.HollowCells, stats.PreservedCells, stats.SkippedCells);
+
+    private static string FormatTopologyText(string source, params object[] values)
+        => string.Format(CultureInfo.CurrentCulture, UiLocalizationManager.T(source), values);
+
+    private static string LocalizeTopologyResultMessage(string message)
+        => message switch
+        {
+            "Material map ou heightmap vide : peinture topologique annulée." => UiLocalizationManager.T(message),
+            "Peinture topologique ignorée : zone vide." => UiLocalizationManager.T(message),
+            _ => message
+        };
 
     private string BuildCoastPreviewDetails(TerrainCoastTransitionOptions options, TerrainMaterialPaintResult result, TerrainCoastTransitionStats stats)
     {

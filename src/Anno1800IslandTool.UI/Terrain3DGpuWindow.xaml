@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:hx="http://helix-toolkit.org/wpf/SharpDX"
-        Title="Terrain 3D GPU v46.19 - aperçu de plage plein écran"
+        Title="Terrain 3D GPU v46.46 - peinture par topologie"
         Width="1500"
         Height="920"
         MinWidth="1050"
@@ -15,10 +15,21 @@
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
-        <Border Grid.Column="0" BorderBrush="#60646C" BorderThickness="1" CornerRadius="4" Padding="10" Background="#F3F4F6">
+        <Border x:Name="EditorControlsPanel" Grid.Column="0" BorderBrush="#60646C" BorderThickness="1" CornerRadius="4" Padding="10" Background="#F3F4F6">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel>
                     <TextBlock Text="ÉDITEUR GPU DU RELIEF" FontSize="16" FontWeight="Bold" Margin="0,0,0,10"/>
+
+                    <GroupBox Header="Historique des outils" Margin="0,0,0,10">
+                        <StackPanel Margin="8">
+                            <UniformGrid Columns="2">
+                                <Button x:Name="UndoButton" Margin="2" Height="32" IsEnabled="False" Click="UndoButton_Click">↶ Annuler</Button>
+                                <Button x:Name="RedoButton" Margin="2" Height="32" IsEnabled="False" Click="RedoButton_Click">↷ Rétablir</Button>
+                            </UniformGrid>
+                            <TextBlock x:Name="UndoStatusTextBlock" Margin="2,5,2,0" Text="Aucune modification à annuler." TextWrapping="Wrap" Foreground="#315D31"/>
+                            <TextBlock Margin="2,3,2,0" Text="Raccourcis : Ctrl+Z et Ctrl+Y. Les 20 dernières actions avant application ou validation sont conservées." TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </GroupBox>
 
                     <GroupBox Header="Maillage fusionné" Margin="0,0,0,10">
                         <StackPanel Margin="8">
@@ -30,6 +41,25 @@
                             <TextBlock Margin="0,7,0,0" TextWrapping="Wrap"
                                        Text="Toutes les pages du LOD sont assemblées et leurs bords communs sont soudés en une seule surface éditable."/>
                             <Button Margin="0,8,0,0" Height="30" Click="ReloadGpuButton_Click">Reconstruire le maillage fusionné</Button>
+                            <Button Margin="0,6,0,0" Height="30" Click="FrameMaximumArea_Click">Cadrer la limite maximale (grise)</Button>
+                            <TextBlock Margin="0,5,0,0" TextWrapping="Wrap" Text="Gris : taille maximale XML. Gardez au moins 8 cases d’océan avant cette limite."/>
+                        </StackPanel>
+                    </GroupBox>
+
+                    <GroupBox Header="Importer un terrain OBJ" Margin="0,0,0,10">
+                        <StackPanel Margin="8">
+                            <TextBlock Text="L'OBJ remplace le maillage du LOD affiché. Tous les éléments reconnus comme terrain sont conservés ; les bâtiments, arbres et autres décors sont écartés automatiquement. X/Z et les hauteurs sont ajustés à l'île. Les UV, normales, tangentes et Raw3..Raw7 sont créés automatiquement." TextWrapping="Wrap"/>
+                            <CheckBox x:Name="ObjFitFootprintCheckBox" Content="Ajuster X/Z à l'emprise active" IsChecked="True" Margin="0,8,0,2"/>
+                            <Grid Margin="0,4,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="82"/></Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="Précision (unités)" VerticalAlignment="Center"/>
+                                <TextBox x:Name="ObjGridStepTextBox" Grid.Row="0" Grid.Column="1" Margin="6,2" Text="32" ToolTip="32 correspond à une case de jeu"/>
+                                <TextBlock Grid.Row="1" Text="Lissage" VerticalAlignment="Center"/>
+                                <TextBox x:Name="ObjSmoothingTextBox" Grid.Row="1" Grid.Column="1" Margin="6,2" Text="2" ToolTip="Nombre de passages de lissage, de 0 à 8"/>
+                            </Grid>
+                            <Button x:Name="ImportObjTerrainButton" Margin="0,8,0,0" Height="32" Click="ImportObjTerrainButton_Click">Charger un fichier OBJ comme terrain</Button>
+                            <TextBlock x:Name="ObjImportStatusTextBlock" Margin="0,6,0,0" Text="Aucun OBJ importé. Les éléments de terrain et leur plage de hauteur sont détectés automatiquement." Foreground="#315D31" TextWrapping="Wrap"/>
                         </StackPanel>
                     </GroupBox>
 
@@ -45,6 +75,8 @@
                                 <ListBoxItem Padding="8" Content="🏖  Créer une plage jouable"/>
                                 <ListBoxItem Padding="8" Content="✚  Ajouter une zone d’île"/>
                                 <ListBoxItem Padding="8" Content="✕  Retirer une zone d’île"/>
+                                <ListBoxItem Padding="8" Content="🌲  Planter des arbres"/>
+                                <ListBoxItem Padding="8" Content="🏖  Créer une plage depuis le maillage"/>
                             </ListBox>
                             <Border Margin="0,8,0,0" Padding="7" Background="#FFF4CC" BorderBrush="#D5B95F" BorderThickness="1">
                                 <TextBlock x:Name="ActiveToolHelpTextBlock" TextWrapping="Wrap"
@@ -67,26 +99,47 @@
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
                                 <TextBlock Grid.Row="0" Text="Hauteur de plage" VerticalAlignment="Center"/>
-                                <TextBox x:Name="BeachHeightTextBox" Grid.Row="0" Grid.Column="1" Margin="6,2" Text="64" TextChanged="BeachSettingsTextBox_TextChanged"/>
+                                <TextBox x:Name="BeachHeightTextBox" Grid.Row="0" Grid.Column="1" Margin="6,2" Text="104" TextChanged="BeachSettingsTextBox_TextChanged"/>
                                 <TextBlock Grid.Row="1" Text="Fond sous l’eau" VerticalAlignment="Center"/>
-                                <TextBox x:Name="BeachWaterDepthTextBox" Grid.Row="1" Grid.Column="1" Margin="6,2" Text="-2047" TextChanged="BeachSettingsTextBox_TextChanged"/>
-                                <TextBlock Grid.Row="2" Text="Largeur côté terre" VerticalAlignment="Center"/>
-                                <TextBox x:Name="BeachLandWidthTextBox" Grid.Row="2" Grid.Column="1" Margin="6,2" Text="256" TextChanged="BeachSettingsTextBox_TextChanged"/>
-                                <TextBlock Grid.Row="3" Text="Largeur côté eau" VerticalAlignment="Center"/>
-                                <TextBox x:Name="BeachWaterWidthTextBox" Grid.Row="3" Grid.Column="1" Margin="6,2" Text="384" TextChanged="BeachSettingsTextBox_TextChanged"/>
-                                <TextBlock Grid.Row="4" Text="Longueur de plage" VerticalAlignment="Center"/>
-                                <TextBox x:Name="BeachLengthTextBox" Grid.Row="4" Grid.Column="1" Margin="6,2" Text="2048" TextChanged="BeachSettingsTextBox_TextChanged"/>
+                                <TextBox x:Name="BeachWaterDepthTextBox" Grid.Row="1" Grid.Column="1" Margin="6,2" Text="-2048" TextChanged="BeachSettingsTextBox_TextChanged"/>
+                                <TextBlock Grid.Row="2" Text="Largeur du sable vers l’eau" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                <TextBox x:Name="BeachLandWidthTextBox" Grid.Row="2" Grid.Column="1" Margin="6,2" Text="96" TextChanged="BeachSettingsTextBox_TextChanged"/>
+                                <TextBlock Grid.Row="3" Text="Raccord vers l’intérieur" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                <TextBox x:Name="BeachInnerWidthTextBox" Grid.Row="3" Grid.Column="1" Margin="6,2" Text="32" TextChanged="BeachSettingsTextBox_TextChanged"/>
+                                <TextBlock Grid.Row="4" Text="Largeur côté eau" VerticalAlignment="Center"/>
+                                <TextBox x:Name="BeachWaterWidthTextBox" Grid.Row="4" Grid.Column="1" Margin="6,2" Text="384" TextChanged="BeachSettingsTextBox_TextChanged"/>
+                                <TextBlock Grid.Row="5" Text="Longueur de plage" VerticalAlignment="Center"/>
+                                <TextBox x:Name="BeachLengthTextBox" Grid.Row="5" Grid.Column="1" Margin="6,2" Text="2048" TextChanged="BeachSettingsTextBox_TextChanged"/>
                             </Grid>
-                            <CheckBox x:Name="BeachFeatherEdgesCheckBox" Content="Adoucir les extrémités de la plage" IsChecked="True" Margin="0,6,0,0"/>
-                            <CheckBox x:Name="BeachAutoStraightCheckBox" Content="Plage droite automatique en un clic" IsChecked="True" Margin="0,4,0,0"/>
-                            <CheckBox x:Name="BeachSnapToShoreCheckBox" Content="Ajuster au bord et garder l’espace nécessaire au comptoir" IsChecked="True" Margin="0,4,0,0"/>
+                            <CheckBox x:Name="BeachFeatherEdgesCheckBox" IsChecked="True" Visibility="Collapsed"/>
+                            <CheckBox x:Name="BeachAutoStraightCheckBox" IsChecked="True" Visibility="Collapsed"/>
+                            <CheckBox x:Name="BeachSnapToShoreCheckBox" IsChecked="True" Visibility="Collapsed"/>
+                            <Button Margin="0,6,0,0" Height="28" Click="ResetBeachProfile_Click">Profil conseillé (inspiré vanilla)</Button>
                             <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#315D31"
-                                       Text="Un clic crée une plage droite sur le bord réel le plus proche, y compris dans une baie. Tirez le carré vert ou rose pour l’allonger ; tirez le losange cyan pour la déplacer. Le sable, la bande d’eau et plusieurs emplacements de comptoir sont appliqués automatiquement."/>
+                                       Text="Cliquez près du contour vert : le tronçon choisi devient orange. Étirez les carrés le long du contour, ou déplacez le losange cyan. Le profil conseillé utilise un raccord intérieur de 1 case, 3 cases de sable et 12 cases de pente marine (32 unités = 1 case). Une seule ligne de côte continue rend tout le rivage utilisable par les comptoirs et les bâtiments de pêche."/>
                             <UniformGrid Columns="2" Margin="0,8,0,0">
                                 <Button Margin="2" Height="30" Click="ApplyBeachButton_Click">Créer la plage jouable</Button>
                                 <Button Margin="2" Height="30" Click="ResetBeachButton_Click">Réinitialiser</Button>
+                            </UniformGrid>
+                        </StackPanel>
+                    </GroupBox>
+
+                    <GroupBox Header="6 — Planter des arbres" Margin="0,0,0,10">
+                        <StackPanel Margin="8">
+                            <TextBlock Text="Choisissez l’outil Arbres puis cliquez ou peignez sur la terre. Les arbres verts sont un aperçu avant application." TextWrapping="Wrap"/>
+                            <DockPanel Margin="0,8,0,3">
+                                <TextBlock Text="Densité" VerticalAlignment="Center"/>
+                                <TextBlock DockPanel.Dock="Right" Width="54" TextAlignment="Right"
+                                           Text="{Binding ElementName=TreeDensitySlider, Path=Value, StringFormat={}{0:0}%}"/>
+                            </DockPanel>
+                            <Slider x:Name="TreeDensitySlider" Minimum="5" Maximum="100" Value="35" TickFrequency="5"/>
+                            <TextBlock x:Name="TreeStatusTextBlock" Margin="0,6,0,0" Foreground="#315D31" Text="Aucun arbre en attente." TextWrapping="Wrap"/>
+                            <UniformGrid Columns="2" Margin="0,8,0,0">
+                                <Button x:Name="ApplyTreesButton" Margin="2" Height="32" Click="ApplyTreesButton_Click">Appliquer les arbres</Button>
+                                <Button Margin="2" Height="32" Click="ResetTreesButton_Click">Effacer l’aperçu</Button>
                             </UniformGrid>
                         </StackPanel>
                     </GroupBox>
@@ -168,9 +221,10 @@
                         </StackPanel>
                     </GroupBox>
 
+                    <TextBlock TextWrapping="Wrap" Margin="0,4,0,6" Text="La validation applique aussi l’empreinte en attente et prépare tous les LOD, normales et teintes pour l’export ZIP."/>
                     <Button Height="36" Margin="0,4,0,6" FontWeight="Bold" Click="ValidateEntireTerrainButton_Click">Valider tout le terrain</Button>
-                    <Button Height="38" Margin="0,4,0,6" FontWeight="Bold" Click="ApplyButton_Click">Appliquer les modifications au projet</Button>
-                    <Button Height="34" Click="CancelButton_Click">Annuler et restaurer le relief</Button>
+                    <Button Height="38" Margin="0,4,0,6" FontWeight="Bold" Click="ApplyButton_Click">Valider et fermer — prêt pour export</Button>
+                    <Button Height="34" Click="CancelButton_Click" ToolTip="Annule uniquement les retouches non validées. Les plages, empreintes et validations déjà appliquées sont conservées.">Fermer sans valider les retouches</Button>
                 </StackPanel>
             </ScrollViewer>
         </Border>
@@ -186,13 +240,13 @@
                                ShowCoordinateSystem="True"
                                ShowViewCube="True"
                                EnableDpiScale="True"
-                               EnableSwapChainRendering="True"
+                               EnableSwapChainRendering="False"
                                UseDefaultGestures="False"
                                FXAALevel="Low"
-                               MouseMove3D="GpuViewport_MouseMove3D"
                                PreviewMouseMove="GpuViewport_MouseMove"
                                PreviewMouseLeftButtonDown="GpuViewport_PreviewMouseLeftButtonDown"
                                MouseLeave="GpuViewport_MouseLeave"
+                               PreviewMouseRightButtonUp="GpuViewport_PreviewMouseRightButtonUp"
                                PreviewMouseWheel="GpuViewport_PreviewMouseWheel"
                                PreviewMouseLeftButtonUp="GpuViewport_PreviewMouseLeftButtonUp">
                     <hx:Viewport3DX.InputBindings>
@@ -248,7 +302,7 @@
                                             IsHitTestVisible="False"
                                             IsRendering="False"/>
                     <hx:LineGeometryModel3D x:Name="MaximumAreaModel"
-                                            Color="#FF36D6C8"
+                                            Color="#FF9FA4AB"
                                             Thickness="3"
                                             DepthBias="-110"
                                             IsHitTestVisible="False"
@@ -259,14 +313,40 @@
                                             DepthBias="-125"
                                             IsHitTestVisible="False"
                                             IsRendering="False"/>
-                    <hx:LineGeometryModel3D x:Name="BrushRingModel"
-                                            Color="#FFFFD400"
-                                            Thickness="4"
-                                            Smoothness="2"
-                                            DepthBias="-100"
+                    <hx:LineGeometryModel3D x:Name="TreePreviewModel"
+                                            Color="#FF32E85A"
+                                            Thickness="3"
+                                            DepthBias="-135"
                                             IsHitTestVisible="False"
                                             IsRendering="False"/>
                 </hx:Viewport3DX>
+            </Border>
+
+            <!-- La forme du pinceau est volontairement dessinée par WPF au-dessus
+                 du SwapChain DirectX. Elle ne dépend donc plus de l'acceptation
+                 d'une nouvelle géométrie par le moteur 3D pour suivre la souris. -->
+            <Canvas x:Name="BrushOverlayCanvas"
+                    Grid.Row="0"
+                    Margin="1"
+                    Panel.ZIndex="20"
+                    ClipToBounds="True"
+                    IsHitTestVisible="False">
+                <Polyline x:Name="BrushOverlayPolyline"
+                          Stroke="#FFFFD400"
+                          StrokeThickness="4"
+                          StrokeLineJoin="Round"
+                          StrokeStartLineCap="Round"
+                          StrokeEndLineCap="Round"
+                          Visibility="Collapsed"/>
+            </Canvas>
+
+            <Border Grid.Row="0" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="12" Padding="8"
+                    Background="#CC101217" BorderBrush="#66707C" BorderThickness="1" IsHitTestVisible="False">
+                <StackPanel>
+                    <TextBlock Text="Couleurs de hauteur" Foreground="White" FontWeight="SemiBold"/>
+                    <TextBlock Text="bleu : eau  •  sable : rivage  •  vert : terres  •  brun/blanc : relief"
+                               Foreground="#E5E8EC" Margin="0,3,0,0"/>
+                </StackPanel>
             </Border>
 
             <Border Grid.Row="1" Margin="0,8,0,0" Padding="8" Background="#ECEFF3" BorderBrush="#B8BDC6" BorderThickness="1">

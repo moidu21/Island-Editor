@@ -31,13 +31,34 @@ public partial class GlobalTintBaseMapWindow : Window
         _project = project;
         _activeMask = ActiveMapGridMaskCodec.Decode(_project.Root.ActiveMapGrid, _project.Root.ActiveMapGridBits, _project.Root.ActiveMapRect);
         InitializeComponent();
-        Loaded += (_, _) => UiLocalizationManager.ApplyTo(this);
+        RefreshSelectedToolDisplay();
+        Loaded += (_, _) =>
+        {
+            UiLocalizationManager.ApplyTo(this);
+            RefreshSelectedToolDisplay();
+        };
         UpdateSliderLabels();
         LoadFromProject();
     }
 
     private void ReloadFromProjectButton_Click(object sender, RoutedEventArgs e)
         => LoadFromProject();
+
+    private void ToolComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        => RefreshSelectedToolDisplay();
+
+    private void RefreshSelectedToolDisplay()
+    {
+        if (ActiveToolTextBlock is null || ToolComboBox.SelectedItem is not ComboBoxItem item)
+        {
+            return;
+        }
+
+        var displayName = item.Content?.ToString() ?? string.Empty;
+        ToolComboBox.Text = displayName;
+        ActiveToolTextBlock.Text = $"Outil actif : {displayName}";
+        ToolComboBox.InvalidateVisual();
+    }
 
     private void ApplyGlobalAntiRedButton_Click(object sender, RoutedEventArgs e)
     {
@@ -315,7 +336,9 @@ public partial class GlobalTintBaseMapWindow : Window
 
         var materialX = Math.Clamp((int)Math.Floor((x + 0.5) / Math.Max(1.0, _width) * materialMap.Width), 0, materialMap.Width - 1);
         var materialY = Math.Clamp((int)Math.Floor((y + 0.5) / Math.Max(1.0, _height) * materialMap.Height), 0, materialMap.Height - 1);
-        return materialMap.GetDominantMaterialId(materialX, materialY) != 1;
+        var size = Math.Max(1, _project.Root.MapSize);
+        var point = new System.Numerics.Vector2((x + .5f) / _width * size, (y + .5f) / _height * size);
+        return !GeneratedBeachZones.ForProject(_project).Any(zone => zone.Contains(point));
     }
 
     private bool IsTintPixelActive(int x, int y)

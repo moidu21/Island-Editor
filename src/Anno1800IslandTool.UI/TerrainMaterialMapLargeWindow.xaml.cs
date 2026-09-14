@@ -17,6 +17,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
     private TerrainMaterialCellPattern? _pickedCellPattern;
     private bool _isPainting;
     private bool _isRefreshing;
+    private bool _isApplyingEmbeddedMaterialSet;
     private bool _isUpdatingCoastControls;
     private bool _isUpdatingCellEditor;
     private int _cellEditorSourceX = -1;
@@ -26,7 +27,8 @@ public partial class TerrainMaterialMapLargeWindow : Window
     private enum LargeViewMode
     {
         PaintMap,
-        CoastThresholds
+        CoastThresholds,
+        Topology
     }
 
     private sealed record LargeViewModeRow(string Label, LargeViewMode Mode);
@@ -34,13 +36,22 @@ public partial class TerrainMaterialMapLargeWindow : Window
     public TerrainMaterialMapLargeWindow(TerrainMaterialMapWindow ownerWindow)
     {
         InitializeComponent();
+        PreviewKeyDown += TerrainMaterialMapLargeWindow_PreviewKeyDown;
         Loaded += (_, _) => UiLocalizationManager.ApplyTo(this);
         _ownerWindow = ownerWindow ?? throw new ArgumentNullException(nameof(ownerWindow));
+        BeachProtectionCheckBox.DataContext = _ownerWindow;
+        var embeddedNames = _ownerWindow.GetEmbeddedMaterialSetNames();
+        EmbeddedMaterialSetComboBox.ItemsSource = embeddedNames;
+        EmbeddedMaterialSetComboBox.SelectedItem = embeddedNames.FirstOrDefault(name =>
+            string.Equals(name, _ownerWindow.GetEffectiveMaterialSetName(), StringComparison.OrdinalIgnoreCase))
+            ?? embeddedNames.FirstOrDefault(name => string.Equals(name, "terra_01.xml", StringComparison.OrdinalIgnoreCase));
+        RefreshEmbeddedMaterialSetSelectionDisplay();
 
         ViewModeComboBox.ItemsSource = new[]
         {
-            new LargeViewModeRow("Matériaux / peinture", LargeViewMode.PaintMap),
-            new LargeViewModeRow("Seuils hauteur monde", LargeViewMode.CoastThresholds)
+            new LargeViewModeRow(UiLocalizationManager.T("Matériaux / peinture"), LargeViewMode.PaintMap),
+            new LargeViewModeRow(UiLocalizationManager.T("Seuils hauteur monde"), LargeViewMode.CoastThresholds),
+            new LargeViewModeRow(UiLocalizationManager.T("Topologie du relief"), LargeViewMode.Topology)
         };
         ViewModeComboBox.SelectedIndex = 0;
 
@@ -60,6 +71,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
         UpdateSliderLabels();
         UpdateCoastStrengthLabel();
         UpdateZoom();
+        RefreshUndoRedoState();
     }
 
     public void RefreshFromParentData(bool refreshPalette)
@@ -74,8 +86,10 @@ public partial class TerrainMaterialMapLargeWindow : Window
         {
             if (refreshPalette)
             {
+                RefreshEmbeddedMaterialSetSelection();
                 RefreshPaletteFromParent();
                 RefreshCoastControlsFromParent();
+                RefreshTopologyControlsFromParent();
                 RefreshMaterialSetStatus();
             }
 
@@ -93,6 +107,27 @@ public partial class TerrainMaterialMapLargeWindow : Window
         if (MaterialSetStatusTextBlock is not null)
         {
             MaterialSetStatusTextBlock.Text = "Materialset courant : " + _ownerWindow.GetMaterialSetStatusForLargeWindow();
+        }
+    }
+
+    private void RefreshEmbeddedMaterialSetSelection()
+    {
+        var effectiveName = _ownerWindow.GetEffectiveMaterialSetName();
+        var matchingName = EmbeddedMaterialSetComboBox.Items.OfType<string>().FirstOrDefault(name =>
+            string.Equals(name, effectiveName, StringComparison.OrdinalIgnoreCase));
+        if (matchingName is not null && !Equals(EmbeddedMaterialSetComboBox.SelectedItem, matchingName))
+        {
+            EmbeddedMaterialSetComboBox.SelectedItem = matchingName;
+        }
+
+        RefreshEmbeddedMaterialSetSelectionDisplay();
+    }
+
+    private void RefreshEmbeddedMaterialSetSelectionDisplay()
+    {
+        if (EmbeddedMaterialSetComboBox.SelectedItem is string fileName)
+        {
+            EmbeddedMaterialSetComboBox.Text = fileName;
         }
     }
 
@@ -153,6 +188,24 @@ public partial class TerrainMaterialMapLargeWindow : Window
     private static string FormatFloat(float value)
         => value.ToString("0.###", CultureInfo.InvariantCulture);
 
+    private void RefreshTopologyControlsFromParent()
+    {
+        var rows = _ownerWindow.GetTerrainMaterialPaletteRows().ToList();
+        var options = _ownerWindow.GetTopologyOptionsForLargeWindow();
+        SetCoastComboItems(TopologyFlatMaterialComboBox, rows, options.FlatMaterialId);
+        SetCoastComboItems(TopologyGentleMaterialComboBox, rows, options.GentleSlopeMaterialId);
+        SetCoastComboItems(TopologySteepMaterialComboBox, rows, options.SteepSlopeMaterialId);
+        SetCoastComboItems(TopologyRidgeMaterialComboBox, rows, options.RidgeMaterialId);
+        SetCoastComboItems(TopologyHollowMaterialComboBox, rows, options.HollowMaterialId);
+        TopologyFlatSlopeTextBox.Text = FormatFloat(options.FlatSlopeMaximum);
+        TopologySteepSlopeTextBox.Text = FormatFloat(options.SteepSlopeMinimum);
+        TopologyCurvatureTextBox.Text = FormatFloat(options.CurvatureSensitivity);
+        TopologyRadiusTextBox.Text = options.AnalysisRadius.ToString(CultureInfo.InvariantCulture);
+        TopologyStrengthSlider.Value = Math.Clamp(options.Strength, (int)TopologyStrengthSlider.Minimum, (int)TopologyStrengthSlider.Maximum);
+        TopologyBlendCheckBox.IsChecked = options.UseBlend;
+        TopologyPreserveWaterBeachCheckBox.IsChecked = options.PreserveExistingWaterAndBeach;
+    }
+
     private LargeViewMode CurrentViewMode => ViewModeComboBox.SelectedItem is LargeViewModeRow row
         ? row.Mode
         : LargeViewMode.PaintMap;
@@ -169,6 +222,16 @@ public partial class TerrainMaterialMapLargeWindow : Window
             CoastStatusTextBlock.Text = status;
             CellDetailsTextBox.Text = details;
             ImageHintTextBlock.Text = "Vue seuils hauteur monde : cliquer inspecte la hauteur et la classe prévue. La peinture est désactivée dans cette vue.";
+            return;
+        }
+
+        if (CurrentViewMode == LargeViewMode.Topology)
+        {
+            var options = ReadTopologyOptions();
+            MaterialMapImage.Source = _ownerWindow.CreateTopologyPreviewBitmapForLargeWindow(options, out var status, out var details);
+            TopologyStatusTextBlock.Text = status;
+            CellDetailsTextBox.Text = details;
+            ImageHintTextBlock.Text = UiLocalizationManager.T("Vue topologique : prévisualisation calculée depuis la pente et la courbure locales, sans altitude absolue. La peinture manuelle est désactivée.");
             return;
         }
 
@@ -194,6 +257,11 @@ public partial class TerrainMaterialMapLargeWindow : Window
         if (CurrentViewMode == LargeViewMode.CoastThresholds)
         {
             ImageHintTextBlock.Text = _ownerWindow.BuildCoastCellSummaryForLargeWindow(x, y, ReadCoastTransitionOptions());
+            return;
+        }
+        if (CurrentViewMode == LargeViewMode.Topology)
+        {
+            ImageHintTextBlock.Text = UiLocalizationManager.T("Vue topologique active : modifie les réglages à gauche puis actualise la vue.");
             return;
         }
 
@@ -229,6 +297,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
 
         if (PaintModeCheckBox.IsChecked == true)
         {
+            _ownerWindow.BeginMaterialHistoryAction();
             _isPainting = true;
             MaterialMapImage.CaptureMouse();
             PaintAt(x, y);
@@ -244,6 +313,54 @@ public partial class TerrainMaterialMapLargeWindow : Window
         if (MaterialMapImage.IsMouseCaptured)
         {
             MaterialMapImage.ReleaseMouseCapture();
+        }
+        _ownerWindow.CompleteMaterialHistoryAction();
+        RefreshUndoRedoState();
+    }
+
+    private void UndoMaterialButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_ownerWindow.UndoMaterialEdit())
+        {
+            MaterialHistoryStatusTextBlock.Text = "Dernière modification de matériaux annulée.";
+        }
+        RefreshUndoRedoState(preserveMessage: true);
+    }
+
+    private void RedoMaterialButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_ownerWindow.RedoMaterialEdit())
+        {
+            MaterialHistoryStatusTextBlock.Text = "Modification de matériaux rétablie.";
+        }
+        RefreshUndoRedoState(preserveMessage: true);
+    }
+
+    private void TerrainMaterialMapLargeWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (Keyboard.FocusedElement is TextBox || (Keyboard.Modifiers & ModifierKeys.Control) == 0) return;
+        if (e.Key == Key.Z)
+        {
+            UndoMaterialButton_Click(sender, e);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Y)
+        {
+            RedoMaterialButton_Click(sender, e);
+            e.Handled = true;
+        }
+    }
+
+    internal void RefreshUndoRedoState(bool preserveMessage = false)
+    {
+        if (UndoMaterialButton is null || RedoMaterialButton is null || MaterialHistoryStatusTextBlock is null) return;
+        UndoMaterialButton.IsEnabled = _ownerWindow.CanUndoMaterialEdit;
+        RedoMaterialButton.IsEnabled = _ownerWindow.CanRedoMaterialEdit;
+        if (!preserveMessage)
+        {
+            MaterialHistoryStatusTextBlock.Text = _ownerWindow.CanUndoMaterialEdit
+                ? "Des modifications peuvent être annulées. Raccourcis : Ctrl+Z / Ctrl+Y."
+                : "Aucune modification à annuler.";
         }
     }
 
@@ -380,6 +497,45 @@ public partial class TerrainMaterialMapLargeWindow : Window
         catch (Exception ex)
         {
             MessageBox.Show(this, ex.ToString(), "Chargement du materialset", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void UseEmbeddedMaterialSetButton_Click(object sender, RoutedEventArgs e)
+        => ApplySelectedEmbeddedMaterialSet();
+
+    private void EmbeddedMaterialSetComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        RefreshEmbeddedMaterialSetSelectionDisplay();
+        if (IsLoaded && !_isRefreshing && !_isApplyingEmbeddedMaterialSet)
+        {
+            ApplySelectedEmbeddedMaterialSet();
+        }
+    }
+
+    private void ApplySelectedEmbeddedMaterialSet()
+    {
+        if (_isApplyingEmbeddedMaterialSet || EmbeddedMaterialSetComboBox.SelectedItem is not string fileName)
+        {
+            return;
+        }
+
+        _isApplyingEmbeddedMaterialSet = true;
+        try
+        {
+            var status = _ownerWindow.UseEmbeddedMaterialSet(fileName);
+            UpdateRd3dMaterialSetCheckBox.IsChecked = true;
+            RefreshFromParentData(refreshPalette: true);
+            PaintStatusTextBlock.Text = status;
+            CellDetailsTextBox.Text = status;
+            RefreshMaterialSetStatus();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.ToString(), "Chargement du materialset intégré", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            _isApplyingEmbeddedMaterialSet = false;
         }
     }
 
@@ -775,6 +931,44 @@ public partial class TerrainMaterialMapLargeWindow : Window
         return options;
     }
 
+    private TerrainTopologyMaterialOptions ReadTopologyOptions()
+    {
+        var options = new TerrainTopologyMaterialOptions
+        {
+            FlatMaterialId = SelectedCoastMaterialId(TopologyFlatMaterialComboBox, 2),
+            GentleSlopeMaterialId = SelectedCoastMaterialId(TopologyGentleMaterialComboBox, 2),
+            SteepSlopeMaterialId = SelectedCoastMaterialId(TopologySteepMaterialComboBox, 16),
+            RidgeMaterialId = SelectedCoastMaterialId(TopologyRidgeMaterialComboBox, 16),
+            HollowMaterialId = SelectedCoastMaterialId(TopologyHollowMaterialComboBox, 2),
+            FlatSlopeMaximum = ParseFloatTextBox(TopologyFlatSlopeTextBox, 0.18f),
+            SteepSlopeMinimum = ParseFloatTextBox(TopologySteepSlopeTextBox, 1.15f),
+            CurvatureSensitivity = ParseFloatTextBox(TopologyCurvatureTextBox, 0.35f),
+            AnalysisRadius = ParseIntTextBox(TopologyRadiusTextBox, 2),
+            Strength = (int)Math.Round(TopologyStrengthSlider.Value),
+            UseBlend = TopologyBlendCheckBox.IsChecked == true,
+            PreserveExistingWaterAndBeach = TopologyPreserveWaterBeachCheckBox.IsChecked == true
+        };
+
+        if (options.PreserveExistingWaterAndBeach)
+        {
+            options.PreservedMaterialIds.Add(SelectedCoastMaterialId(DeepWaterMaterialComboBox, 3));
+            options.PreservedMaterialIds.Add(SelectedCoastMaterialId(ShallowWaterMaterialComboBox, 4));
+            options.PreservedMaterialIds.Add(SelectedCoastMaterialId(BeachMaterialComboBox, 1));
+            foreach (var row in _ownerWindow.GetTerrainMaterialPaletteRows().Where(row =>
+                         row.Label.Contains("water", StringComparison.OrdinalIgnoreCase) ||
+                         row.Label.Contains("underwater", StringComparison.OrdinalIgnoreCase) ||
+                         row.Label.Contains("coral", StringComparison.OrdinalIgnoreCase) ||
+                         row.Label.Contains("beach", StringComparison.OrdinalIgnoreCase) ||
+                         row.Label.Contains("sand", StringComparison.OrdinalIgnoreCase)))
+            {
+                options.PreservedMaterialIds.Add(row.Id);
+            }
+        }
+
+        options.Normalize();
+        return options;
+    }
+
     private TerrainMaterialCellPattern? TryGetCoastRolePattern(string key)
         => _coastRoleCellPatterns.TryGetValue(key, out var pattern) ? pattern.Clone() : null;
 
@@ -786,6 +980,9 @@ public partial class TerrainMaterialMapLargeWindow : Window
         var text = textBox.Text?.Trim().Replace(',', '.');
         return float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ? value : fallback;
     }
+
+    private static int ParseIntTextBox(TextBox textBox, int fallback)
+        => int.TryParse(textBox.Text?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : fallback;
 
     private void ApplyMaterialEditsButton_Click(object sender, RoutedEventArgs e)
     {
@@ -863,6 +1060,29 @@ public partial class TerrainMaterialMapLargeWindow : Window
         catch (Exception ex)
         {
             MessageBox.Show(this, ex.ToString(), "Transition côte/plage/eau", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void ShowTopologyViewButton_Click(object sender, RoutedEventArgs e)
+    {
+        ViewModeComboBox.SelectedItem = ViewModeComboBox.Items.OfType<LargeViewModeRow>().FirstOrDefault(r => r.Mode == LargeViewMode.Topology);
+        RefreshMapImage();
+    }
+
+    private void ApplyTopologyButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var details = _ownerWindow.ApplyTopologyFromLargeWindow(ReadTopologyOptions(), out var status);
+            TopologyStatusTextBlock.Text = status;
+            PaintStatusTextBlock.Text = UiLocalizationManager.T("Image matériaux mise à jour depuis la topologie. Clique ensuite sur Appliquer au projet pour l’export ZIP.");
+            CellDetailsTextBox.Text = details;
+            RefreshFromParentData(refreshPalette: false);
+            ViewModeComboBox.SelectedItem = ViewModeComboBox.Items.OfType<LargeViewModeRow>().FirstOrDefault(r => r.Mode == LargeViewMode.PaintMap);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.ToString(), UiLocalizationManager.T("Peinture par topologie"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 

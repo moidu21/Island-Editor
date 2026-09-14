@@ -14,8 +14,10 @@ namespace Anno1800IslandTool.Pipeline.Services;
 /// Ce sampler utilise le LOD mesh en mémoire comme source de vérité locale, typiquement LOD2 après
 /// édition 3D, puis retombe sur la coarse heightmap quand aucun vertex proche n'est disponible.
 /// </summary>
-internal sealed class MeshBackedHeightSampler
+public sealed class MeshBackedHeightSampler
 {
+    private readonly Dictionary<(int X, int Z), List<SurfaceTriangle>> _triangles = new();
+    private const double TriangleCellSize = 256d;
     private readonly Dictionary<(int X, int Z), List<VertexSample>> _cells;
     private readonly double _cellSize;
     private readonly double _defaultRadius;
@@ -42,6 +44,7 @@ internal sealed class MeshBackedHeightSampler
 
         var pages = project.MeshPages.Values
             .Where(page => page.Key.Lod == lod)
+            .Where(page => !project.SuppressedTerrainPagePaths.Contains(page.OriginalRelativePath))
             .Where(MeshPageClassifier.CanEditGeometry)
             .Where(page => page.Clusters.Any(cluster => cluster.Vertices.Count > 0))
             .ToList();
@@ -79,11 +82,45 @@ internal sealed class MeshBackedHeightSampler
             list.Add(sample);
         }
 
-        return new MeshBackedHeightSampler(cells, cellSize, radius, maxRing);
+        var sampler = new MeshBackedHeightSampler(cells, cellSize, radius, maxRing);
+        foreach (var cluster in pages.SelectMany(page => page.Clusters))
+        {
+            for (var i = 0; i + 2 < cluster.Indices.Count; i += 3)
+            {
+                var ia = cluster.Indices[i];
+                var ib = cluster.Indices[i + 1];
+                var ic = cluster.Indices[i + 2];
+                if ((uint)ia >= cluster.Vertices.Count || (uint)ib >= cluster.Vertices.Count || (uint)ic >= cluster.Vertices.Count) continue;
+                var a = cluster.Vertices[ia];
+                var b = cluster.Vertices[ib];
+                var c = cluster.Vertices[ic];
+                // Les jupes sont des coutures verticales, pas une deuxième surface.
+                if (a.Attributes.IsSkirtVertex || b.Attributes.IsSkirtVertex || c.Attributes.IsSkirtVertex) continue;
+                var triangle = new SurfaceTriangle(a.X, a.Z, a.WorldHeight, b.X, b.Z, b.WorldHeight, c.X, c.Z, c.WorldHeight);
+                if (Math.Abs(triangle.Determinant) < 1e-9) continue;
+                var min = ToCell(Math.Min(a.X, Math.Min(b.X, c.X)), Math.Min(a.Z, Math.Min(b.Z, c.Z)), TriangleCellSize);
+                var max = ToCell(Math.Max(a.X, Math.Max(b.X, c.X)), Math.Max(a.Z, Math.Max(b.Z, c.Z)), TriangleCellSize);
+                for (var z = min.Z; z <= max.Z; z++)
+                for (var x = min.X; x <= max.X; x++)
+                {
+                    if (!sampler._triangles.TryGetValue((x, z), out var bucket)) sampler._triangles[(x, z)] = bucket = new();
+                    bucket.Add(triangle);
+                }
+            }
+        }
+        return sampler;
     }
 
     public bool TrySample(double x, double z, out float height)
     {
+        // Un grand triangle plat peut ne posséder aucun sommet dans le rayon de
+        // recherche. Retomber alors sur GameData réintroduisait l'ancienne montagne
+        // dans les autres LOD. Interpoler la surface avant le secours par proximité.
+        if (_triangles.TryGetValue(ToCell(x, z, TriangleCellSize), out var triangles))
+        {
+            foreach (var triangle in triangles)
+                if (triangle.TrySample(x, z, out height)) return true;
+        }
         var baseCell = ToCell(x, z, _cellSize);
         var radiusSq = _defaultRadius * _defaultRadius;
         var best = new NearestAccumulator(8);
@@ -186,6 +223,19 @@ internal sealed class MeshBackedHeightSampler
     }
 
     private readonly record struct VertexSample(double X, double Z, float Height);
+
+    private readonly record struct SurfaceTriangle(double AX, double AZ, float AH, double BX, double BZ, float BH, double CX, double CZ, float CH)
+    {
+        public double Determinant => (BZ - CZ) * (AX - CX) + (CX - BX) * (AZ - CZ);
+        public bool TrySample(double x, double z, out float height)
+        {
+            var a = ((BZ - CZ) * (x - CX) + (CX - BX) * (z - CZ)) / Determinant;
+            var b = ((CZ - AZ) * (x - CX) + (AX - CX) * (z - CZ)) / Determinant;
+            var c = 1d - a - b;
+            height = (float)(a * AH + b * BH + c * CH);
+            return a >= -1e-7 && b >= -1e-7 && c >= -1e-7;
+        }
+    }
 
     private struct NearestAccumulator
     {

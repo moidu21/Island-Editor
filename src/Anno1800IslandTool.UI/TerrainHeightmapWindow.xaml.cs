@@ -29,7 +29,7 @@ public partial class TerrainHeightmapWindow : Window
     private PageRow? _selectedPage;
     private bool _initialized;
     private ScrollViewer? _runtimeHeightScrollViewer;
-    private Canvas? _runtimeHeightCanvas;
+    private Rendering.DirectX11Canvas? _runtimeHeightCanvas;
     private readonly LocalTerrainDerivativeRegenerator _localRegenerator = new();
     private readonly IslandExporter _exporter = new();
     private readonly IslandImporter _importer = new();
@@ -86,7 +86,7 @@ public partial class TerrainHeightmapWindow : Window
         }
 
         HeightSurfaceHost.Children.Clear();
-        _runtimeHeightCanvas = new Canvas
+        _runtimeHeightCanvas = new Rendering.DirectX11Canvas
         {
             Background = Brushes.Transparent
         };
@@ -104,7 +104,7 @@ public partial class TerrainHeightmapWindow : Window
         HeightSurfaceHost.Children.Add(_runtimeHeightScrollViewer);
     }
 
-    private Canvas? GetHeightCanvas()
+    private Rendering.DirectX11Canvas? GetHeightCanvas()
     {
         EnsureHeightSurface();
         return _runtimeHeightCanvas;

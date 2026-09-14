@@ -55,6 +55,7 @@ public sealed class IslandProject
     public string? Rd3dFilePath { get; set; }
     public string? GameDataFilePath { get; set; }
     public string? MaterialSetFilePath { get; set; }
+    public string? AnnoEditorLevelFilePath { get; set; }
 
     public bool IsModified { get; set; }
     public HashSet<string> ModifiedSections { get; } = new(StringComparer.OrdinalIgnoreCase);

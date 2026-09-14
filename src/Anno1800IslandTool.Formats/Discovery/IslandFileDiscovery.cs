@@ -24,6 +24,7 @@ public sealed class IslandFileDiscovery
 
         result.Rd3dPath = ChooseSingle(classified, FileKind.Rd3dXml);
         result.GameDataPath = ChooseSingle(classified, FileKind.GameDataXml);
+        result.AnnoEditorLevelPath = ChooseSingle(classified, FileKind.AnnoEditorLevel);
 
         var inferredIslandName =
             NormalizeName(preferredIslandName) ??
@@ -87,6 +88,11 @@ public sealed class IslandFileDiscovery
         if (fileName.Equals("gamedata.xml", StringComparison.OrdinalIgnoreCase))
         {
             return FileKind.GameDataXml;
+        }
+
+        if (path.EndsWith(".a7me", StringComparison.OrdinalIgnoreCase))
+        {
+            return FileKind.AnnoEditorLevel;
         }
 
         if (fileName.StartsWith("terra_", StringComparison.OrdinalIgnoreCase) &&
