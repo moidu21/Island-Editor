@@ -479,11 +479,17 @@ public sealed class IslandExporter : IIslandWriter
             }
         }
 
-        // v39.1 : les tintmaps sont à nouveau gérées par le pipeline.
+        var shouldRegenerateTintMaps = project.HeightEditState?.HasGeometryEdits == true ||
+            (project.LocalRegeneration?.GeneratedTintMapWrites.Any(write => write.HasContent) == true);
+
+        // Les tintmaps source sont des données dérivées délicates. Une conversion de
+        // MaterialSet seule ne doit ni les normaliser ni en inventer de nouvelles : cela
+        // transformait un changement de référence en centaines de fichiers altérés.
+        // Elles ne sont reconstruites qu'après une vraie édition géométrique explicite.
         // 1) normalisation DXT1 conservatrice des pages source si nécessaire ;
         // 2) export des GeneratedTintMapWrites de validation ;
         // 3) synchronisation finale MaterialMap -> tintmaps pour les LOD distants.
-        foreach (var tintMapPage in project.TintMapPages.Values)
+        foreach (var tintMapPage in shouldRegenerateTintMaps ? project.TintMapPages.Values : Enumerable.Empty<TintMapPage>())
         {
             if (string.IsNullOrWhiteSpace(tintMapPage.OriginalRelativePath) || tintMapPage.RawDdsBytes.Length == 0)
             {
@@ -528,7 +534,10 @@ public sealed class IslandExporter : IIslandWriter
             }
         }
 
-        var syncedTintMaps = TerrainTintMapExportSynchronizer.BuildAllTintMapReplacements(project, out var tintSyncSummary);
+        var tintSyncSummary = "Tintmaps source conservées : aucune édition géométrique.";
+        var syncedTintMaps = shouldRegenerateTintMaps
+            ? TerrainTintMapExportSynchronizer.BuildAllTintMapReplacements(project, out tintSyncSummary)
+            : new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
         foreach (var pair in syncedTintMaps)
         {
             replacements[pair.Key] = pair.Value;

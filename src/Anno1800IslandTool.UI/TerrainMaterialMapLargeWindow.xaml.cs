@@ -39,6 +39,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
         PreviewKeyDown += TerrainMaterialMapLargeWindow_PreviewKeyDown;
         Loaded += (_, _) => UiLocalizationManager.ApplyTo(this);
         _ownerWindow = ownerWindow ?? throw new ArgumentNullException(nameof(ownerWindow));
+        InitializeMaterial3D();
         BeachProtectionCheckBox.DataContext = _ownerWindow;
         var embeddedNames = _ownerWindow.GetEmbeddedMaterialSetNames();
         EmbeddedMaterialSetComboBox.ItemsSource = embeddedNames;
@@ -72,6 +73,9 @@ public partial class TerrainMaterialMapLargeWindow : Window
         UpdateCoastStrengthLabel();
         UpdateZoom();
         RefreshUndoRedoState();
+        LoadSavedGameDataPath();
+        SetMaterialView3D(true);
+        Closed += (_, _) => DisposeMaterial3D();
     }
 
     public void RefreshFromParentData(bool refreshPalette)
@@ -222,6 +226,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
             CoastStatusTextBlock.Text = status;
             CellDetailsTextBox.Text = details;
             ImageHintTextBlock.Text = "Vue seuils hauteur monde : cliquer inspecte la hauteur et la classe prévue. La peinture est désactivée dans cette vue.";
+            RefreshMaterial3DFromCurrentBitmap();
             return;
         }
 
@@ -232,11 +237,13 @@ public partial class TerrainMaterialMapLargeWindow : Window
             TopologyStatusTextBlock.Text = status;
             CellDetailsTextBox.Text = details;
             ImageHintTextBlock.Text = UiLocalizationManager.T("Vue topologique : prévisualisation calculée depuis la pente et la courbure locales, sans altitude absolue. La peinture manuelle est désactivée.");
+            RefreshMaterial3DFromCurrentBitmap();
             return;
         }
 
         MaterialMapImage.Source = _ownerWindow.CreateMaterialMapBitmap();
         ImageHintTextBlock.Text = "Vue matériaux / peinture : clique pour inspecter, clic droit ou pickup pour prélever, cliquer/glisser peint si le mode peinture est activé.";
+        RefreshMaterial3DFromCurrentBitmap();
     }
 
     private void MaterialMapImage_MouseMove(object sender, MouseEventArgs e)

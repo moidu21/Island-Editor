@@ -47,6 +47,7 @@ public partial class TerrainMaterialMapWindow : Window
         BeachProtectionCheckBox.DataContext = this;
         _editor = editor ?? throw new ArgumentNullException(nameof(editor));
         _workingMap = _project.Rd3d.MaterialMap.Clone();
+        MaterialSetSelectionCoordinator.SelectionChanged += MaterialSetSelectionCoordinator_SelectionChanged;
 
         PopulateEmbeddedMaterialSets();
         RefreshMaterialSetPaletteFromProject();
@@ -56,6 +57,36 @@ public partial class TerrainMaterialMapWindow : Window
         RefreshMaterialMapDisplay(refreshTables: true);
         CellDetailsTextBox.Text = "Aucune cellule sélectionnée.";
         PickupStatusTextBlock.Text = "Pickup : aucun. Clic droit sur la carte pour prélever une cellule complète.";
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        MaterialSetSelectionCoordinator.SelectionChanged -= MaterialSetSelectionCoordinator_SelectionChanged;
+        base.OnClosed(e);
+    }
+
+    private void MaterialSetSelectionCoordinator_SelectionChanged(object? sender, MaterialSetSelectionChangedEventArgs e)
+    {
+        if (!ReferenceEquals(e.Project, _project) || ReferenceEquals(e.Source, this))
+        {
+            return;
+        }
+
+        Dispatcher.InvokeAsync(() =>
+        {
+            var wasApplying = _isApplyingEmbeddedMaterialSet;
+            _isApplyingEmbeddedMaterialSet = true;
+            try
+            {
+                PopulateEmbeddedMaterialSets();
+                RefreshMaterialSetPaletteFromProject();
+                RefreshMaterialMapDisplay(refreshTables: true);
+            }
+            finally
+            {
+                _isApplyingEmbeddedMaterialSet = wasApplying;
+            }
+        });
     }
 
     private void PopulateEmbeddedMaterialSets()
@@ -153,6 +184,7 @@ public partial class TerrainMaterialMapWindow : Window
         RefreshMaterialSetPaletteFromProject();
         RefreshMaterialMapDisplay(refreshTables: true);
         ProjectApplied?.Invoke(this, EventArgs.Empty);
+        MaterialSetSelectionCoordinator.Publish(_project, this);
         var gamePath = $"data/config/engine/material_sets/{fileName}";
         return $"Materialset intégré chargé : {fileName}. Le RD3D pointera vers {gamePath} à l’export. {environmentReport}";
     }
@@ -288,6 +320,7 @@ public partial class TerrainMaterialMapWindow : Window
         RefreshMaterialSetPaletteFromProject();
         RefreshMaterialMapDisplay(refreshTables: true);
         ProjectApplied?.Invoke(this, EventArgs.Empty);
+        MaterialSetSelectionCoordinator.Publish(_project, this);
 
         var terrainCount = _paletteRows.Count(r => r.IsTerrain);
         var objectCount = _paletteRows.Count(r => !r.IsTerrain);
@@ -670,6 +703,18 @@ public partial class TerrainMaterialMapWindow : Window
 
     internal string GetMaterialLabelForLargeWindow(int id)
         => GetMaterialLabel(id);
+
+    internal MaterialDefinition? GetMaterialDefinitionForLargeWindow(int id)
+        => GetMaterial(id);
+
+    internal CoarseHeightMap GetHeightMapForLargeWindow()
+        => _project.GameData.TerrainHeightMap;
+
+    internal int GetMapSizeForLargeWindow()
+        => Math.Max(1, _project.Root.MapSize > 0 ? _project.Root.MapSize : _project.Metadata.MapSize);
+
+    internal IslandProject GetProjectForLargeWindow()
+        => _project;
 
     internal TerrainMaterialPaintResult PaintMaterialAtFromLargeWindow(int x, int y, TerrainMaterialBrushOptions options)
     {

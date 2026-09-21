@@ -8,6 +8,14 @@ namespace Anno1800IslandTool.UI;
 
 public partial class Terrain3DGpuWindow
 {
+    private void InitializeTreeBiomeDisplay()
+    {
+        if (TreeBiomeTextBlock is null) return;
+        var synchronizer = new Anno1800IslandTool.Pipeline.Services.MaterialSetEnvironmentSynchronizer();
+        var trees = synchronizer.GetCompatibleTreePaths(_project, out var biome);
+        TreeBiomeTextBlock.Text = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+            UiLocalizationManager.T("Biome détecté : {0} — {1} arbre(s) compatible(s)."), biome, trees.Count);
+    }
     private void PlaceTreeStamp(Vector3 center)
     {
         if (_spatialIndex is null) return;

@@ -19,7 +19,7 @@ public partial class Terrain3DWindow
         var meshBacked = _localRegenerator.BuildMeshBackedCoarseHeightMap(_project, working, definition.Lod, full);
         _editedCoarseSamples = meshBacked.Samples.ToArray();
         MergeDirtyRegionFromWorldBounds(result.MinX, result.MinZ, result.MaxX, result.MaxZ);
-        var validation = ValidateEntireTerrainCore(definition.Lod, useCoarseHeightMap: false);
+        var validation = ValidateEntireTerrainCore(definition.Lod, useCoarseHeightMap: false, forceGeometryRegeneration: true);
 
         return $"OBJ chargé : {result.SourceVertices:N0} sommets et {result.SourceTriangles:N0} triangles source ; " +
                $"{result.ImportedVertices:N0} sommets et {result.ImportedTriangles:N0} triangles répartis dans {result.PagesChanged} page(s) du LOD {definition.Lod}. " +

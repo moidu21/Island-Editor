@@ -16,6 +16,7 @@ public sealed class ProjectTextRegenerator
     private readonly GameDataWriter _gameDataWriter = new();
     private readonly MaterialSetWriter _materialSetWriter = new();
     private const float Rd3dCoarseHeightMinimumWorld = -8f;
+    private const int Rd3dLevelBoundsSafetyMargin = 2;
 
     public void RegenerateRootText(IslandProject project)
     {
@@ -41,8 +42,10 @@ public sealed class ProjectTextRegenerator
         var candidate = string.IsNullOrWhiteSpace(project.RawContent.Rd3dText)
             ? fallback
             : UpdateRd3dText(project.RawContent.Rd3dText!, project.Rd3d, project.GameData.TerrainHeightMap, project.Root, project.PreserveManualGlobalTintBaseTextureData);
-        project.RawContent.Rd3dText = Anno1800IslandTool.Pipeline.Services.TerrainWaterMapSynchronizer.Synchronize(
-            PseudoXmlSafety.EnsureSingleRootOrFallback(candidate, fallback), project.GameData.TerrainHeightMap);
+        project.RawContent.Rd3dText = Anno1800IslandTool.Pipeline.Services.GeneratedRiverService.ReapplyWaterFlow(
+            Anno1800IslandTool.Pipeline.Services.TerrainWaterMapSynchronizer.Synchronize(
+                PseudoXmlSafety.EnsureSingleRootOrFallback(candidate, fallback), project.GameData.TerrainHeightMap),
+            project.RawContent.GameDataText);
     }
 
     public void RegenerateGameDataText(IslandProject project)
@@ -52,7 +55,15 @@ public sealed class ProjectTextRegenerator
             ? fallback
             : project.RawContent.GameDataText!;
         var candidate = UpdateGameDataText(sourceText, project.Metadata.MapSize, project.GameData, project.Root);
-        project.RawContent.GameDataText = GeneratedCoastGeometry.RepairBounds(PseudoXmlSafety.EnsureSingleRootOrFallback(candidate, fallback));
+        var safeText = GeneratedCoastGeometry.RepairBounds(PseudoXmlSafety.EnsureSingleRootOrFallback(candidate, fallback));
+        var irrigatedBiome = Anno1800IslandTool.Pipeline.Services.GeneratedRiverService.UsesIrrigation(project);
+        project.RawContent.GameDataText = Anno1800IslandTool.Pipeline.Services.GeneratedRiverService.SynchronizeRiverObjects(
+            safeText,
+            irrigatedBiome);
+        project.RawContent.GameDataText = Anno1800IslandTool.Pipeline.Services.GeneratedRiverService.SynchronizeRiverCoverage(
+            project.RawContent.GameDataText,
+            Math.Max(1, project.Root.MapSize),
+            irrigatedBiome);
     }
 
     public void RegenerateMaterialSetText(IslandProject project)
@@ -918,8 +929,13 @@ public sealed class ProjectTextRegenerator
                 }
 
                 var index = (y * levelWidth) + x;
-                mins[index] = (int)Math.Floor(min);
-                maxs[index] = (int)Math.Ceiling(max);
+                // Les limites sont utilisées par le moteur pour le culling des blocs.
+                // Une coarse map peut différer de quelques centièmes du mesh fin ; sans
+                // marge, un sommet valide situé juste au-dessus de MaxY fait disparaître
+                // tout son bloc selon la caméra et révèle les jupes/vides du LOD voisin.
+                mins[index] = Math.Max((int)Rd3dCoarseHeightMinimumWorld,
+                    (int)Math.Floor(min) - Rd3dLevelBoundsSafetyMargin);
+                maxs[index] = (int)Math.Ceiling(max) + Rd3dLevelBoundsSafetyMargin;
             }
         }
 

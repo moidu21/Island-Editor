@@ -20,6 +20,7 @@ public partial class Terrain3DWindow
                 controller.ApplyBeachFromGpu,
                 controller.ApplyFootprintFromGpu,
                 controller.ApplyTreesFromGpu,
+                controller.ApplyRiverFromGpu,
                 controller.ValidateEntireTerrainFromGpu,
                 controller.ApplyObjTerrainFromGpu)
             {

@@ -14,6 +14,28 @@ public sealed class MaterialSetEnvironmentSynchronizer
 {
     private readonly EnvironmentAssetCatalog _catalog = EnvironmentAssetCatalog.LoadEmbedded();
 
+    public IReadOnlyList<string> GetCompatibleTreePaths(IslandProject project, out string biomeName)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        var biome = project.MaterialSet is not null
+            ? DetectBiome(project.MaterialSet)
+            : DetectBiomeFromName(project.EffectiveMaterialSetName);
+        biomeName = biome.ToString();
+        var resolvedBiomeName = biomeName;
+        var current = project.Rd3d.PropGrid.FileNames
+            .Where(IsPlantableTreeAsset)
+            .Where(path => biome == EnvironmentBiome.Unknown || _catalog.IsCompatible(path, resolvedBiomeName) || DetectBiomeFromPath(path) == biome)
+            .Select(Normalize)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (current.Count > 0) return current;
+        if (biome == EnvironmentBiome.Unknown) return Array.Empty<string>();
+        return _catalog.GetProfilePaths(resolvedBiomeName)
+            .Where(IsPlantableTreeAsset)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     public MaterialSetEnvironmentSyncReport Synchronize(
         IslandProject project,
         MaterialSetDefinition? previousMaterialSet,
@@ -152,6 +174,22 @@ public sealed class MaterialSetEnvironmentSynchronizer
         }
 
         var normalized = Normalize(source);
+        var category = DetectCategory(normalized);
+        if (category == EnvironmentAssetCategory.Tree)
+        {
+            // Pour les arbres de décor, suivre le profil réellement observé sur les îles
+            // vanilla du biome. Les ObjectFileName du materialset peuvent désigner des
+            // props spécialisés (par exemple des orangers de verger) aux LOD très courts.
+            var vanillaTrees = _catalog.GetProfilePaths(targetBiome.ToString())
+                .Where(IsPlantableTreeAsset)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (vanillaTrees.Count == 0) return null;
+            if (vanillaTrees.Contains(normalized, StringComparer.OrdinalIgnoreCase)) return normalized;
+            return vanillaTrees[(int)(StableHash(normalized) % (uint)vanillaTrees.Count)];
+        }
+
         if (directMap.TryGetValue(normalized, out var direct) &&
             (_catalog.IsCompatible(direct, targetBiome.ToString()) || DetectBiomeFromPath(direct) == targetBiome))
         {
@@ -163,7 +201,6 @@ public sealed class MaterialSetEnvironmentSynchronizer
             return normalized;
         }
 
-        var category = DetectCategory(normalized);
         var candidates = selectedMaterialSet.Materials
             .Select(material => material.ObjectFileName)
             .Where(path => !string.IsNullOrWhiteSpace(path))
@@ -279,6 +316,36 @@ public sealed class MaterialSetEnvironmentSynchronizer
         if (name.Contains("south", StringComparison.Ordinal) || name.Contains("jungle", StringComparison.Ordinal)) return EnvironmentBiome.Jungle;
         if (name.Contains("terra", StringComparison.Ordinal) || name.Contains("moderate", StringComparison.Ordinal)) return EnvironmentBiome.Moderate;
         return EnvironmentBiome.Unknown;
+    }
+
+    private static EnvironmentBiome DetectBiomeFromName(string? value)
+    {
+        var name = (value ?? string.Empty).ToLowerInvariant();
+        if (name.Contains("arctic", StringComparison.Ordinal)) return EnvironmentBiome.Arctic;
+        if (name.Contains("colony02", StringComparison.Ordinal) || name.Contains("colony_02", StringComparison.Ordinal)) return EnvironmentBiome.Colony02;
+        if (name.Contains("south", StringComparison.Ordinal) || name.Contains("jungle", StringComparison.Ordinal)) return EnvironmentBiome.Jungle;
+        if (name.Contains("terra", StringComparison.Ordinal) || name.Contains("moderate", StringComparison.Ordinal)) return EnvironmentBiome.Moderate;
+        return EnvironmentBiome.Unknown;
+    }
+
+    private static bool IsTreeAsset(string path)
+        => IsNaturalEnvironmentAsset(path) && DetectCategory(path) == EnvironmentAssetCategory.Tree;
+
+    private static bool IsPlantableTreeAsset(string path)
+    {
+        if (!IsTreeAsset(path)) return false;
+        var normalized = Normalize(path);
+        // Les souches, branches au sol et arbres morts ont une distance d'affichage
+        // volontairement courte dans le jeu. Les choisir pour l'outil « planter »
+        // donne l'impression que les arbres disparaissent, même à faible distance.
+        return !normalized.Contains("trees_dead", StringComparison.Ordinal) &&
+               !normalized.Contains("tree_dead", StringComparison.Ordinal) &&
+               !normalized.Contains("stump", StringComparison.Ordinal) &&
+               !normalized.Contains("ground", StringComparison.Ordinal) &&
+               // Les orangers sont des props de verger : leur LOD/culling et leur silhouette
+               // ne correspondent pas à la végétation sauvage d'Enbesa. Les îles vanilla
+               // Colony02 utilisent ici les acacias et le stone pine.
+               !normalized.Contains("orange_tree", StringComparison.Ordinal);
     }
 
     private static EnvironmentBiome DetectBiomeFromPath(string path)

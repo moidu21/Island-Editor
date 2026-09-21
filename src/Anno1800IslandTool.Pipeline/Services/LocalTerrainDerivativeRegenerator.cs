@@ -704,14 +704,26 @@ public sealed class LocalTerrainDerivativeRegenerator
         // Les normalmaps/heightmaps pilotent le rendu visuel proche via cNodeHeightMap/tessellation.
         // Elles doivent donc être synchronisées sur tous les LOD affectés, même quand le mesh édité
         // provient d'un seul LOD, sinon le jeu peut réinjecter l'ancien relief quand la caméra se rapproche.
-        var pageInputs = state.AffectedPages
+        var affectedKeys = state.AffectedPages
             .Where(p => string.Equals(p.Family, TerrainPageCoverage.NormalMapFamily, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(p => p.Key.Lod)
-            .ThenBy(p => p.Key.X)
-            .ThenBy(p => p.Key.Y)
-            .Select(affected => (Page: project.NormalMapPages.TryGetValue(affected.Key, out var page) ? page : null, Bounds: affected.SampleBounds, ForcedFullRebuild: false))
-            .Where(input => input.Page is not null)
-            .Select(input => (Page: input.Page!, input.Bounds, input.ForcedFullRebuild))
+            .Select(p => p.Key).ToHashSet();
+        var gridWidth = project.Rd3d.GridWidth > 0 ? project.Rd3d.GridWidth : Math.Max(1, (workingMap.Width - 1) * 16);
+        var gridHeight = project.Rd3d.GridHeight > 0 ? project.Rd3d.GridHeight : Math.Max(1, (workingMap.Height - 1) * 16);
+        var dirty = state.ExpandedSampleBounds;
+        bool TouchesGutter(NormalMapPage page)
+        {
+            var span = 512d * (1 << Math.Clamp(page.Key.Lod, 0, 20));
+            var gutter = span / 64d;
+            return (page.Key.X + 1) * span + gutter >= dirty.Left * (double)gridWidth / Math.Max(1, workingMap.Width - 1)
+                && page.Key.X * span - gutter <= dirty.Right * (double)gridWidth / Math.Max(1, workingMap.Width - 1)
+                && (page.Key.Y + 1) * span + gutter >= dirty.Top * (double)gridHeight / Math.Max(1, workingMap.Height - 1)
+                && page.Key.Y * span - gutter <= dirty.Bottom * (double)gridHeight / Math.Max(1, workingMap.Height - 1);
+        }
+        // The visible page may be untouched while its filtering gutter overlaps the edit.
+        var pageInputs = project.NormalMapPages.Values
+            .Where(page => affectedKeys.Contains(page.Key) || TouchesGutter(page))
+            .OrderBy(page => page.Key.Lod).ThenBy(page => page.Key.X).ThenBy(page => page.Key.Y)
+            .Select(page => (Page: page, Bounds: dirty, ForcedFullRebuild: false))
             .ToList();
 
         return GenerateInterpretedNormalMapWritesFromInputs(project, workingMap, state, pageInputs, "Régénération normalmaps affectées");
@@ -720,7 +732,9 @@ public sealed class LocalTerrainDerivativeRegenerator
     public IReadOnlyList<RegeneratedNormalMapWrite> GenerateAllInterpretedNormalMapWrites(
         IslandProject project,
         CoarseHeightMap workingMap,
-        TerrainLocalRegenerationState state)
+        TerrainLocalRegenerationState state,
+        bool includeMissingPages = true,
+        bool includeInactivePages = false)
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(workingMap);
@@ -737,13 +751,13 @@ public sealed class LocalTerrainDerivativeRegenerator
             .ThenBy(page => page.Key.X)
             .ThenBy(page => page.Key.Y)
             .Select(page => (Page: page, Bounds: coverage.TryGetValue(page.Key, out var bounds) ? bounds : fullBounds, ForcedFullRebuild: true))
-            .Where(input => SampleBoundsIntersectsActiveMap(project, workingMap, input.Bounds))
+            .Where(input => includeInactivePages || SampleBoundsIntersectsActiveMap(project, workingMap, input.Bounds))
             .ToList();
 
         // v42.7 : les flags RD3D NormalMap sont resynchronisés avec le masque actif.
         // Il faut donc écrire toutes les pages nouvellement déclarées. On génère les normalmaps
         // manquantes depuis la heightmap autoritaire, mais on ne touche pas à la géométrie LOD0/LOD1.
-        pageInputs.AddRange(BuildMissingActiveNormalMapInputs(project, workingMap));
+        if (includeMissingPages) pageInputs.AddRange(BuildMissingActiveNormalMapInputs(project, workingMap));
         return GenerateInterpretedNormalMapWritesFromInputs(project, workingMap, state, pageInputs, "Régénération normalmaps existantes + pages manquantes v42.7");
     }
 
@@ -1035,153 +1049,19 @@ public sealed class LocalTerrainDerivativeRegenerator
 
     private static string BuildInterpretedNormalMapXml(IslandProject project, NormalMapPage page, CoarseHeightMap map, RectI bounds, Func<double, double, float>? heightSampler)
     {
-        var downsampledMap = BuildDownsampledMapString(project, page, map, bounds, heightSampler);
-        var deltaMaps = page.DeltaLevels
-            .Select(level => BuildDeltaMapString(project, page, level, map, bounds, heightSampler))
-            .ToList();
+        if (page.DownsampledWidth <= 0 || page.DownsampledHeight <= 0)
+            return page.RawUnknownFields.GetValueOrDefault("__raw", string.Empty);
+        // Keep the lattice in mesh coordinates: the gameplay grid is too coarse to
+        // represent an eight-unit gutter, and truncated far pages still have full UVs.
+        var encoded = NormalMapHeightEncoder.Encode(page, heightSampler ??
+            ((x, z) => SampleWorldHeightAtWorld(project, map, x, z)));
+        var downsampledMap = string.Join(" ", encoded.DownsampledSamples);
+        var deltaMaps = encoded.DeltaLevels.Select(level => string.Join(" ", level.QuantizedSamples)).ToList();
 
         var writer = new NormalMapPageWriter();
-        var xml = writer.WritePreserving(page, downsampledMap, deltaMaps);
-        var fallback = writer.Write(page, downsampledMap, deltaMaps);
+        var xml = writer.WritePreserving(encoded, downsampledMap, deltaMaps);
+        var fallback = writer.Write(encoded, downsampledMap, deltaMaps);
         return PseudoXmlSafety.EnsureSingleRootOrFallback(xml, fallback);
-    }
-
-    private static string BuildDownsampledMapString(IslandProject project, NormalMapPage page, CoarseHeightMap map, RectI bounds, Func<double, double, float>? heightSampler)
-    {
-        var samplingBounds = ExpandNormalMapSamplingBounds(project, page, map, bounds);
-        SampleRegionWorld(project, map, samplingBounds, Math.Max(page.DownsampledWidth, page.DownsampledHeight), heightSampler, out var samples, out var width, out var height);
-        if (samples.Length == 0 || width <= 0 || height <= 0)
-        {
-            return page.DownsampledSamples is { Length: > 0 }
-                ? string.Join(" ", page.DownsampledSamples.Select(value => value.ToString(CultureInfo.InvariantCulture)))
-                : DecodeUtf8(page.DownsampledData);
-        }
-
-        var targetWidth = Math.Max(1, page.DownsampledWidth);
-        var targetHeight = Math.Max(1, page.DownsampledHeight);
-        var resampled = ResampleFloatGrid(samples, width, height, targetWidth, targetHeight);
-        var ints = new int[targetWidth * targetHeight];
-        Parallel.For(0, ints.Length, CpuParallelOptions, i =>
-        {
-            ints[i] = TerrainHeightEncoding.WorldHeightToNormalPageRaw(resampled[i]);
-        });
-
-        return string.Join(" ", ints.Select(v => v.ToString(CultureInfo.InvariantCulture)));
-    }
-
-    private static string BuildDeltaMapString(IslandProject project, NormalMapPage page, QuantizedDeltaLevel level, CoarseHeightMap map, RectI bounds, Func<double, double, float>? heightSampler)
-    {
-        if (level.Width <= 0 || level.Height <= 0)
-        {
-            return level.QuantizedSamples is { Length: > 0 }
-                ? string.Join(" ", level.QuantizedSamples.Select(value => value.ToString(CultureInfo.InvariantCulture)))
-                : DecodeUtf8(level.RawData);
-        }
-
-        // v26.2 : certaines height/normal pages Anno 1800 ont un dernier niveau de delta
-        // sans balise <QuantBits>. Dans les fichiers d'origine, ce niveau contient pourtant
-        // des valeurs 0..255 centrées sur 128, donc il se comporte comme un delta 8 bits.
-        // La v26.1 préservait ces maps quand QuantBits était absent, ce qui pouvait réinjecter
-        // l'ancien relief en caméra proche malgré la synchronisation mesh et Downsampled.
-        var quantBits = ResolveDeltaQuantBits(level);
-        var half = 1 << (quantBits - 1);
-        var maxQuantized = (1 << quantBits) - 1;
-        var neutral = half;
-
-        var samplingBounds = ExpandNormalMapSamplingBounds(project, page, map, bounds);
-        SampleRegionWorld(project, map, samplingBounds, Math.Max(level.Width, level.Height), heightSampler, out var samples, out var srcWidth, out var srcHeight);
-        if (samples.Length == 0 || srcWidth <= 0 || srcHeight <= 0)
-        {
-            return string.Join(" ", Enumerable.Repeat(neutral.ToString(CultureInfo.InvariantCulture), level.Width * level.Height));
-        }
-
-        var fine = ResampleFloatGrid(samples, srcWidth, srcHeight, level.Width, level.Height);
-
-        // v26.3 : les deltas sont hiérarchiques. Un niveau 528x528 encode le delta
-        // par rapport au parent 264x264, 264x264 par rapport à 132x132, etc.
-        // La v26.2 comparait chaque niveau directement au Downsampled 66x66, ce qui
-        // cassait l'amplitude/répartition du cNodeHeightMap utilisé par la caméra proche.
-        var parentWidth = Math.Max(Math.Max(1, page.DownsampledWidth), Math.Max(1, (level.Width + 1) / 2));
-        var parentHeight = Math.Max(Math.Max(1, page.DownsampledHeight), Math.Max(1, (level.Height + 1) / 2));
-        parentWidth = Math.Min(parentWidth, Math.Max(1, level.Width));
-        parentHeight = Math.Min(parentHeight, Math.Max(1, level.Height));
-
-        var coarse = ResampleFloatGrid(samples, srcWidth, srcHeight, parentWidth, parentHeight);
-        var coarseUpscaled = ResampleFloatGrid(coarse, parentWidth, parentHeight, level.Width, level.Height);
-        var scale = Math.Max(1.0, Math.Abs(level.ScaleFactor ?? 1));
-        var ints = new int[level.Width * level.Height];
-        Parallel.For(0, ints.Length, CpuParallelOptions, i =>
-        {
-            var fineRaw = TerrainHeightEncoding.WorldHeightToNormalPageRaw(fine[i]);
-            var coarseRaw = TerrainHeightEncoding.WorldHeightToNormalPageRaw(coarseUpscaled[i]);
-            var normalizedDelta = (fineRaw - coarseRaw) / 65535.0;
-            var signed = (int)Math.Round(normalizedDelta * scale * half, MidpointRounding.AwayFromZero);
-            ints[i] = Math.Clamp(neutral + signed, 0, maxQuantized);
-        });
-
-        return string.Join(" ", ints.Select(v => v.ToString(CultureInfo.InvariantCulture)));
-    }
-
-    private static RectI ExpandNormalMapSamplingBounds(IslandProject project, NormalMapPage page, CoarseHeightMap map, RectI bounds)
-    {
-        if (map.Width <= 1 || map.Height <= 1)
-        {
-            return bounds;
-        }
-
-        // v44.1 : les pages height/normal terrain vanilla sont stockées avec une bordure.
-        // Les dimensions 528/264/132/66 correspondent à un coeur de page + un gutter
-        // d'environ 8 texels sur 512. Sans ce gutter, les shaders qui utilisent
-        // cNodeHeightMap/cNodeNormalMap avec les offsets cTrnHeightPageUV* et les samplers
-        // mirror peuvent lire des bords artificiels entre pages, visibles comme des carrés
-        // blancs/verts selon la distance et l'angle caméra. On échantillonne donc la
-        // heightmap au-delà du rectangle coeur de la page, en clampant aux limites de l'île.
-        var gridWidth = project.Rd3d.GridWidth > 0
-            ? project.Rd3d.GridWidth
-            : Math.Max(1, (map.Width - 1) * 16);
-        var gridHeight = project.Rd3d.GridHeight > 0
-            ? project.Rd3d.GridHeight
-            : Math.Max(1, (map.Height - 1) * 16);
-
-        var pageWorldSize = Math.Max(1, TerrainPageCoverage.ResolvePageWorldSize(TerrainPageCoverage.NormalMapFamily, page.Key.Lod));
-        var gutterWorld = pageWorldSize / 64.0; // 8 / 512 du coeur vanilla.
-        var marginX = Math.Max(1, (int)Math.Ceiling(gutterWorld / Math.Max(1.0, gridWidth) * Math.Max(1, map.Width - 1)));
-        var marginY = Math.Max(1, (int)Math.Ceiling(gutterWorld / Math.Max(1.0, gridHeight) * Math.Max(1, map.Height - 1)));
-
-        return ClampRect(new RectI(
-            bounds.Left - marginX,
-            bounds.Top - marginY,
-            bounds.Right + marginX,
-            bounds.Bottom + marginY), map);
-    }
-
-    private static int ResolveDeltaQuantBits(QuantizedDeltaLevel level)
-    {
-        if (level.QuantBits.HasValue && level.QuantBits.Value > 0)
-        {
-            return Math.Clamp(level.QuantBits.Value, 1, 30);
-        }
-
-        var max = level.QuantizedSamples is { Length: > 0 }
-            ? level.QuantizedSamples.Max()
-            : 255;
-
-        if (max <= 1) return 1;
-        if (max <= 3) return 2;
-        if (max <= 7) return 3;
-        if (max <= 15) return 4;
-        if (max <= 31) return 5;
-        if (max <= 63) return 6;
-        if (max <= 127) return 7;
-        if (max <= 255) return 8;
-        if (max <= 511) return 9;
-        if (max <= 1023) return 10;
-        if (max <= 2047) return 11;
-        if (max <= 4095) return 12;
-        if (max <= 8191) return 13;
-        if (max <= 16383) return 14;
-        if (max <= 32767) return 15;
-        return 16;
     }
 
     public IReadOnlyList<RegeneratedTintMapWrite> GenerateTintMapWrites(
@@ -1729,7 +1609,7 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateMeshPageWrites(
         .AsParallel()
         .AsOrdered()
         .WithDegreeOfParallelism(Math.Max(1, Environment.ProcessorCount))
-        .Select(input => BuildMeshPageWrite(project, input.Page, workingMap, input.Affected.SampleBounds, options, heightSampler))
+        .Select(input => BuildMeshPageWrite(project, input.Page, workingMap, input.Affected.SampleBounds, state.DirtySampleBounds, options, heightSampler))
         .Where(write => write is { HasContent: true })
         .Select(write => write!)
         .ToList();
@@ -1829,7 +1709,7 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
 
     if (map.Width <= 1 || map.Height <= 1 || map.Samples.Length < map.Width * map.Height)
     {
-        return BuildConservativeMeshPageWrite(project, page, map, pageSampleBounds, effectiveOptions, heightSampler);
+        return BuildConservativeMeshPageWrite(project, page, map, pageSampleBounds, pageSampleBounds, effectiveOptions, heightSampler);
     }
 
     var rebuiltPage = BuildExpandedActiveMeshPage(project, page, map, pageSampleBounds, effectiveOptions, heightSampler, out var generatedExtensionVertices, out var generatedExtensionTriangles);
@@ -1932,7 +1812,22 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
     for (var clusterIndex = 0; clusterIndex < expectedClusterCount; clusterIndex++)
     {
         var sourceCluster = clusterIndex < page.Clusters.Count ? page.Clusters[clusterIndex] : new MeshCluster();
-        var rebuiltCluster = BuildHeightOnlyClusterFromOriginal(project, sourceCluster, map, options, heightSampler);
+        // Les vertices vanilla existants gardent impérativement Raw3..Raw7. Le même
+        // objet options reste activé pour AppendExtensionGeometryToCluster afin que
+        // seuls les nouveaux vertices reçoivent normales/tangentes calculées.
+        var preserveExistingOptions = new MeshRegenerationOptions
+        {
+            RebuildTopology = false,
+            MaxVerticesPerAxis = options.MaxVerticesPerAxis,
+            HeightSmoothingPasses = options.HeightSmoothingPasses,
+            PreserveNearestRawAttributes = true,
+            AdaptiveVertexBudgetMultiplier = options.AdaptiveVertexBudgetMultiplier,
+            AdaptiveVertexBudgetPadding = options.AdaptiveVertexBudgetPadding,
+            PreserveOriginalFootprint = options.PreserveOriginalFootprint,
+            RebuildSurfaceAttributes = false,
+            RawAttributePreset = null
+        };
+        var rebuiltCluster = BuildHeightOnlyClusterFromOriginal(project, sourceCluster, map, preserveExistingOptions, page.Key.Lod, heightSampler);
         var col = clusterIndex % clusterGridWidth;
         var row = clusterIndex / clusterGridWidth;
         if (row < clusterGridHeight)
@@ -1962,8 +1857,7 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
                 // ce qui évite de rouvrir les fentes sur les montagnes.
                 var partiallyActive = hasActiveMask && !IsWorldBoundsFullyActive(
                     activeMask, activeGrid, clusterMinX, clusterMinZ, clusterMaxX, clusterMaxZ, gridWidth, gridHeight);
-                var coastal = partiallyActive || RequiresCoastalRetessellation(project, map, clusterMinX, clusterMaxX, clusterMinZ, clusterMaxZ)
-                    || sourceCluster.Vertices.Any(v => TerrainVertexAttributeCodec.Decode(v).IsSkirtVertex);
+                var coastal = partiallyActive || RequiresCoastalRetessellation(project, map, clusterMinX, clusterMaxX, clusterMinZ, clusterMaxZ);
                 var coverageCluster = sourceCluster;
                 if (coastal)
                 {
@@ -2400,14 +2294,14 @@ private static int ToSignedUInt16Storage(int value)
     return Math.Clamp(baseStep * lodScale, 32, 512);
 }
 
-    private static RegeneratedMeshPageWrite? BuildMeshPageWrite(IslandProject project, MeshPage page, CoarseHeightMap map, RectI bounds, MeshRegenerationOptions? options, Func<double, double, float>? heightSampler)
+    private static RegeneratedMeshPageWrite? BuildMeshPageWrite(IslandProject project, MeshPage page, CoarseHeightMap map, RectI bounds, RectI heightUpdateBounds, MeshRegenerationOptions? options, Func<double, double, float>? heightSampler)
 {
     // v34.8 : mode production en topologie source.
     // Aucun rebuild adaptatif : on gère explicitement les vertices existants sans créer
     // de nouvelle grille. X/Z, indices, ordre et nombre de vertices restent ceux du mesh
     // courant/importé/édité ; Raw1/Y et UsedMaterialBits sont resynchronisés. Les tintmaps sont
     // régénérées par la validation/export, mais la topologie mesh reste stable.
-    return BuildConservativeMeshPageWrite(project, page, map, bounds, options, heightSampler);
+    return BuildConservativeMeshPageWrite(project, page, map, bounds, heightUpdateBounds, options, heightSampler);
 }
 
     private static RegeneratedMeshPageWrite? BuildAdaptiveMeshPageWrite(IslandProject project, MeshPage page, CoarseHeightMap map, RectI bounds, MeshRegenerationOptions options, Func<double, double, float>? heightSampler)
@@ -2438,7 +2332,7 @@ private static int ToSignedUInt16Storage(int value)
     };
 }
 
-    private static RegeneratedMeshPageWrite? BuildConservativeMeshPageWrite(IslandProject project, MeshPage page, CoarseHeightMap map, RectI bounds, MeshRegenerationOptions? options, Func<double, double, float>? heightSampler)
+    private static RegeneratedMeshPageWrite? BuildConservativeMeshPageWrite(IslandProject project, MeshPage page, CoarseHeightMap map, RectI bounds, RectI heightUpdateBounds, MeshRegenerationOptions? options, Func<double, double, float>? heightSampler)
 {
     var effectiveOptions = options ?? new MeshRegenerationOptions();
     // v46.4 : une édition de hauteur conservatrice ne doit modifier que Raw1.
@@ -2469,7 +2363,7 @@ private static int ToSignedUInt16Storage(int value)
 
     foreach (var cluster in page.Clusters)
     {
-        rebuiltPage.Clusters.Add(BuildHeightOnlyClusterFromOriginal(project, cluster, map, effectiveOptions, heightSampler));
+        rebuiltPage.Clusters.Add(BuildHeightOnlyClusterFromOriginal(project, cluster, map, effectiveOptions, page.Key.Lod, heightSampler, heightUpdateBounds));
     }
 
     rebuiltPage.ParsedClusterCount = rebuiltPage.Clusters.Count;
@@ -2584,7 +2478,7 @@ private static MeshPage BuildAdaptiveMeshPage(IslandProject project, MeshPage pa
         .AsParallel()
         .AsOrdered()
         .WithDegreeOfParallelism(Math.Max(1, Environment.ProcessorCount))
-        .Select(cluster => BuildAdaptiveCluster(project, cluster, map, options, heightSampler))
+        .Select(cluster => BuildAdaptiveCluster(project, cluster, map, options, page.Key.Lod, heightSampler))
         .ToList();
     foreach (var cluster in rebuiltClusters)
     {
@@ -2596,7 +2490,7 @@ private static MeshPage BuildAdaptiveMeshPage(IslandProject project, MeshPage pa
     return rebuilt;
 }
 
-private static MeshCluster BuildAdaptiveCluster(IslandProject project, MeshCluster cluster, CoarseHeightMap map, MeshRegenerationOptions options, Func<double, double, float>? heightSampler)
+private static MeshCluster BuildAdaptiveCluster(IslandProject project, MeshCluster cluster, CoarseHeightMap map, MeshRegenerationOptions options, int lod, Func<double, double, float>? heightSampler)
 {
     if (cluster.Vertices.Count == 0)
     {
@@ -2725,7 +2619,7 @@ private static MeshCluster BuildAdaptiveCluster(IslandProject project, MeshClust
     // conservateur de la topologie originale plutôt que de produire une page vide.
     if (useFootprint && !keepVertices.Any(v => v))
     {
-        return BuildHeightOnlyClusterFromOriginal(project, cluster, map, options, heightSampler);
+        return BuildHeightOnlyClusterFromOriginal(project, cluster, map, options, lod, heightSampler);
     }
 
     var attributeStepRawX = ComputeMeshAttributeSampleStepRawX(project, map);
@@ -2813,7 +2707,7 @@ private static MeshCluster BuildAdaptiveCluster(IslandProject project, MeshClust
 
     if (result.Vertices.Count == 0 || result.Indices.Count == 0)
     {
-        return BuildHeightOnlyClusterFromOriginal(project, cluster, map, options, heightSampler);
+        return BuildHeightOnlyClusterFromOriginal(project, cluster, map, options, lod, heightSampler);
     }
 
     // v34.8 : si la MaterialMap a été repeinte, les bitmasks source ne décrivent plus
@@ -2929,7 +2823,7 @@ private static bool IsPointInTriangle(double x, double z, FootprintTriangle tria
     return s >= -0.0001d && t >= -0.0001d && s + t <= d + 0.0001d;
 }
 
-private static MeshCluster BuildHeightOnlyClusterFromOriginal(IslandProject project, MeshCluster cluster, CoarseHeightMap map, MeshRegenerationOptions options, Func<double, double, float>? heightSampler)
+private static MeshCluster BuildHeightOnlyClusterFromOriginal(IslandProject project, MeshCluster cluster, CoarseHeightMap map, MeshRegenerationOptions options, int lod, Func<double, double, float>? heightSampler, RectI? heightUpdateBounds = null)
 {
     var result = new MeshCluster
     {
@@ -2942,8 +2836,16 @@ private static MeshCluster BuildHeightOnlyClusterFromOriginal(IslandProject proj
     var rawUnitScale = ResolveMeshRawUnitScale(project);
     Func<double, double, float> attributeSampler = (rawX, rawZ) => SampleWorldHeightAtWorld(project, map, rawX, rawZ, heightSampler);
 
-    foreach (var vertex in cluster.Vertices)
+    // Les maillages vanilla ferment leurs bords avec des « jupes » verticales : deux
+    // sommets partagent X/Z, mais le sommet de bord descend sous la surface. Contrairement
+    // à notre ancienne hypothèse, Raw3..Raw7 ne portent aucun bit fiable pour les identifier.
+    // La topologie, elle, est stable : le sommet de surface participe à davantage de faces.
+    // Cette détection restaure également une jupe déjà aplatie par une ancienne exportation.
+    var skirtOffsets = FindStructuralSkirtOffsets(cluster, lod);
+
+    for (var vertexIndex = 0; vertexIndex < cluster.Vertices.Count; vertexIndex++)
     {
+        var vertex = cluster.Vertices[vertexIndex];
         var raw = vertex.RawValues?.ToArray() ?? new int[8];
         if (raw.Length < 8)
         {
@@ -2958,7 +2860,20 @@ private static MeshCluster BuildHeightOnlyClusterFromOriginal(IslandProject proj
         // acceptant une emprise X/Z modifiée.
         raw[0] = vertex.Raw0;
         raw[2] = vertex.Raw2;
-        raw[1] = MeshVertex.EncodeWorldHeight(SampleWorldHeightAtWorld(project, map, vertex.X, vertex.Z, heightSampler));
+        // v46.64 : une page de LOD distant peut couvrir l'île entière. La sélectionner
+        // parce qu'une rivière la recoupe ne donne pas le droit de rééchantillonner ses
+        // montagnes éloignées. Hors du masque sale (+ 1 sample pour l'interpolation),
+        // Raw1 et tous les attributs restent strictement ceux du mesh courant.
+        if (heightUpdateBounds is { } updateBounds &&
+            !IsWorldPointWithinSampleBounds(project, map, vertex.X, vertex.Z, updateBounds, 1))
+        {
+            result.Vertices.Add(new MeshVertex { RawValues = raw });
+            continue;
+        }
+
+        var sampledSurfaceHeight = SampleWorldHeightAtWorld(project, map, vertex.X, vertex.Z, heightSampler);
+        var isSkirtVertex = skirtOffsets.TryGetValue(vertexIndex, out var verticalOffset);
+        raw[1] = MeshVertex.EncodeWorldHeight(sampledSurfaceHeight + (isSkirtVertex ? verticalOffset : 0f));
         if (options.RawAttributePreset is not null)
         {
             raw[3] = options.RawAttributePreset.Raw3;
@@ -2967,7 +2882,7 @@ private static MeshCluster BuildHeightOnlyClusterFromOriginal(IslandProject proj
             raw[6] = options.RawAttributePreset.Raw6;
             raw[7] = options.RawAttributePreset.Raw7;
         }
-        else if (options.RebuildSurfaceAttributes)
+        else if (options.RebuildSurfaceAttributes && !isSkirtVertex)
         {
             TerrainVertexAttributeCodec.RebuildSurfaceAttributes(raw, attributeSampler, attributeStepRawX, attributeStepRawZ, rawUnitScale);
         }
@@ -2976,8 +2891,103 @@ private static MeshCluster BuildHeightOnlyClusterFromOriginal(IslandProject proj
     }
 
     result.Indices.AddRange(cluster.Indices);
-    result.UsedMaterialBits = RecomputeUsedMaterialBitsFromMaterialMap(project, result.Vertices, cluster.UsedMaterialBits);
+    // Les masques sont resynchronisés séparément avec la MaterialMap, après la passe
+    // géométrique. Ne jamais remplacer ici les centaines de palettes locales vanilla
+    // par un masque global commun à tous les clusters/LOD.
+    result.UsedMaterialBits = cluster.UsedMaterialBits;
     return result;
+}
+
+private static bool IsWorldPointWithinSampleBounds(
+    IslandProject project,
+    CoarseHeightMap map,
+    double worldX,
+    double worldZ,
+    RectI bounds,
+    int paddingSamples)
+{
+    if (map.Width <= 1 || map.Height <= 1)
+    {
+        return true;
+    }
+
+    var gridWidth = project.Rd3d.GridWidth > 0 ? project.Rd3d.GridWidth : Math.Max(1, map.Width - 1);
+    var gridHeight = project.Rd3d.GridHeight > 0 ? project.Rd3d.GridHeight : Math.Max(1, map.Height - 1);
+    var sampleX = (worldX / Math.Max(1.0, gridWidth)) * (map.Width - 1);
+    var sampleY = (worldZ / Math.Max(1.0, gridHeight)) * (map.Height - 1);
+    return sampleX >= bounds.Left - paddingSamples && sampleX <= bounds.Right + paddingSamples &&
+           sampleY >= bounds.Top - paddingSamples && sampleY <= bounds.Bottom + paddingSamples;
+}
+
+private static Dictionary<int, float> FindStructuralSkirtOffsets(MeshCluster cluster, int lod)
+{
+    var result = new Dictionary<int, float>();
+    if (cluster.Vertices.Count < 2)
+    {
+        return result;
+    }
+
+    var incidentTriangleCounts = new int[cluster.Vertices.Count];
+    foreach (var index in cluster.Indices)
+    {
+        if ((uint)index < (uint)incidentTriangleCounts.Length)
+        {
+            incidentTriangleCounts[index]++;
+        }
+    }
+
+    foreach (var group in cluster.Vertices
+                 .Select((vertex, index) => (Vertex: vertex, Index: index))
+                 .GroupBy(item => (item.Vertex.Raw0, item.Vertex.Raw2))
+                 .Where(group => group.Count() > 1))
+    {
+        var items = group.ToList();
+        var surfaceHeight = items.Max(item => item.Vertex.WorldHeight);
+        var lowestHeight = items.Min(item => item.Vertex.WorldHeight);
+        var vanillaDepth = GetVanillaSkirtDepth(lod);
+        if (surfaceHeight - lowestHeight > (1f / 512f))
+        {
+            foreach (var item in items.Where(item => item.Vertex.WorldHeight < surfaceHeight - (1f / 512f)))
+            {
+                // v46.62 : conserver exactement la profondeur source. La 46.61 forçait
+                // chaque jupe à 16 unités ; ces immenses parois internes devenaient des
+                // feuilles blanches au zoom proche. Une jupe vanilla existante ne doit
+                // jamais être redimensionnée lors d'une reconstruction conservative.
+                result[item.Index] = item.Vertex.WorldHeight - surfaceHeight;
+            }
+            continue;
+        }
+
+        // Anciennes versions de l'outil ont aplati la jupe. Le sommet relié au plus
+        // grand nombre de triangles est la surface ; les doublons de bord retrouvent
+        // la profondeur vanilla propre au LOD.
+        var surfaceIndex = items
+            .OrderByDescending(item => incidentTriangleCounts[item.Index])
+            .ThenBy(item => item.Index)
+            .First().Index;
+        var restoredOffset = -vanillaDepth;
+        foreach (var item in items.Where(item => item.Index != surfaceIndex))
+        {
+            result[item.Index] = restoredOffset;
+        }
+    }
+
+    return result;
+}
+
+private static float GetVanillaSkirtDepth(int lod)
+{
+    var vanillaRawDepth = lod switch
+    {
+        <= 2 => 40,
+        3 => 82,
+        4 => 164,
+        5 => 328,
+        6 => 655,
+        7 => 1311,
+        _ => 2621
+    };
+    return vanillaRawDepth / 256f;
 }
 
 private static int RecomputeUsedMaterialBitsFromMaterialMap(IslandProject project, IReadOnlyList<MeshVertex> vertices, int originalBits)
@@ -2987,45 +2997,49 @@ private static int RecomputeUsedMaterialBitsFromMaterialMap(IslandProject projec
         return originalBits;
     }
 
-    var gridWidth = project.Rd3d.GridWidth > 0
-        ? project.Rd3d.GridWidth
-        : Math.Max(1, (project.GameData.TerrainHeightMap.Width - 1) * 16);
-    var gridHeight = project.Rd3d.GridHeight > 0
-        ? project.Rd3d.GridHeight
-        : Math.Max(1, (project.GameData.TerrainHeightMap.Height - 1) * 16);
+    var knownMaterialIds = project.MaterialSet?.Materials.Select(material => material.Id).ToHashSet();
+    uint allowedMask = 0;
+    if (knownMaterialIds is { Count: > 0 })
+        foreach (var id in knownMaterialIds.Where(id => id is >= 0 and < 32)) allowedMask |= 1u << id;
 
+    // v46.64 : UsedMaterialBits est une palette locale par cluster, pas le masque
+    // global du MaterialSet. Le rendre identique sur tous les clusters/LOD provoquait
+    // précisément les plaques grises/blanches observées au zoom proche. On conserve
+    // le masque source et on ajoute seulement les matériaux réellement présents à
+    // proximité, avec une marge pour les mipmaps et les jupes.
+    var gridWidth = project.Rd3d.GridWidth > 0 ? project.Rd3d.GridWidth : 1;
+    var gridHeight = project.Rd3d.GridHeight > 0 ? project.Rd3d.GridHeight : 1;
     var materialMap = project.Rd3d.MaterialMap;
-    var minRawX = vertices.Min(v => v.X);
-    var maxRawX = vertices.Max(v => v.X);
-    var minRawZ = vertices.Min(v => v.Z);
-    var maxRawZ = vertices.Max(v => v.Z);
-
-    var minX = Math.Clamp((int)Math.Floor(minRawX / Math.Max(1.0, gridWidth) * materialMap.Width) - 1, 0, materialMap.Width - 1);
-    var maxX = Math.Clamp((int)Math.Ceiling(maxRawX / Math.Max(1.0, gridWidth) * materialMap.Width) + 1, 0, materialMap.Width - 1);
-    var minY = Math.Clamp((int)Math.Floor(minRawZ / Math.Max(1.0, gridHeight) * materialMap.Height) - 1, 0, materialMap.Height - 1);
-    var maxY = Math.Clamp((int)Math.Ceiling(maxRawZ / Math.Max(1.0, gridHeight) * materialMap.Height) + 1, 0, materialMap.Height - 1);
-
-    uint mask = unchecked((uint)originalBits);
+    var minRawX = vertices.Min(vertex => (double)vertex.X);
+    var maxRawX = vertices.Max(vertex => (double)vertex.X);
+    var minRawZ = vertices.Min(vertex => (double)vertex.Z);
+    var maxRawZ = vertices.Max(vertex => (double)vertex.Z);
+    const int padding = 16;
+    var minX = Math.Clamp((int)Math.Floor(minRawX / gridWidth * materialMap.Width) - padding, 0, materialMap.Width - 1);
+    var maxX = Math.Clamp((int)Math.Ceiling(maxRawX / gridWidth * materialMap.Width) + padding, 0, materialMap.Width - 1);
+    var minY = Math.Clamp((int)Math.Floor(minRawZ / gridHeight * materialMap.Height) - padding, 0, materialMap.Height - 1);
+    var maxY = Math.Clamp((int)Math.Ceiling(maxRawZ / gridHeight * materialMap.Height) + padding, 0, materialMap.Height - 1);
+    uint localMask = 0;
     for (var y = minY; y <= maxY; y++)
+    for (var x = minX; x <= maxX; x++)
     {
-        for (var x = minX; x <= maxX; x++)
+        var cell = materialMap.GetCell(x, y);
+        for (var slot = 0; slot < TerrainMaterialPackEncoding.SlotCount &&
+                           slot < cell.MaterialIds.Length && slot < cell.AlphaWeights.Length; slot++)
         {
-            var cell = materialMap.GetCell(x, y);
-            for (var slot = 0; slot < TerrainMaterialPackEncoding.SlotCount && slot < cell.MaterialIds.Length && slot < cell.AlphaWeights.Length; slot++)
+            if (TerrainMaterialPackEncoding.ClampSlot(cell.AlphaWeights[slot]) > 0)
             {
-                var alpha = TerrainMaterialPackEncoding.ClampSlot(cell.AlphaWeights[slot]);
-                if (alpha <= 0)
-                {
-                    continue;
-                }
-
-                var id = TerrainMaterialPackEncoding.ClampSlot(cell.MaterialIds[slot]);
-                mask |= 1u << id;
+                localMask |= 1u << TerrainMaterialPackEncoding.ClampSlot(cell.MaterialIds[slot]);
             }
         }
     }
 
-    return unchecked((int)mask);
+    var combined = unchecked((uint)originalBits) | localMask;
+    if (allowedMask != 0)
+    {
+        combined &= allowedMask;
+    }
+    return combined != 0 ? unchecked((int)combined) : originalBits;
 }
 
 private static double[] SmoothHeightGrid(double[] source, int width, int height, bool[] missing, int passes)

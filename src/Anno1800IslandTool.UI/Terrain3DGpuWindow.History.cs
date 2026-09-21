@@ -118,6 +118,8 @@ public partial class Terrain3DGpuWindow
             _workingFootprintMask.ToArray(),
             _pendingFineTerrainStamps.ToArray(),
             _pendingTreeInstances.ToArray(),
+            _pendingRiverPoints.ToArray(),
+            _pendingRiverSlotClicks.ToArray(),
             _footprintDirty,
             _selectedCoast,
             _coastStart,
@@ -138,6 +140,12 @@ public partial class Terrain3DGpuWindow
     private Dictionary<MeshVertex, int> CaptureLoadedRawHeights()
     {
         var heights = new Dictionary<MeshVertex, int>(ReferenceEqualityComparer.Instance);
+        // Other LODs are edited in the same stroke. Once a vertex has entered the
+        // transaction, include it in later snapshots so undo/redo remains multi-LOD.
+        foreach (var vertex in _originalRaw1.Keys)
+        {
+            heights[vertex] = vertex.Raw1;
+        }
         foreach (var vertex in _positionByVertex.Keys)
         {
             heights[vertex] = vertex.Raw1;
@@ -147,6 +155,13 @@ public partial class Terrain3DGpuWindow
 
     private void RestoreToolSnapshot(GpuToolSnapshot snapshot)
     {
+        foreach (var pair in _originalRaw1)
+        {
+            if (!snapshot.RawHeights.ContainsKey(pair.Key))
+            {
+                pair.Key.Raw1 = pair.Value;
+            }
+        }
         foreach (var pair in snapshot.RawHeights)
         {
             pair.Key.Raw1 = pair.Value;
@@ -157,6 +172,10 @@ public partial class Terrain3DGpuWindow
         _pendingFineTerrainStamps.AddRange(snapshot.FineTerrainStamps);
         _pendingTreeInstances.Clear();
         _pendingTreeInstances.AddRange(snapshot.TreeInstances);
+        _pendingRiverPoints.Clear();
+        _pendingRiverPoints.AddRange(snapshot.RiverPoints);
+        _pendingRiverSlotClicks.Clear();
+        _pendingRiverSlotClicks.AddRange(snapshot.RiverSlotClicks);
         _footprintDirty = snapshot.FootprintDirty;
         _selectedCoast = snapshot.SelectedCoast;
         _coastStart = snapshot.CoastStart;
@@ -191,6 +210,7 @@ public partial class Terrain3DGpuWindow
         UpdateFootprintPreview();
         UpdateFootprintStatus();
         RefreshTreePreview();
+        RefreshRiverPreview();
         TreeStatusTextBlock.Text = _pendingTreeInstances.Count == 0
             ? "Aucun arbre en attente."
             : $"{_pendingTreeInstances.Count:N0} arbres en attente.";
@@ -254,6 +274,8 @@ public partial class Terrain3DGpuWindow
                left.Footprint.SequenceEqual(right.Footprint) &&
                left.FineTerrainStamps.SequenceEqual(right.FineTerrainStamps) &&
                left.TreeInstances.SequenceEqual(right.TreeInstances) &&
+               left.RiverPoints.SequenceEqual(right.RiverPoints) &&
+               left.RiverSlotClicks.SequenceEqual(right.RiverSlotClicks) &&
                ReferenceEquals(left.SelectedCoast, right.SelectedCoast) &&
                left.CoastStart.Equals(right.CoastStart) &&
                left.CoastLength.Equals(right.CoastLength) &&
@@ -269,6 +291,8 @@ public partial class Terrain3DGpuWindow
         bool[] Footprint,
         GpuFineTerrainStamp[] FineTerrainStamps,
         GpuTreeInstance[] TreeInstances,
+        Vector3[] RiverPoints,
+        Vector3[] RiverSlotClicks,
         bool FootprintDirty,
         FootprintCoast? SelectedCoast,
         double CoastStart,

@@ -1,24 +1,27 @@
-﻿param(
-    [string]$ArchiveDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'archive'),
-    [string]$Label = 'v46.24_DX11_Eau'
+param(
+    [string]$ArchiveDirectory = 'H:\anno 1800\archive',
+    [string]$Version = '46.68',
+    [switch]$SkipPublish
 )
 $ErrorActionPreference = 'Stop'
-if ($Label -notmatch '^[a-zA-Z0-9._-]+$') { throw 'Label invalide.' }
+if ($Version -notmatch '^\d+\.\d+$') { throw 'Numéro de version invalide.' }
+
 $projectRoot = [IO.Path]::GetFullPath($PSScriptRoot)
-$publishDirectory = Join-Path $projectRoot 'publish\win-x64'
+$publishDirectory = Join-Path $projectRoot "publish\v$Version-win-x64"
 $archiveRoot = [IO.Path]::GetFullPath($ArchiveDirectory)
 New-Item -ItemType Directory -Force -Path $publishDirectory, $archiveRoot | Out-Null
-& dotnet publish (Join-Path $projectRoot 'src\Anno1800IslandTool.UI\Anno1800IslandTool.UI.csproj') -c Release -r win-x64 --self-contained true -p:Platform=x64 -o $publishDirectory -v quiet -clp:ErrorsOnly
-if ($LASTEXITCODE -ne 0) { throw 'Compilation échouée : aucune archive créée.' }
 
-$stamp = Get-Date -Format 'yyyy-MM-dd_HH-mm-ss'
-$prefix = "Anno1800IslandTool_${Label}_${stamp}"
-$sourceZip = Join-Path $archiveRoot "${prefix}_sources.zip"
-$programZip = Join-Path $archiveRoot "${prefix}_win-x64.zip"
+if (-not $SkipPublish) {
+    & dotnet publish (Join-Path $projectRoot 'src\Anno1800IslandTool.UI\Anno1800IslandTool.UI.csproj') -c Release -r win-x64 --self-contained true -p:Platform=x64 -o $publishDirectory -v quiet -clp:ErrorsOnly
+    if ($LASTEXITCODE -ne 0) { throw 'Compilation échouée : aucune archive créée.' }
+}
+
+$sourceZip = Join-Path $archiveRoot "sources_$Version.zip"
+$programZip = Join-Path $archiveRoot "programme_$Version.zip"
 Add-Type -AssemblyName System.IO.Compression
 
 function Write-Archive([string]$Destination, [string]$BaseDirectory, $Files) {
-    $stream = [IO.File]::Open($Destination, [IO.FileMode]::CreateNew)
+    $stream = [IO.File]::Open($Destination, [IO.FileMode]::Create)
     $zip = [IO.Compression.ZipArchive]::new($stream, [IO.Compression.ZipArchiveMode]::Create)
     try {
         foreach ($file in $Files) {
@@ -39,6 +42,7 @@ $sourceFiles = @(
 )
 Write-Archive $sourceZip $projectRoot $sourceFiles
 Write-Archive $programZip $publishDirectory (Get-ChildItem -LiteralPath $publishDirectory -File -Recurse)
+
 foreach ($path in $sourceZip, $programZip) {
     $archive = [IO.Compression.ZipFile]::OpenRead($path)
     try {

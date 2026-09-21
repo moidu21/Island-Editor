@@ -19,6 +19,7 @@ public sealed class TerrainHeightEditState
     public List<string> RecentOperations { get; set; } = new();
 
     public bool HasEdits => DirtyGameDataSamples.Count > 0 || MeshVerticesTouched.Count > 0 || NormalMapPagesTouched.Count > 0 || TintMapPagesTouched.Count > 0;
+    public bool HasGeometryEdits => DirtyGameDataSamples.Count > 0 || MeshVerticesTouched.Count > 0 || DirtySampleBounds is not null;
 
     public void Reset(int mapWidth, int mapHeight, int rd3dGridWidth, int rd3dGridHeight, TerrainHeightSampleEncoding sampleEncoding)
     {

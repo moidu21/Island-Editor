@@ -106,6 +106,86 @@ public class CoastAndSurfaceTests
     }
 
     [Fact]
+    public void Conservative_Rebuild_Restores_A_Flattened_Vanilla_Skirt()
+    {
+        var project = new IslandProject();
+        project.Rd3d.GridWidth = project.Rd3d.GridHeight = 2048;
+        var flattenedHeight = MeshVertex.EncodeWorldHeight(3f);
+        var cluster = new MeshCluster
+        {
+            Vertices = new()
+            {
+                new() { Raw0 = 0, Raw2 = 0, Raw1 = flattenedHeight },
+                new() { Raw0 = 256, Raw2 = 0, Raw1 = flattenedHeight },
+                new() { Raw0 = 0, Raw2 = 256, Raw1 = flattenedHeight },
+                // Même X/Z que le sommet 0 : ancienne exportation ayant aplati la jupe.
+                new() { Raw0 = 0, Raw2 = 0, Raw1 = flattenedHeight }
+            },
+            // Le sommet 0 appartient à la surface et à la paroi ; le doublon 3
+            // appartient uniquement à la paroi verticale.
+            Indices = new() { 0, 2, 1, 3, 0, 1 }
+        };
+        project.MeshPages[new(2, 0, 0)] = new MeshPage
+        {
+            Key = new(2, 0, 0), OriginalRelativePath = "meshes/2/0x0.xml",
+            HasEditablePayload = true, HasDecodedPayload = true, ContainsStructuredMeshPayload = true,
+            DeclaredWidth = 1, DeclaredHeight = 1, Clusters = new() { cluster }
+        };
+        var map = new CoarseHeightMap
+        {
+            Width = 33, Height = 33, SampleEncoding = TerrainHeightSampleEncoding.GameDataRawUInt16,
+            Samples = Enumerable.Repeat((float)TerrainHeightEncoding.WorldHeightToGameDataRaw(1.5f), 33 * 33).ToArray()
+        };
+
+        var regenerator = new LocalTerrainDerivativeRegenerator();
+        var state = regenerator.RegenerateAroundBounds(project, map, "Mesh", new(2, 0, 0),
+            new(0, 0, 32, 32), new(0, 0, 32, 32));
+        state.UseCoarseHeightMap = true;
+        var write = Assert.Single(regenerator.GenerateMeshPageWrites(project, map, state, true, 99));
+        var page = new MeshPageReader().Read(write.TargetPath, write.Key, write.XmlText, false);
+        var seamVertices = Assert.Single(page.Clusters).Vertices.Where(v => v.Raw0 == 0 && v.Raw2 == 0).ToList();
+
+        Assert.Equal(2, seamVertices.Count);
+        Assert.Equal(1.5f, seamVertices.Max(v => v.WorldHeight), 5);
+        Assert.Equal(40f / 256f, seamVertices.Max(v => v.WorldHeight) - seamVertices.Min(v => v.WorldHeight), 5);
+
+        project.MeshPages[page.Key] = page;
+        var sampler = MeshBackedHeightSampler.Create(project, 2)!;
+        Assert.True(sampler.TrySample(0, 0, out var sampled));
+        Assert.Equal(1.5f, sampled, 5);
+    }
+
+    [Fact]
+    public void Conservative_Rebuild_Preserves_Existing_Skirt_Depth_Exactly()
+    {
+        var project = FlatProject();
+        var cluster = Assert.Single(project.MeshPages[new(2, 0, 0)].Clusters);
+        cluster.Vertices.Add(new MeshVertex
+        {
+            Raw0 = cluster.Vertices[0].Raw0,
+            Raw2 = cluster.Vertices[0].Raw2,
+            Raw1 = MeshVertex.EncodeWorldHeight(cluster.Vertices[0].WorldHeight - .5f)
+        });
+        cluster.Indices.AddRange(new[] { 4, 0, 1 });
+        var map = new CoarseHeightMap
+        {
+            Width = 33, Height = 33, SampleEncoding = TerrainHeightSampleEncoding.GameDataRawUInt16,
+            Samples = Enumerable.Repeat((float)TerrainHeightEncoding.WorldHeightToGameDataRaw(1.5f), 33 * 33).ToArray()
+        };
+
+        var regenerator = new LocalTerrainDerivativeRegenerator();
+        var state = regenerator.RegenerateAroundBounds(project, map, "Mesh", new(2, 0, 0),
+            new(0, 0, 32, 32), new(0, 0, 32, 32));
+        state.UseCoarseHeightMap = true;
+        var write = Assert.Single(regenerator.GenerateMeshPageWrites(project, map, state, true, 99));
+        var page = new MeshPageReader().Read(write.TargetPath, write.Key, write.XmlText, false);
+        var seamVertices = Assert.Single(page.Clusters).Vertices.Where(v => v.Raw0 == 0 && v.Raw2 == 0).ToList();
+
+        Assert.Equal(2, seamVertices.Count);
+        Assert.Equal(.5f, seamVertices.Max(v => v.WorldHeight) - seamVertices.Min(v => v.WorldHeight), 5);
+    }
+
+    [Fact]
     public void CoastContour_Separates_Hole_And_Exterior_And_Points_Outward()
     {
         var mask = Enumerable.Repeat(true, 25).ToArray();

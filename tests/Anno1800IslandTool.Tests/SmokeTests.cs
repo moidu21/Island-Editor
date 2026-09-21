@@ -1959,6 +1959,104 @@ public sealed class SmokeTests
             message.Message.Contains("LOD0/LOD1 non supportées", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void ReplaceMaterialSet_Remaps_MaterialMap_And_Session_Without_Stale_Terra_Ids()
+    {
+        var map = new TerrainMaterialMap
+        {
+            Width = 2,
+            Height = 2,
+            MaterialIdBlockSize = 2,
+            PackedMaterialIds = new[] { TerrainMaterialPackEncoding.EncodeMaterialIds(new[] { 30, 31, 29, 28, 27, 26 }) },
+            PackedMaterialAlphas = Enumerable.Repeat(
+                TerrainMaterialPackEncoding.EncodeAlphaWeights(new[] { 31, 0, 0, 0, 0, 0 }), 4).ToArray()
+        };
+        var project = new IslandProject
+        {
+            MaterialSet = new MaterialSetDefinition
+            {
+                // Reproduit une île déjà déclarée colony02 mais dont la carte conserve
+                // encore des identifiants terra_01 (cas réel de moderate_l_10).
+                FileName = "colony02_01.xml",
+                Materials = new List<MaterialDefinition>
+                {
+                    new() { Id = 6, Type = "0", FileName = "data/dlc06/graphics/landscape/terrain/colony02/colony02_mountain_01.xml" },
+                    new() { Id = 0, Type = "0", FileName = "data/dlc06/graphics/landscape/terrain/colony02/colony02_beach_06.xml" }
+                }
+            },
+            Rd3d = new Rd3dDefinition { MaterialMap = map, MaterialMapWidth = 2, MaterialMapHeight = 2 },
+            RawContent = new RawProjectContent
+            {
+                Rd3dText = "<Content><MaterialMapWidth>2</MaterialMapWidth><MaterialMapHeight>2</MaterialMapHeight><MaterialIDBlockSize>2</MaterialIDBlockSize><MaterialIDs2>0</MaterialIDs2><MaterialAlphas2>0 0 0 0</MaterialAlphas2><PropGrid><FileNames/><Instances/></PropGrid></Content>",
+                GameDataText = "<Content><GameSessionManager><SessionSettings><GlobalAmbientName>Moderate_01</GlobalAmbientName><PlayableArea>0 0 2 2</PlayableArea><VegetationPropSetName>Moderate</VegetationPropSetName></SessionSettings><EditorObject><objects/></EditorObject></GameSessionManager></Content>"
+            }
+        };
+        const string colony02 = "<MaterialSet><Material><ID>6</><Type>0</><FileName>data/dlc06/graphics/landscape/terrain/colony02/colony02_mountain_01.xml</><ObjectFileName></></><Material><ID>0</><Type>0</><FileName>data/dlc06/graphics/landscape/terrain/colony02/colony02_beach_06.xml</><ObjectFileName></></></>";
+
+        new IslandProjectEditor().ReplaceMaterialSet(project, "colony02_01.xml", colony02, "colony02_01.xml", true);
+
+        var ids = project.Rd3d.MaterialMap.GetMaterialIdBlock(0, 0);
+        Assert.All(ids, id => Assert.Contains(id, new[] { 0, 6 }));
+        Assert.Equal(6, project.Rd3d.MaterialMap.GetDominantMaterialId(0, 0));
+        Assert.Contains("<GlobalAmbientName>Colony_02</GlobalAmbientName>", project.RawContent.GameDataText);
+        Assert.Contains("<VegetationPropSetName>Colony02</VegetationPropSetName>", project.RawContent.GameDataText);
+    }
+
+    [Fact]
+    public void UsedMaterialBits_Preserve_Local_Masks_And_Add_Nearby_Painted_Materials()
+    {
+        var map = new TerrainMaterialMap
+        {
+            Width = 2,
+            Height = 1,
+            MaterialIdBlockSize = 1,
+            PackedMaterialIds = new[]
+            {
+                TerrainMaterialPackEncoding.EncodeMaterialIds(new[] { 3, 0, 0, 0, 0, 0 }),
+                TerrainMaterialPackEncoding.EncodeMaterialIds(new[] { 9, 0, 0, 0, 0, 0 })
+            },
+            PackedMaterialAlphas = new[]
+            {
+                TerrainMaterialPackEncoding.EncodeAlphaWeights(new[] { 31, 0, 0, 0, 0, 0 }),
+                TerrainMaterialPackEncoding.EncodeAlphaWeights(new[] { 31, 0, 0, 0, 0, 0 })
+            }
+        };
+        var key = new TerrainPageKey(2, 0, 0);
+        var page = new MeshPage
+        {
+            Key = key,
+            OriginalRelativePath = "_gamedata/test/meshes/2/0x0.xml",
+            DeclaredWidth = 2,
+            DeclaredHeight = 1,
+            Clusters =
+            {
+                new MeshCluster { UsedMaterialBits = 1 << 3, Vertices = { new MeshVertex { Raw0 = 0, Raw2 = 0 } } },
+                new MeshCluster { UsedMaterialBits = 1 << 9, Vertices = { new MeshVertex { Raw0 = 16, Raw2 = 0 } } }
+            }
+        };
+        var project = new IslandProject
+        {
+            Rd3d = new Rd3dDefinition { GridWidth = 32, GridHeight = 16, MaterialMap = map },
+            MaterialSet = new MaterialSetDefinition
+            {
+                Materials = new List<MaterialDefinition>
+                {
+                    new() { Id = 0 },
+                    new() { Id = 3 },
+                    new() { Id = 9 }
+                }
+            },
+            MeshPages = { [key] = page }
+        };
+
+        var changedPages = new IslandProjectEditor().ResynchronizeMeshUsedMaterialBitsFromMaterialMap(project);
+
+        Assert.Equal(1, changedPages);
+        Assert.Equal((1 << 3) | (1 << 9), page.Clusters[0].UsedMaterialBits);
+        Assert.Equal((1 << 3) | (1 << 9), page.Clusters[1].UsedMaterialBits);
+        Assert.Single(project.LocalRegeneration!.GeneratedMeshPageWrites);
+    }
+
 
 
     public void CoastTransitionPainter_Classifies_HeightMap_Into_Water_Beach_And_Land()
@@ -2234,7 +2332,7 @@ public sealed class SmokeTests
         Assert.NotNull(method);
         var write = Assert.IsType<RegeneratedMeshPageWrite>(method!.Invoke(
             null,
-            new object?[] { project, page, map, new RectI(0, 0, 1, 1), new MeshRegenerationOptions { RebuildSurfaceAttributes = false }, null }));
+            new object?[] { project, page, map, new RectI(0, 0, 1, 1), new RectI(0, 0, 1, 1), new MeshRegenerationOptions { RebuildSurfaceAttributes = false }, null }));
         var regenerated = new MeshPageReader().Read("generated.xml", key, write.XmlText, retainRawText: false);
         var outputVertices = Assert.Single(regenerated.Clusters).Vertices;
 
@@ -2244,6 +2342,75 @@ public sealed class SmokeTests
             Assert.Equal(MeshVertex.EncodeWorldHeight(5f), outputVertices[index].Raw1);
             Assert.Equal(sourceVertices[index].RawValues.Skip(3).Take(5), outputVertices[index].RawValues.Skip(3).Take(5));
         }
+    }
+
+    [Fact]
+    public void ConservativeMeshRegeneration_V4664_Preserves_Vertices_Outside_Local_River_Bounds()
+    {
+        var key = new TerrainPageKey(5, 0, 0);
+        var insideRaw1 = MeshVertex.EncodeWorldHeight(1f);
+        var mountainRaw1 = MeshVertex.EncodeWorldHeight(37f);
+        var page = new MeshPage
+        {
+            Key = key,
+            OriginalRelativePath = "meshes/5/0x0.xml",
+            HasEditablePayload = true,
+            HasDecodedPayload = true,
+            ContainsStructuredMeshPayload = true,
+            VertexStride = 8,
+            ProbableHeightComponentIndex = 1,
+            Clusters =
+            {
+                new MeshCluster
+                {
+                    UsedMaterialBits = 1 << 9,
+                    Vertices =
+                    {
+                        new MeshVertex { RawValues = new[] { 0, insideRaw1, 0, 1, 2, 3, 4, 5 } },
+                        new MeshVertex { RawValues = new[] { 100, mountainRaw1, 100, 6, 7, 8, 9, 10 } },
+                        new MeshVertex { RawValues = new[] { 90, mountainRaw1, 100, 11, 12, 13, 14, 15 } }
+                    },
+                    Indices = { 0, 1, 2 }
+                }
+            }
+        };
+        var project = new IslandProject
+        {
+            Rd3d = new Rd3dDefinition { GridWidth = 100, GridHeight = 100, UnitScale = 1f },
+            MeshPages = { [key] = page }
+        };
+        var map = new CoarseHeightMap
+        {
+            Width = 5,
+            Height = 5,
+            SampleEncoding = TerrainHeightSampleEncoding.WorldUnits,
+            Samples = Enumerable.Repeat(5f, 25).ToArray()
+        };
+
+        var method = typeof(LocalTerrainDerivativeRegenerator).GetMethod(
+            "BuildConservativeMeshPageWrite",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+        var write = Assert.IsType<RegeneratedMeshPageWrite>(method!.Invoke(
+            null,
+            new object?[]
+            {
+                project,
+                page,
+                map,
+                new RectI(0, 0, 4, 4),
+                new RectI(0, 0, 0, 0),
+                new MeshRegenerationOptions { RebuildSurfaceAttributes = false },
+                null
+            }));
+        var regenerated = new MeshPageReader().Read("generated.xml", key, write.XmlText, retainRawText: false);
+        var cluster = Assert.Single(regenerated.Clusters);
+
+        Assert.Equal(MeshVertex.EncodeWorldHeight(5f), cluster.Vertices[0].Raw1);
+        Assert.Equal(mountainRaw1, cluster.Vertices[1].Raw1);
+        Assert.Equal(mountainRaw1, cluster.Vertices[2].Raw1);
+        Assert.Equal(1 << 9, cluster.UsedMaterialBits);
+        Assert.Equal(new[] { 0, 1, 2 }, cluster.Indices);
     }
 
     [Fact]

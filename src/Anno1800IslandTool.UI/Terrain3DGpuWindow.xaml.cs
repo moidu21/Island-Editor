@@ -9,6 +9,8 @@ using System.Windows.Media;
 using System.Windows.Media.Media3D;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;
+using Anno1800IslandTool.Pipeline.Editing;
+using Anno1800IslandTool.Pipeline.Services;
 using HelixToolkit;
 using HelixToolkit.Maths;
 using HelixToolkit.SharpDX;
@@ -28,10 +30,13 @@ public partial class Terrain3DGpuWindow : Window
     private const float OuterOceanSafetyWidthWorld = 256f;
     private const int UndoHistoryLimit = 20;
     private readonly IslandProject _project;
+    private readonly IslandProjectEditor _materialSetEditor = new();
+    private readonly EmbeddedMaterialSetLibrary _embeddedMaterialSets = new();
     private readonly Func<IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, string>? _applyMaximumExpansion;
     private readonly Func<GpuBeachDefinition, IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, string>? _applyBeachToProject;
     private readonly Func<IReadOnlyList<bool>, IReadOnlyList<GpuFineTerrainStamp>, IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, string>? _applyFootprintToProject;
     private readonly Func<IReadOnlyList<GpuTreeInstance>, string>? _applyTreesToProject;
+    private readonly Func<GpuRiverDefinition, string>? _applyRiverToProject;
     private readonly Func<int, IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, string>? _validateEntireTerrain;
     private readonly Func<GpuObjTerrainImportDefinition, string>? _importObjTerrain;
     private bool _isValidatingTerrain;
@@ -46,6 +51,7 @@ public partial class Terrain3DGpuWindow : Window
     private HxMeshGeometry3D? _geometry;
     private TerrainRayIndex? _terrainRayIndex;
     private TerrainBrushSpatialIndex? _spatialIndex;
+    private readonly Dictionary<int, TerrainBrushSpatialIndex> _heightSpatialIndicesByLod = new();
     private IReadOnlyList<MeshPage> _loadedPages = Array.Empty<MeshPage>();
     private CancellationTokenSource? _loadCancellation;
     private bool _initializing = true;
@@ -76,6 +82,7 @@ public partial class Terrain3DGpuWindow : Window
     private int _beachSelectionStep;
     private BeachDragMode _beachDragMode;
     private bool _hasDirectProjectCommit;
+    private bool _materialSetChanged;
     private bool[] _projectFootprintMask = Array.Empty<bool>();
     private bool[] _workingFootprintMask = Array.Empty<bool>();
     private bool _footprintDirty;
@@ -83,6 +90,8 @@ public partial class Terrain3DGpuWindow : Window
     private readonly List<GpuTreeInstance> _pendingTreeInstances = new();
     private Vector3 _lastTreeStampCenter;
     private bool _hasLastTreeStampCenter;
+    private readonly List<Vector3> _pendingRiverPoints = new();
+    private readonly List<Vector3> _pendingRiverSlotClicks = new();
     private readonly Stack<GpuToolSnapshot> _undoHistory = new();
     private readonly Stack<GpuToolSnapshot> _redoHistory = new();
     private GpuToolSnapshot? _activeHistoryAction;
@@ -105,6 +114,7 @@ public partial class Terrain3DGpuWindow : Window
         Func<GpuBeachDefinition, IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, string>? applyBeachToProject = null,
         Func<IReadOnlyList<bool>, IReadOnlyList<GpuFineTerrainStamp>, IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, string>? applyFootprintToProject = null,
         Func<IReadOnlyList<GpuTreeInstance>, string>? applyTreesToProject = null,
+        Func<GpuRiverDefinition, string>? applyRiverToProject = null,
         Func<int, IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, string>? validateEntireTerrain = null,
         Func<GpuObjTerrainImportDefinition, string>? importObjTerrain = null)
     {
@@ -113,6 +123,7 @@ public partial class Terrain3DGpuWindow : Window
         _applyBeachToProject = applyBeachToProject;
         _applyFootprintToProject = applyFootprintToProject;
         _applyTreesToProject = applyTreesToProject;
+        _applyRiverToProject = applyRiverToProject;
         _validateEntireTerrain = validateEntireTerrain;
         _importObjTerrain = importObjTerrain;
         _originalTouchedPages = new Dictionary<TerrainPageKey, int>(_project.HeightEditState.MeshVerticesTouched);
@@ -121,6 +132,7 @@ public partial class Terrain3DGpuWindow : Window
         (_effectsManager, _adapterName) = CreateEffectsManager();
 
         InitializeComponent();
+        MaterialSetSelectionCoordinator.SelectionChanged += MaterialSetSelectionCoordinator_SelectionChanged;
         PreviewKeyDown += Terrain3DGpuWindow_PreviewKeyDown;
         _brushPointerTrackingTimer = new System.Windows.Threading.DispatcherTimer(
             System.Windows.Threading.DispatcherPriority.Input)
@@ -160,7 +172,10 @@ public partial class Terrain3DGpuWindow : Window
         };
 
         BrushToolListBox.SelectedIndex = 0;
+        PopulateGpuMaterialSets();
         InitializeFootprintMask();
+        InitializeTreeBiomeDisplay();
+        InitializeRiverSlotUi();
         UpdateMaximumIslandSizeDisplay();
         UpdateNavigationBinding();
         PopulateLods(preferredLod);
@@ -192,6 +207,7 @@ public partial class Terrain3DGpuWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        MaterialSetSelectionCoordinator.SelectionChanged -= MaterialSetSelectionCoordinator_SelectionChanged;
         _brushPointerTrackingTimer.Stop();
         _loadCancellation?.Cancel();
         _loadCancellation?.Dispose();
@@ -209,6 +225,86 @@ public partial class Terrain3DGpuWindow : Window
         _bindingsByPosition.Clear();
         _effectsManager.Dispose();
         base.OnClosed(e);
+    }
+
+    private void PopulateGpuMaterialSets()
+    {
+        var names = _embeddedMaterialSets.GetAvailableFileNames();
+        GpuMaterialSetComboBox.ItemsSource = names;
+        var effectiveName = EmbeddedMaterialSetLibrary.NormalizeFileName(_project.EffectiveMaterialSetName);
+        GpuMaterialSetComboBox.SelectedItem = names.FirstOrDefault(name =>
+            string.Equals(name, effectiveName, StringComparison.OrdinalIgnoreCase))
+            ?? names.FirstOrDefault(name => string.Equals(name, "terra_01.xml", StringComparison.OrdinalIgnoreCase))
+            ?? names.FirstOrDefault();
+        RefreshGpuMaterialSetDisplay();
+    }
+
+    private void RefreshGpuMaterialSetDisplay()
+    {
+        if (GpuMaterialSetComboBox.SelectedItem is string fileName)
+        {
+            GpuMaterialSetComboBox.Text = fileName;
+            GpuMaterialSetStatusTextBlock.Text = $"Actif : {fileName}. Synchronisé avec l’éditeur de matériaux et le RD3D.";
+        }
+    }
+
+    private void GpuMaterialSetComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        RefreshGpuMaterialSetDisplay();
+        if (_initializing || !IsLoaded || GpuMaterialSetComboBox.SelectedItem is not string fileName)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!_embeddedMaterialSets.TryRead(fileName, out var text))
+            {
+                throw new InvalidOperationException($"Le materialset intégré {fileName} est introuvable.");
+            }
+
+            var report = _materialSetEditor.ReplaceMaterialSet(
+                _project,
+                fileName,
+                text,
+                fileName,
+                updateRd3dReference: true);
+            _hasDirectProjectCommit = true;
+            _materialSetChanged = true;
+            GpuMaterialSetStatusTextBlock.Text = $"Actif : {fileName}. {report}";
+            InitializeTreeBiomeDisplay();
+            MaterialSetSelectionCoordinator.Publish(_project, this);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.ToString(), "Sélection du materialset", MessageBoxButton.OK, MessageBoxImage.Error);
+            PopulateGpuMaterialSets();
+        }
+    }
+
+    private void MaterialSetSelectionCoordinator_SelectionChanged(object? sender, MaterialSetSelectionChangedEventArgs e)
+    {
+        if (!ReferenceEquals(e.Project, _project) || ReferenceEquals(e.Source, this))
+        {
+            return;
+        }
+
+        Dispatcher.InvokeAsync(() =>
+        {
+            _hasDirectProjectCommit = true;
+            _materialSetChanged = true;
+            var wasInitializing = _initializing;
+            _initializing = true;
+            try
+            {
+                PopulateGpuMaterialSets();
+                InitializeTreeBiomeDisplay();
+            }
+            finally
+            {
+                _initializing = wasInitializing;
+            }
+        });
     }
 
     private void PopulateLods(int preferredLod)
@@ -373,18 +469,18 @@ public partial class Terrain3DGpuWindow : Window
                 1f);
         }
 
-        var decodedRange = Math.Max(1, maxDecodedHeight - minDecodedHeight);
-        var terrainSpan = Math.Max(128, Math.Max(maxTerrainX - minTerrainX, maxTerrainZ - minTerrainZ));
-        // Même transformation que « Mesh brut fusionné du LOD » dans l'éditeur historique.
-        // Les hauteurs réelles Anno sont petites devant X/Z : cette échelle visuelle rend
-        // la topologie lisible sans modifier les valeurs Raw1 enregistrées.
-        var sceneHeightScale = (float)((terrainSpan * 0.22) / decodedRange);
+        // Mesh X/Z has 32 units per game tile; height has 256 encoded steps per
+        // world unit. Keep a fixed physical aspect instead of stretching every island.
+        var sceneHeightScale = 32f / 256f;
 
         var positions = new List<Vector3>();
         var sourceCounts = new List<int>();
         var bindings = new List<GpuVertexBinding>();
         var indices = new List<int>();
-        var positionByTerrainCoordinate = new Dictionary<(int X, int Z), int>();
+        // Surface vertices may share X/Z with vertical connector (skirt) vertices.
+        // They must never be fused together: editing the fused point used to flatten
+        // the connector and created the long white/black sheets visible in game.
+        var positionByTerrainCoordinate = new Dictionary<(int X, int Z, int Layer), int>();
         var uniqueTriangles = new HashSet<(int A, int B, int C)>();
         var min = new Vector3(float.PositiveInfinity);
         var max = new Vector3(float.NegativeInfinity);
@@ -398,7 +494,11 @@ public partial class Terrain3DGpuWindow : Window
                 for (var vertexIndex = 0; vertexIndex < cluster.Vertices.Count; vertexIndex++)
                 {
                     var vertex = cluster.Vertices[vertexIndex];
-                    var coordinate = (vertex.X, vertex.Z);
+                    // Raw3..Raw7 do not identify vanilla connector/skirt vertices reliably
+                    // (on the stock moderate islands none of the real skirts carries the
+                    // previously assumed flag).  Height is the structural layer: equal-height
+                    // page-border copies are fused, while the lower connector remains distinct.
+                    var coordinate = (vertex.X, vertex.Z, (int)unchecked((ushort)vertex.Raw1));
                     var sceneY = (vertex.DecodedHeight - minDecodedHeight) * sceneHeightScale;
                     var position = new Vector3(vertex.X, sceneY, vertex.Z);
                     if (!positionByTerrainCoordinate.TryGetValue(coordinate, out var fusedIndex))
@@ -434,6 +534,11 @@ public partial class Terrain3DGpuWindow : Window
                     {
                         continue;
                     }
+
+                    // Connector walls have no X/Z area. They remain in the project
+                    // and export, but must not darken surface normals or intercept picks.
+                    if (!TerrainStructuralHeightEditor.IsSurfaceTriangle(cluster.Vertices[a], cluster.Vertices[b], cluster.Vertices[c]))
+                        continue;
 
                     var fusedA = remappedIndices[a];
                     var fusedB = remappedIndices[b];
@@ -585,6 +690,16 @@ public partial class Terrain3DGpuWindow : Window
             _isPainting = true;
             GpuViewport.CaptureMouse();
             ApplyFootprintBrush(args.HitTestResult.PointHit, mode == GpuBrushMode.AddFootprint);
+            e.Handled = true;
+            return;
+        }
+        if (mode == GpuBrushMode.River)
+        {
+            if (ManualRiverSlotModeCheckBox?.IsChecked == true)
+                AddManualRiverSlot(args.HitTestResult.PointHit);
+            else
+                AddRiverPoint(args.HitTestResult.PointHit);
+            CompleteToolHistoryAction();
             e.Handled = true;
             return;
         }
@@ -958,113 +1073,90 @@ public partial class Terrain3DGpuWindow : Window
             return;
         }
 
+        if (mode is not (GpuBrushMode.Raise or GpuBrushMode.Lower or GpuBrushMode.Smooth or GpuBrushMode.Flatten))
+        {
+            return;
+        }
+
         var radius = Math.Max(1.0, BrushRadiusSlider.Value);
         var strength = (float)BrushStrengthSlider.Value;
-        var affected = _spatialIndex.QueryCircle(center.X, center.Z, GetBrushQueryRadius(radius));
-        if (affected.Count == 0)
+        EnsureHeightSpatialIndices();
+        var affectedByLod = _heightSpatialIndicesByLod
+            .OrderBy(pair => pair.Key)
+            .Select(pair => (Lod: pair.Key, Groups: BuildBrushCoordinateGroups(pair.Value, center, radius)))
+            .Where(item => item.Groups.Count > 0)
+            .ToArray();
+        if (affectedByLod.Length == 0)
         {
             return;
         }
 
-        var affectedByPosition = new Dictionary<int, TerrainBrushVertexHit>();
-        foreach (var item in affected)
-        {
-            if (!_positionByVertex.TryGetValue(item.Vertex, out var positionIndex))
-            {
-                continue;
-            }
-
-            if (!affectedByPosition.TryGetValue(positionIndex, out var existing) || item.Distance < existing.Distance)
-            {
-                affectedByPosition[positionIndex] = item;
-            }
-        }
-
-        // Le dernier anneau au bord du XML appartient à l'océan. Un grand pinceau
-        // (notamment Flatten 2048) ne doit jamais le relever : sinon le jeu recrée
-        // une languette de terrain et pose ses vagues jusque sur la terre.
-        foreach (var positionIndex in affectedByPosition.Keys.ToArray())
-        {
-            var position = _geometry.Positions[positionIndex];
-            if (IsProtectedOuterOceanPosition(position.X, position.Z) ||
-                GetBrushNormalizedDistance(position.X - center.X, position.Z - center.Z, radius) > 1d)
-            {
-                affectedByPosition.Remove(positionIndex);
-            }
-        }
-        if (affectedByPosition.Count == 0)
-        {
-            return;
-        }
-
+        var selectedGroups = affectedByLod.FirstOrDefault(item => item.Lod == GetSelectedLod()).Groups
+            ?? affectedByLod[0].Groups;
         var smoothTarget = _hasPickedHeight
             ? _pickedHeight
-            : affectedByPosition.Keys.Average(positionIndex =>
-                SceneYToDecodedHeight(_geometry.Positions[positionIndex].Y));
+            : selectedGroups.Average(group => group.SurfaceDecodedHeight);
         var flattenTarget = _hasFlattenStrokeTarget
             ? _flattenStrokeTarget
             : _hasPickedHeight
                 ? _pickedHeight
                 : QuantizeDecodedHeight(SceneYToDecodedHeight(center.Y));
-        var exactFlattenRaw = MeshVertex.EncodeDecodedHeight(flattenTarget);
         var changedByPage = new Dictionary<TerrainPageKey, int>();
+        var changedGpuPositions = new HashSet<int>();
         var stopwatch = Stopwatch.StartNew();
 
-        foreach (var pair in affectedByPosition)
+        // The same brush stamp is evaluated against every editable LOD.  Each X/Z
+        // group is moved by a delta, including its lower structural skirt copies.
+        // This keeps the vertical connector depth intact and gives all LODs the same
+        // intended surface instead of reconstructing them later from a rectangle.
+        foreach (var (lod, groups) in affectedByLod)
         {
-            var positionIndex = pair.Key;
-            var position = _geometry.Positions[positionIndex];
-            var normalized = Math.Clamp(GetBrushNormalizedDistance(position.X - center.X, position.Z - center.Z, radius), 0.0, 1.0);
-            var weight = mode == GpuBrushMode.Flatten
-                ? 1f
-                : SmoothFalloffCheckBox.IsChecked == true
-                    ? (float)Math.Pow(1.0 - normalized, 2.0)
-                    : 1f;
-            if (weight <= 0f)
+            foreach (var group in groups)
             {
-                continue;
-            }
-
-            var currentPosition = _geometry.Positions[positionIndex];
-            var original = SceneYToDecodedHeight(currentPosition.Y);
-            var target = mode switch
-            {
-                GpuBrushMode.Raise => original + (strength * weight),
-                GpuBrushMode.Lower => original - (strength * weight),
-                GpuBrushMode.Smooth => Lerp(original, (float)smoothTarget, 0.35f * weight),
-                GpuBrushMode.Flatten => flattenTarget,
-                _ => original
-            };
-            var nextRaw = mode == GpuBrushMode.Flatten
-                ? exactFlattenRaw
-                : MeshVertex.EncodeDecodedHeight(target);
-            if (!_bindingsByPosition.TryGetValue(positionIndex, out var sharedVertices))
-            {
-                continue;
-            }
-
-            var fusedPositionChanged = false;
-            foreach (var binding in sharedVertices)
-            {
-                if (nextRaw == binding.Vertex.Raw1)
+                var normalized = Math.Clamp(
+                    GetBrushNormalizedDistance(group.X - center.X, group.Z - center.Z, radius), 0.0, 1.0);
+                var weight = mode == GpuBrushMode.Flatten
+                    ? ComputeFlattenTransitionWeight(normalized)
+                    : SmoothFalloffCheckBox.IsChecked == true
+                        ? (float)Math.Pow(1.0 - normalized, 2.0)
+                        : 1f;
+                if (weight <= 0f)
                 {
                     continue;
                 }
 
-                _originalRaw1.TryAdd(binding.Vertex, binding.Vertex.Raw1);
-                binding.Vertex.Raw1 = nextRaw;
-                changedByPage[binding.Page.Key] = changedByPage.TryGetValue(binding.Page.Key, out var count) ? count + 1 : 1;
-                _changedVertexWrites++;
-                fusedPositionChanged = true;
-            }
+                var originalSurface = group.SurfaceDecodedHeight;
+                var target = mode switch
+                {
+                    GpuBrushMode.Raise => originalSurface + (strength * weight),
+                    GpuBrushMode.Lower => originalSurface - (strength * weight),
+                    GpuBrushMode.Smooth => Lerp(originalSurface, (float)smoothTarget, 0.35f * weight),
+                    GpuBrushMode.Flatten => Lerp(originalSurface, flattenTarget, weight),
+                    _ => originalSurface
+                };
+                var decodedDelta = target - originalSurface;
+                var groupChanged = false;
+                foreach (var reference in group.Vertices)
+                {
+                    var vertex = reference.Vertex;
+                    var nextRaw = TerrainStructuralHeightEditor.MoveRawByDecodedDelta(vertex.Raw1, decodedDelta);
+                    if (nextRaw == vertex.Raw1) continue;
 
-            if (fusedPositionChanged)
-            {
-                var source = sharedVertices[0].Vertex;
-                _geometry.Positions[positionIndex] = new Vector3(source.X, DecodedHeightToSceneY(source.DecodedHeight), source.Z);
-                if (_geometry.Colors is not null && positionIndex < _geometry.Colors.Count)
-                    _geometry.Colors[positionIndex] = HeightColor(source.DecodedHeight);
-                RecordChangedWorldPoint(GetSelectedLod(), source.X, source.Z);
+                    _originalRaw1.TryAdd(vertex, vertex.Raw1);
+                    vertex.Raw1 = nextRaw;
+                    changedByPage[reference.Page.Key] = changedByPage.TryGetValue(reference.Page.Key, out var count) ? count + 1 : 1;
+                    _changedVertexWrites++;
+                    groupChanged = true;
+                    if (lod == GetSelectedLod() && _positionByVertex.TryGetValue(vertex, out var positionIndex))
+                    {
+                        changedGpuPositions.Add(positionIndex);
+                    }
+                }
+
+                if (groupChanged)
+                {
+                    RecordChangedWorldPoint(lod, group.X, group.Z);
+                }
             }
         }
 
@@ -1073,8 +1165,19 @@ public partial class Terrain3DGpuWindow : Window
             return;
         }
 
-        _geometry.UpdateVertices();
-        _geometry.UpdateColors();
+        foreach (var positionIndex in changedGpuPositions)
+        {
+            if (!_bindingsByPosition.TryGetValue(positionIndex, out var bindings) || bindings.Count == 0) continue;
+            var source = bindings[0].Vertex;
+            _geometry.Positions[positionIndex] = new Vector3(source.X, DecodedHeightToSceneY(source.DecodedHeight), source.Z);
+            if (_geometry.Colors is not null && positionIndex < _geometry.Colors.Count)
+                _geometry.Colors[positionIndex] = HeightColor(source.DecodedHeight);
+        }
+        if (changedGpuPositions.Count > 0)
+        {
+            _geometry.UpdateVertices();
+            _geometry.UpdateColors();
+        }
         stopwatch.Stop();
         _lastUploadDuration = stopwatch.Elapsed;
         foreach (var pair in changedByPage)
@@ -1084,6 +1187,55 @@ public partial class Terrain3DGpuWindow : Window
         _project.IsModified = true;
         _project.ModifiedSections.Add("TerrainMeshGpuD3D11");
         StatusTextBlock.Text = BuildStatusText(_geometry.Positions.Count, (_geometry.Indices?.Count ?? 0) / 3, TimeSpan.Zero);
+    }
+
+    private void EnsureHeightSpatialIndices()
+    {
+        if (_heightSpatialIndicesByLod.Count > 0) return;
+        foreach (var group in _project.MeshPages.Values
+                     .Where(MeshPageClassifier.CanEditGeometry)
+                     .GroupBy(page => page.Key.Lod))
+        {
+            _heightSpatialIndicesByLod[group.Key] = TerrainBrushSpatialIndex.Build(group, group.Key, 32d);
+        }
+    }
+
+    private static float ComputeFlattenTransitionWeight(double normalizedDistance)
+    {
+        // Exact plateau over 75% of the radius, then a C1-continuous transition.
+        // A hard step at the radius is intersected differently by each LOD and can
+        // expose their vertical connectors even when all page-border vertices match.
+        const double plateau = 0.75;
+        if (normalizedDistance <= plateau) return 1f;
+        if (normalizedDistance >= 1d) return 0f;
+        var t = (float)((1d - normalizedDistance) / (1d - plateau));
+        return t * t * (3f - (2f * t));
+    }
+
+    private List<GpuBrushCoordinateGroup> BuildBrushCoordinateGroups(
+        TerrainBrushSpatialIndex spatialIndex,
+        Vector3 center,
+        double radius)
+    {
+        var groups = new Dictionary<(int X, int Z), GpuBrushCoordinateGroup>();
+        foreach (var hit in spatialIndex.QueryCircle(center.X, center.Z, GetBrushQueryRadius(radius)))
+        {
+            var vertex = hit.Vertex;
+            if (IsProtectedOuterOceanPosition(vertex.X, vertex.Z) ||
+                GetBrushNormalizedDistance(vertex.X - center.X, vertex.Z - center.Z, radius) > 1d)
+            {
+                continue;
+            }
+
+            var key = (vertex.X, vertex.Z);
+            if (!groups.TryGetValue(key, out var group))
+            {
+                group = new GpuBrushCoordinateGroup(vertex.X, vertex.Z, hit.Distance);
+                groups[key] = group;
+            }
+            group.Add(hit);
+        }
+        return groups.Values.ToList();
     }
 
     private bool IsProtectedOuterOceanPosition(float worldX, float worldZ)
@@ -1143,6 +1295,7 @@ public partial class Terrain3DGpuWindow : Window
             GpuBrushMode.RemoveFootprint => "Retirer une zone : peignez les parties à supprimer. Le mesh, les dérivés et le masque gameplay seront retirés à l’application.",
             GpuBrushMode.Trees => "Arbres : cliquez ou peignez sur la terre. Le rayon, le motif et la densité déterminent la forêt créée.",
             GpuBrushMode.MeshBeach => "Plage sur maillage : choisissez directement une ligne où le relief traverse le niveau de la mer, sans utiliser le contour vert de l'empreinte.",
+            GpuBrushMode.River => "Rivière : cliquez les points dans l’ordre de l’écoulement. L’aperçu arrondit automatiquement les changements de direction.",
             _ => "Déplacer : bouton gauche ou droit pour tourner, molette maintenue pour déplacer, roulette pour zoomer."
         };
     }
@@ -1377,11 +1530,12 @@ public partial class Terrain3DGpuWindow : Window
         }
     }
 
-    private void RebaseTransactionAfterDirectCommit()
+    private void RebaseTransactionAfterDirectCommit(bool preservePendingTerrainChanges = false)
     {
         ResetUndoHistory();
+        _heightSpatialIndicesByLod.Clear();
         _originalRaw1.Clear();
-        _changedBoundsByLod.Clear();
+        if (!preservePendingTerrainChanges) _changedBoundsByLod.Clear();
         _originalTouchedPages.Clear();
         foreach (var pair in _project.HeightEditState.MeshVerticesTouched)
         {
@@ -1626,6 +1780,35 @@ public partial class Terrain3DGpuWindow : Window
     private async void ValidateEntireTerrainButton_Click(object sender, RoutedEventArgs e)
         => await ValidateProjectForExportAsync(closeAfterValidation: false);
 
+    private async void RepairHeightPagesButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isValidatingTerrain) return;
+        if (_originalRaw1.Count > 0 || _changedBoundsByLod.Count > 0 || _footprintDirty)
+        {
+            StatusTextBlock.Text = "Validez d’abord les modifications en cours, puis relancez la réparation.";
+            return;
+        }
+        _isValidatingTerrain = true;
+        _loadCancellation?.Cancel();
+        EditorControlsPanel.IsEnabled = false;
+        GpuViewport.IsEnabled = false;
+        StatusTextBlock.Text = "Réparation des pages de hauteur et de leurs bordures en cours…";
+        try
+        {
+            var count = await Task.Run(() => TerrainHeightPageRepair.Repair(_project));
+            _hasDirectProjectCommit = true;
+            RebaseTransactionAfterDirectCommit();
+            StatusTextBlock.Text = $"{count} pages de hauteur recalculées. Fermez l’éditeur puis exportez le ZIP complet pour l’essai en jeu.";
+        }
+        catch (Exception ex) { StatusTextBlock.Text = $"Réparation incomplète : {ex.Message}"; }
+        finally
+        {
+            _isValidatingTerrain = false;
+            EditorControlsPanel.IsEnabled = true;
+            GpuViewport.IsEnabled = true;
+        }
+    }
+
     private async Task ValidateProjectForExportAsync(bool closeAfterValidation)
     {
         if (_isValidatingTerrain) return;
@@ -1705,6 +1888,7 @@ public partial class Terrain3DGpuWindow : Window
         8 => GpuBrushMode.RemoveFootprint,
         9 => GpuBrushMode.Trees,
         10 => GpuBrushMode.MeshBeach,
+        11 => GpuBrushMode.River,
         _ => GpuBrushMode.Navigation
     };
 
@@ -1967,7 +2151,21 @@ public partial class Terrain3DGpuWindow : Window
         {
             _project.ModifiedSections.Add(section);
         }
-        _project.IsModified = _originalIsModified;
+        if (_materialSetChanged)
+        {
+            // A material-set switch is an immediate project operation shared with the
+            // material editor. Cancelling temporary height strokes must not erase the
+            // dirty state of that already-applied selection.
+            foreach (var section in new[]
+                     {
+                         "GameData", "Rivers", "RiverRendering", "EnvironmentAssets",
+                         "MaterialSet", "RD3D", "MaterialSetSelection"
+                     })
+            {
+                _project.ModifiedSections.Add(section);
+            }
+        }
+        _project.IsModified = _originalIsModified || _materialSetChanged;
     }
 
     private enum GpuBrushMode
@@ -1982,7 +2180,8 @@ public partial class Terrain3DGpuWindow : Window
         AddFootprint,
         RemoveFootprint,
         Trees,
-        MeshBeach
+        MeshBeach,
+        River
     }
 
     private enum GpuBrushPattern
@@ -2015,6 +2214,30 @@ public partial class Terrain3DGpuWindow : Window
         float SceneHeightScale);
 
     private sealed record GpuVertexBinding(MeshPage Page, MeshVertex Vertex, int PositionIndex);
+
+    private sealed class GpuBrushCoordinateGroup
+    {
+        private readonly HashSet<MeshVertex> _seen = new(ReferenceEqualityComparer.Instance);
+
+        public GpuBrushCoordinateGroup(int x, int z, double distance)
+        {
+            X = x;
+            Z = z;
+            Distance = distance;
+        }
+
+        public int X { get; }
+        public int Z { get; }
+        public double Distance { get; private set; }
+        public List<TerrainBrushVertexReference> Vertices { get; } = new();
+        public float SurfaceDecodedHeight => TerrainStructuralHeightEditor.GetSurfaceDecodedHeight(Vertices.Select(item => item.Vertex));
+
+        public void Add(TerrainBrushVertexHit hit)
+        {
+            Distance = Math.Min(Distance, hit.Distance);
+            if (_seen.Add(hit.Vertex)) Vertices.Add(new TerrainBrushVertexReference(hit.Page, hit.Vertex));
+        }
+    }
 
     private sealed class GpuEditBounds
     {
@@ -2095,6 +2318,11 @@ public sealed record GpuFineTerrainStamp(
     bool SmoothEdge);
 
 public sealed record GpuTreeInstance(double X, double Z, double WorldHeight, double RotationRadians, double Scale);
+
+public sealed record GpuRiverDefinition(IReadOnlyList<GpuRiverPoint> Points, double WidthTiles, double BedDepth,
+    double IrrigationRadius, IReadOnlyList<GpuRiverSlotDefinition>? RiverSlots = null);
+public sealed record GpuRiverPoint(double X, double Z, double WorldHeight);
+public sealed record GpuRiverSlotDefinition(GpuRiverPoint RiverPoint, GpuRiverPoint WorkAreaPoint);
 
 public sealed record GpuObjTerrainImportDefinition(
     string Path,

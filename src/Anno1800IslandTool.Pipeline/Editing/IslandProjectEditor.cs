@@ -5,6 +5,8 @@ using Anno1800IslandTool.Core.Terrain;
 using Anno1800IslandTool.Formats.Readers;
 using Anno1800IslandTool.Pipeline.Services;
 using Anno1800IslandTool.Pipeline.Validation;
+using System.Text.RegularExpressions;
+using System.Xml.Linq;
 
 namespace Anno1800IslandTool.Pipeline.Editing;
 
@@ -18,6 +20,7 @@ public sealed class IslandProjectEditor
     private readonly Rd3dReader _rd3dReader = new();
     private readonly GameDataReader _gameDataReader = new();
     private readonly MaterialSetReader _materialSetReader = new();
+    private readonly EmbeddedMaterialSetLibrary _embeddedMaterialSetLibrary = new();
     private readonly DefaultMaterialSetResolver _materialResolver = new();
     private readonly IslandValidator _validator = new();
     private readonly TerrainDependencySynchronizer _terrainDependencySynchronizer = new();
@@ -82,6 +85,19 @@ public sealed class IslandProjectEditor
         _regenerator.RegenerateRd3dText(project);
         MarkDirty(project, "RD3D", "PropGrid");
         project.ValidationReport = _validator.Validate(project);
+    }
+
+    public long AddGeneratedRiver(IslandProject project, GeneratedRiverDefinition river)
+    {
+        var generated = GeneratedRiverService.Add(project, river);
+        project.RawContent.GameDataText = generated.GameDataText;
+        project.RawContent.Rd3dText = generated.Rd3dText;
+        _regenerator.RegenerateRootText(project);
+        project.GameData = _gameDataReader.Read(generated.GameDataText);
+        project.Rd3d = _rd3dReader.Read(generated.Rd3dText);
+        MarkDirty(project, "Root", "GameData", "RD3D", "Rivers", "RiverSlots", "RiverGrid", "WaterFlow", "IrrigationManager");
+        project.ValidationReport = _validator.Validate(project);
+        return generated.ObjectId;
     }
 
     public void ReplaceSlotObjects(IslandProject project, IReadOnlyList<SlotObjectDefinition> slotObjects)
@@ -178,6 +194,7 @@ public sealed class IslandProjectEditor
         // Ces trous de coverage provoquent un fallback blanc/gris dans les shaders terrain,
         // notamment après peinture par blocs MaterialIDs2 partagés 2x2.
         TerrainMaterialMapCoverageSanitizer.EnsureNoZeroCoverageTexels(materialMap);
+        SanitizeMaterialMapForActiveMaterialSet(project, materialMap);
 
         project.Rd3d.MaterialMap = materialMap;
         project.Rd3d.MaterialMapWidth = materialMap.Width;
@@ -345,33 +362,50 @@ public sealed class IslandProjectEditor
 
     private static int RecomputeUsedMaterialBitsFromMaterialMap(IslandProject project, double minRawX, double maxRawX, double minRawZ, double maxRawZ, int gridWidth, int gridHeight, int originalBits)
     {
-        var materialMap = project.Rd3d.MaterialMap;
-        var minX = Math.Clamp((int)Math.Floor(Math.Min(minRawX, maxRawX) / Math.Max(1.0, gridWidth) * materialMap.Width) - 1, 0, materialMap.Width - 1);
-        var maxX = Math.Clamp((int)Math.Ceiling(Math.Max(minRawX, maxRawX) / Math.Max(1.0, gridWidth) * materialMap.Width) + 1, 0, materialMap.Width - 1);
-        var minY = Math.Clamp((int)Math.Floor(Math.Min(minRawZ, maxRawZ) / Math.Max(1.0, gridHeight) * materialMap.Height) - 1, 0, materialMap.Height - 1);
-        var maxY = Math.Clamp((int)Math.Ceiling(Math.Max(minRawZ, maxRawZ) / Math.Max(1.0, gridHeight) * materialMap.Height) + 1, 0, materialMap.Height - 1);
-
-        uint mask = unchecked((uint)originalBits);
-        for (var y = minY; y <= maxY; y++)
+        var knownMaterialIds = project.MaterialSet?.Materials.Select(material => material.Id).ToHashSet();
+        uint allowedMask = 0;
+        if (knownMaterialIds is { Count: > 0 })
         {
-            for (var x = minX; x <= maxX; x++)
+            foreach (var id in knownMaterialIds.Where(id => id is >= 0 and < 32))
             {
-                var cell = materialMap.GetCell(x, y);
-                for (var slot = 0; slot < TerrainMaterialPackEncoding.SlotCount && slot < cell.MaterialIds.Length && slot < cell.AlphaWeights.Length; slot++)
-                {
-                    var alpha = TerrainMaterialPackEncoding.ClampSlot(cell.AlphaWeights[slot]);
-                    if (alpha <= 0)
-                    {
-                        continue;
-                    }
+                allowedMask |= 1u << id;
+            }
+        }
 
-                    var id = TerrainMaterialPackEncoding.ClampSlot(cell.MaterialIds[slot]);
-                    mask |= 1u << id;
+        // v46.63 : les pages vanilla prouvent que ce masque est local et volontairement
+        // conservateur (des centaines de valeurs différentes sur un même LOD). Le remplacer
+        // par l'union globale faisait perdre l'organisation/palette locale attendue par le
+        // shader et produisait de grandes plaques grises. On conserve donc le masque source
+        // déjà transposé vers le MaterialSet courant et on lui ajoute seulement les matériaux
+        // réellement visibles dans une marge assez large pour le filtrage et les jupes.
+        var materialMap = project.Rd3d.MaterialMap;
+        var padding = 16;
+        var minX = Math.Clamp((int)Math.Floor(minRawX / Math.Max(1.0, gridWidth) * materialMap.Width) - padding, 0, materialMap.Width - 1);
+        var maxX = Math.Clamp((int)Math.Ceiling(maxRawX / Math.Max(1.0, gridWidth) * materialMap.Width) + padding, 0, materialMap.Width - 1);
+        var minY = Math.Clamp((int)Math.Floor(minRawZ / Math.Max(1.0, gridHeight) * materialMap.Height) - padding, 0, materialMap.Height - 1);
+        var maxY = Math.Clamp((int)Math.Ceiling(maxRawZ / Math.Max(1.0, gridHeight) * materialMap.Height) + padding, 0, materialMap.Height - 1);
+        uint localMask = 0;
+        for (var y = minY; y <= maxY; y++)
+        for (var x = minX; x <= maxX; x++)
+        {
+            var cell = materialMap.GetCell(x, y);
+            for (var slot = 0; slot < TerrainMaterialPackEncoding.SlotCount &&
+                               slot < cell.MaterialIds.Length && slot < cell.AlphaWeights.Length; slot++)
+            {
+                if (TerrainMaterialPackEncoding.ClampSlot(cell.AlphaWeights[slot]) > 0)
+                {
+                    localMask |= 1u << TerrainMaterialPackEncoding.ClampSlot(cell.MaterialIds[slot]);
                 }
             }
         }
 
-        return unchecked((int)mask);
+        var preserved = unchecked((uint)originalBits);
+        var combined = preserved | localMask;
+        if (allowedMask != 0)
+        {
+            combined &= allowedMask;
+        }
+        return combined != 0 ? unchecked((int)combined) : originalBits;
     }
 
 
@@ -392,11 +426,39 @@ public sealed class IslandProjectEditor
         project.RawContent.MaterialSetText = text;
         project.MaterialSetFilePath = string.IsNullOrWhiteSpace(sourcePath) ? fileName : sourcePath;
         project.EffectiveMaterialSetName = fileName;
+        var legacyMaterialSet = ReadEmbeddedMaterialSet("terra_01.xml");
+        var materialIdTransition = BuildMaterialIdTransitionMap(previousMaterialSet, project.MaterialSet, legacyMaterialSet);
+        RemapMeshUsedMaterialBitsForMaterialSetTransition(project, materialIdTransition);
+        RemapMaterialMapForMaterialSetTransition(
+            project.Rd3d.MaterialMap,
+            previousMaterialSet,
+            project.MaterialSet,
+            legacyMaterialSet);
         var environmentReport = _materialSetEnvironmentSynchronizer.Synchronize(project, previousMaterialSet, project.MaterialSet);
+        project.RawContent.GameDataText = SynchronizeSessionSettings(
+            project.RawContent.GameDataText ?? string.Empty,
+            environmentReport.TargetBiome);
+        project.RawContent.GameDataText = GeneratedRiverService.SynchronizeRiverObjects(
+            project.RawContent.GameDataText ?? string.Empty,
+            GeneratedRiverService.UsesIrrigation(project));
+        project.GameData = _gameDataReader.Read(project.RawContent.GameDataText);
         if (environmentReport.HasGroundObjectChanges)
         {
             RegenerateGroundObjectPages(project, environmentReport.AffectedMeshPages, environmentReport.ToString());
         }
+
+        // Sérialise les masques transposés après les éventuelles écritures GroundObjects,
+        // puis ajoute les matériaux réellement présents sans effacer la couverture vanilla.
+        ResynchronizeMeshUsedMaterialBitsFromMaterialMap(project);
+
+        _regenerator.RegenerateGameDataText(project);
+        // La régénération conservatrice peut devoir reconstruire un document incomplet.
+        // Réappliquer les marqueurs de session en dernier garantit qu'ils ne retombent
+        // jamais sur Moderate après une conversion de biome.
+        project.RawContent.GameDataText = SynchronizeSessionSettings(
+            project.RawContent.GameDataText ?? string.Empty,
+            environmentReport.TargetBiome);
+        MarkDirty(project, "GameData", "Rivers", "RiverRendering", "EnvironmentAssets");
 
         if (updateRd3dReference)
         {
@@ -430,6 +492,278 @@ public sealed class IslandProjectEditor
 
         project.ValidationReport = _validator.Validate(project);
         return environmentReport;
+    }
+
+    private void SanitizeMaterialMapForActiveMaterialSet(IslandProject project, TerrainMaterialMap map)
+    {
+        if (project.MaterialSet is null || project.MaterialSet.Materials.Count == 0 ||
+            map.PackedMaterialIds.Length != map.ExpectedPackedMaterialIdCount ||
+            map.PackedMaterialAlphas.Length != map.ExpectedPackedAlphaCount)
+        {
+            return;
+        }
+
+        RemapMaterialMapForMaterialSetTransition(map, null, project.MaterialSet, ReadEmbeddedMaterialSet("terra_01.xml"));
+    }
+
+    private MaterialSetDefinition? ReadEmbeddedMaterialSet(string fileName)
+        => _embeddedMaterialSetLibrary.TryRead(fileName, out var text)
+            ? _materialSetReader.Read(fileName, text)
+            : null;
+
+    private static void RemapMaterialMapForMaterialSetTransition(
+        TerrainMaterialMap map,
+        MaterialSetDefinition? previous,
+        MaterialSetDefinition selected,
+        MaterialSetDefinition? legacyFallback = null)
+    {
+        if (map.Width <= 0 || map.Height <= 0 || map.MaterialIdBlockSize <= 0 ||
+            map.PackedMaterialIds.Length != map.ExpectedPackedMaterialIdCount ||
+            map.PackedMaterialAlphas.Length != map.ExpectedPackedAlphaCount ||
+            selected.Materials.Count == 0)
+        {
+            return;
+        }
+
+        var targetMaterials = selected.Materials
+            .Where(material => material.Id is >= 0 and < 32)
+            .GroupBy(material => material.Id)
+            .Select(group => group.First())
+            .ToArray();
+        if (targetMaterials.Length == 0) return;
+
+        var targetById = targetMaterials.ToDictionary(material => material.Id);
+        var previousById = previous?.Materials
+            .Where(material => material.Id is >= 0 and < 32)
+            .GroupBy(material => material.Id)
+            .ToDictionary(group => group.Key, group => group.First())
+            ?? new Dictionary<int, MaterialDefinition>();
+        var legacyById = legacyFallback?.Materials
+            .Where(material => material.Id is >= 0 and < 32)
+            .GroupBy(material => material.Id)
+            .ToDictionary(group => group.Key, group => group.First())
+            ?? new Dictionary<int, MaterialDefinition>();
+        var fallbackId = targetMaterials
+            .Where(material => material.Type == "0")
+            .Select(material => material.Id)
+            .DefaultIfEmpty(targetMaterials[0].Id)
+            .First();
+
+        int MapId(int sourceId)
+        {
+            if (previousById.TryGetValue(sourceId, out var sourceMaterial) ||
+                (!targetById.ContainsKey(sourceId) && legacyById.TryGetValue(sourceId, out sourceMaterial)))
+            {
+                var sourceCategory = MaterialCategory(sourceMaterial.FileName);
+                var candidates = targetMaterials
+                    .Where(candidate => candidate.Type == sourceMaterial.Type || string.IsNullOrWhiteSpace(sourceMaterial.Type))
+                    .ToArray();
+                if (candidates.Length == 0) candidates = targetMaterials;
+                return candidates
+                    .OrderByDescending(candidate => MaterialCategory(candidate.FileName) == sourceCategory ? 1000 : 0)
+                    .ThenByDescending(candidate => MaterialTokenScore(sourceMaterial.FileName, candidate.FileName))
+                    .ThenBy(candidate => Math.Abs(candidate.Id - sourceId))
+                    .ThenBy(candidate => candidate.Id)
+                    .First().Id;
+            }
+
+            return targetById.ContainsKey(sourceId) ? sourceId : fallbackId;
+        }
+
+        for (var blockY = 0; blockY < map.BlockHeight; blockY++)
+        {
+            for (var blockX = 0; blockX < map.BlockWidth; blockX++)
+            {
+                var oldIds = map.GetMaterialIdBlock(blockX, blockY);
+                var mappedIds = oldIds.Select(MapId).ToArray();
+                var unique = mappedIds.Distinct().ToList();
+                foreach (var candidate in targetMaterials.Select(material => material.Id))
+                {
+                    if (unique.Count >= TerrainMaterialPackEncoding.SlotCount) break;
+                    if (!unique.Contains(candidate)) unique.Add(candidate);
+                }
+                while (unique.Count < TerrainMaterialPackEncoding.SlotCount) unique.Add(fallbackId);
+                var newIds = unique.Take(TerrainMaterialPackEncoding.SlotCount).ToArray();
+
+                var startX = blockX * map.MaterialIdBlockSize;
+                var startY = blockY * map.MaterialIdBlockSize;
+                var endX = Math.Min(map.Width, startX + map.MaterialIdBlockSize);
+                var endY = Math.Min(map.Height, startY + map.MaterialIdBlockSize);
+                var remappedAlphas = new Dictionary<(int X, int Y), int[]>();
+                for (var y = startY; y < endY; y++)
+                {
+                    for (var x = startX; x < endX; x++)
+                    {
+                        var oldAlphas = map.GetCellAlphaWeights(x, y);
+                        var next = new int[TerrainMaterialPackEncoding.SlotCount];
+                        for (var slot = 0; slot < TerrainMaterialPackEncoding.SlotCount; slot++)
+                        {
+                            var newSlot = Array.IndexOf(newIds, mappedIds[slot]);
+                            if (newSlot >= 0)
+                                next[newSlot] = Math.Min(TerrainMaterialPackEncoding.MaxPackedSlotValue, next[newSlot] + oldAlphas[slot]);
+                        }
+                        if (!next.Any(value => value > 0)) next[0] = TerrainMaterialPackEncoding.MaxPackedSlotValue;
+                        remappedAlphas[(x, y)] = next;
+                    }
+                }
+
+                map.SetMaterialIdBlock(blockX, blockY, newIds);
+                foreach (var pair in remappedAlphas) map.SetCellAlphaWeights(pair.Key.X, pair.Key.Y, pair.Value);
+            }
+        }
+    }
+
+    private static int[] BuildMaterialIdTransitionMap(
+        MaterialSetDefinition? previous,
+        MaterialSetDefinition selected,
+        MaterialSetDefinition? legacyFallback)
+    {
+        var targetMaterials = selected.Materials
+            .Where(material => material.Id is >= 0 and < 32)
+            .GroupBy(material => material.Id)
+            .Select(group => group.First())
+            .ToArray();
+        var result = Enumerable.Range(0, 32).ToArray();
+        if (targetMaterials.Length == 0) return result;
+
+        var targetById = targetMaterials.ToDictionary(material => material.Id);
+        var previousById = previous?.Materials
+            .Where(material => material.Id is >= 0 and < 32)
+            .GroupBy(material => material.Id)
+            .ToDictionary(group => group.Key, group => group.First())
+            ?? new Dictionary<int, MaterialDefinition>();
+        var legacyById = legacyFallback?.Materials
+            .Where(material => material.Id is >= 0 and < 32)
+            .GroupBy(material => material.Id)
+            .ToDictionary(group => group.Key, group => group.First())
+            ?? new Dictionary<int, MaterialDefinition>();
+        var fallbackId = targetMaterials.Where(material => material.Type == "0")
+            .Select(material => material.Id).DefaultIfEmpty(targetMaterials[0].Id).First();
+
+        for (var sourceId = 0; sourceId < result.Length; sourceId++)
+        {
+            if (previousById.TryGetValue(sourceId, out var sourceMaterial) ||
+                (!targetById.ContainsKey(sourceId) && legacyById.TryGetValue(sourceId, out sourceMaterial)))
+            {
+                var sourceCategory = MaterialCategory(sourceMaterial.FileName);
+                var candidates = targetMaterials
+                    .Where(candidate => candidate.Type == sourceMaterial.Type || string.IsNullOrWhiteSpace(sourceMaterial.Type))
+                    .ToArray();
+                if (candidates.Length == 0) candidates = targetMaterials;
+                result[sourceId] = candidates
+                    .OrderByDescending(candidate => MaterialCategory(candidate.FileName) == sourceCategory ? 1000 : 0)
+                    .ThenByDescending(candidate => MaterialTokenScore(sourceMaterial.FileName, candidate.FileName))
+                    .ThenBy(candidate => Math.Abs(candidate.Id - sourceId))
+                    .ThenBy(candidate => candidate.Id)
+                    .First().Id;
+            }
+            else
+            {
+                result[sourceId] = targetById.ContainsKey(sourceId) ? sourceId : fallbackId;
+            }
+        }
+        return result;
+    }
+
+    private void RemapMeshUsedMaterialBitsForMaterialSetTransition(IslandProject project, IReadOnlyList<int> transition)
+    {
+        project.LocalRegeneration ??= new TerrainLocalRegenerationState();
+        var existingWrites = project.LocalRegeneration.GeneratedMeshPageWrites
+            .Where(write => write.HasContent)
+            .GroupBy(write => write.TargetPath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var pair in project.MeshPages)
+        {
+            if (pair.Key.Lod > 8) continue;
+            var page = pair.Value;
+            var pageChanged = false;
+            foreach (var cluster in page.Clusters)
+            {
+                var source = unchecked((uint)cluster.UsedMaterialBits);
+                uint mapped = 0;
+                for (var sourceId = 0; sourceId < 32; sourceId++)
+                {
+                    if ((source & (1u << sourceId)) == 0) continue;
+                    var targetId = sourceId < transition.Count ? transition[sourceId] : sourceId;
+                    if (targetId is >= 0 and < 32) mapped |= 1u << targetId;
+                }
+                if (mapped == 0 || mapped == source) continue;
+                cluster.UsedMaterialBits = unchecked((int)mapped);
+                pageChanged = true;
+            }
+
+            if (!pageChanged || string.IsNullOrWhiteSpace(page.OriginalRelativePath)) continue;
+            var targetPath = page.OriginalRelativePath.Replace('\\', '/');
+            existingWrites[targetPath] = new RegeneratedMeshPageWrite
+            {
+                Key = pair.Key,
+                TargetPath = targetPath,
+                XmlText = _meshPageXmlWriter.WriteFullPageFromModel(page),
+                Summary = "v46.63 MaterialSet : UsedMaterialBits locaux transposés ; géométrie/indices inchangés"
+            };
+        }
+
+        project.LocalRegeneration.GeneratedMeshPageWrites = existingWrites.Values
+            .OrderBy(write => write.Key.Lod).ThenBy(write => write.Key.Y).ThenBy(write => write.Key.X).ToList();
+    }
+
+    private static string MaterialCategory(string? path)
+    {
+        var value = (path ?? string.Empty).ToLowerInvariant();
+        foreach (var category in new[] { "beach", "mountain", "mud", "grass", "forest", "underwater", "sand", "stone", "rock", "gravel", "field" })
+            if (value.Contains(category, StringComparison.Ordinal)) return category;
+        return "other";
+    }
+
+    private static int MaterialTokenScore(string? source, string? target)
+    {
+        var sourceTokens = Regex.Split((source ?? string.Empty).ToLowerInvariant(), @"[^a-z0-9]+")
+            .Where(token => token.Length > 2).ToHashSet();
+        return Regex.Split((target ?? string.Empty).ToLowerInvariant(), @"[^a-z0-9]+")
+            .Count(token => sourceTokens.Contains(token));
+    }
+
+    private static string SynchronizeSessionSettings(string gameDataText, string biome)
+    {
+        if (string.IsNullOrWhiteSpace(gameDataText)) return gameDataText;
+        XDocument document;
+        try { document = XDocument.Parse(gameDataText, LoadOptions.PreserveWhitespace); }
+        catch (System.Xml.XmlException) { return gameDataText; }
+
+        var settings = document.Descendants("SessionSettings").FirstOrDefault();
+        var values = biome switch
+        {
+            "Colony02" => (Ambient: "Colony_02", Vegetation: "Colony02"),
+            "Arctic" => (Ambient: "Arctic_01", Vegetation: "Arctic"),
+            "Jungle" => (Ambient: "Colony_01", Vegetation: "Colony01"),
+            "Moderate" => (Ambient: "Moderate_01", Vegetation: "Moderate"),
+            _ => default
+        };
+        if (string.IsNullOrWhiteSpace(values.Ambient)) return gameDataText;
+
+        if (settings is null)
+        {
+            var manager = document.Descendants("GameSessionManager").FirstOrDefault();
+            if (manager is null)
+            {
+                manager = new XElement("GameSessionManager");
+                document.Root?.AddFirst(manager);
+            }
+            settings = new XElement("SessionSettings");
+            manager.AddFirst(settings);
+        }
+
+        SetOrAdd(settings, "GlobalAmbientName", values.Ambient);
+        SetOrAdd(settings, "VegetationPropSetName", values.Vegetation);
+        return document.ToString(SaveOptions.DisableFormatting);
+
+        static void SetOrAdd(XElement parent, string name, string value)
+        {
+            var element = parent.Element(name);
+            if (element is null) parent.Add(new XElement(name, value));
+            else element.Value = value;
+        }
     }
 
     private void RegenerateGroundObjectPages(

@@ -417,6 +417,7 @@ public partial class Terrain3DWindow : Window
                 ApplyBeachFromGpu,
                 ApplyFootprintFromGpu,
                 ApplyTreesFromGpu,
+                ApplyRiverFromGpu,
                 ValidateEntireTerrainFromGpu,
                 ApplyObjTerrainFromGpu)
             {
@@ -1850,37 +1851,87 @@ public partial class Terrain3DWindow : Window
 
     private string ValidateEntireTerrainFromGpu(int selectedLod, IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)> changedRegions)
     {
+        if (changedRegions.Count == 0 && !_activeMapMaskDirty && !IsIslandExpansionModeEnabled()
+            && !_preserveDirectRiverMeshWritesOnNextValidation)
+        {
+            // HeightEditState is cumulative export history, not uncommitted GPU edits.
+            // Revalidating must not rebuild already-committed meshes from stale coarse samples.
+            _editor.RegenerateAllTexts(_project);
+            return "Aucune nouvelle modification du relief : maillages et pages de hauteur validés conservés.";
+        }
         LodComboBox.SelectedItem = LodComboBox.Items.OfType<ComboBoxItem>()
             .FirstOrDefault(item => item.Tag is int lod && lod == selectedLod);
         var mergeMultipleLods = changedRegions.Select(r => r.Lod).Distinct().Count() > 1;
+        TerrainLodSeamStitchReport? seamStitch = null;
+        if (changedRegions.Count > 0)
+        {
+            var stitcher = new TerrainLodSeamStitcher();
+            seamStitch = stitcher.StitchEditedRegion(
+                _project,
+                changedRegions.Min(region => region.MinX),
+                changedRegions.Min(region => region.MinZ),
+                changedRegions.Max(region => region.MaxX),
+                changedRegions.Max(region => region.MaxZ));
+        }
         if (mergeMultipleLods && !IsIslandExpansionModeEnabled() && !_activeMapMaskDirty)
         {
-            // Start from the detailed surface, then merge pending regions from each
-            // edited LOD. Do not regenerate everything from the last/coarsest LOD.
-            _editedCoarseSamples = _localRegenerator.BuildMeshBackedCoarseHeightMap(
-                _project, BuildWorkingMap(), changedRegions.Min(r => r.Lod)).Samples.ToArray();
+            // Keep the imported coarse map outside the edited footprint. Rebuilding a
+            // full coarse map from a mesh changed untouched mountains and was the hidden
+            // source of the very large rectangular collateral edits.
+            _editedCoarseSamples ??= BuildWorkingMap().Samples.ToArray();
         }
         // Le bouton DX11 validait la coarse d'avant le pinceau, puis rechargeait
         // ces vieilles hauteurs dans les LOD. Transférer les changements avant tout.
+        var authoritativeLod = mergeMultipleLods ? changedRegions.Min(r => r.Lod) : selectedLod;
         foreach (var region in changedRegions)
         {
-            UpdateCoarseFromEditedMeshRegion(region.Lod, region.MinX, region.MinZ, region.MaxX, region.MaxZ);
+            if (!mergeMultipleLods || region.Lod == authoritativeLod)
+            {
+                UpdateCoarseFromEditedMeshRegion(region.Lod, region.MinX, region.MinZ, region.MaxX, region.MaxZ);
+            }
             MergeDirtyRegionFromWorldBounds(region.MinX, region.MinZ, region.MaxX, region.MaxZ);
         }
-        return ValidateEntireTerrainCore(changedRegions.Count == 1 ? changedRegions[0].Lod : selectedLod, mergeMultipleLods);
+        // GPU brushes now write every LOD directly. Snapshot those exact pages before
+        // validation so no rectangular heightmap resampling can replace their topology.
+        var preserveDirectGpuMeshWrites = changedRegions.Count > 0 &&
+            CommitDirectTerrainMeshWrites("Édition GPU : mêmes coups de pinceau appliqués à tous les LOD, raccords et jupes structurelles conservés.");
+        var preserveDirectMeshWrites = preserveDirectGpuMeshWrites ||
+            (_preserveDirectRiverMeshWritesOnNextValidation && changedRegions.Count > 0);
+        try
+        {
+            var summary = ValidateEntireTerrainCore(
+                changedRegions.Count == 1 ? changedRegions[0].Lod : selectedLod,
+                mergeMultipleLods || preserveDirectMeshWrites,
+                forceGeometryRegeneration: changedRegions.Count > 0,
+                preserveDirectMeshWrites: preserveDirectMeshWrites);
+            return seamStitch is null ? summary : summary + "\n" + seamStitch.ToDisplayText();
+        }
+        finally
+        {
+            _preserveDirectRiverMeshWritesOnNextValidation = false;
+        }
     }
 
-    private string ValidateEntireTerrainCore(int? sourceLod = null, bool useCoarseHeightMap = false)
+    private string ValidateEntireTerrainCore(
+        int? sourceLod = null,
+        bool useCoarseHeightMap = false,
+        bool forceGeometryRegeneration = false,
+        bool preserveDirectMeshWrites = false)
     {
             // v42.3 : capturer le mode extension AVANT toute régénération. L'extension
             // d'emprise ne doit pas être traitée comme une reconstruction globale de hauteur.
             var repairedCoastAnchors = RepairGeneratedPlayableCoastLine();
-            var hasInvalidGeneratedSkirts = _project.MeshPages.Values.SelectMany(p => p.Clusters)
-                .SelectMany(c => c.Vertices).Any(v => TerrainVertexAttributeCodec.Decode(v).IsSkirtVertex);
-            var usesIslandExpansion = IsIslandExpansionModeEnabled() || _activeMapMaskDirty || repairedCoastAnchors > 0 || hasInvalidGeneratedSkirts;
+            // Une jupe de couture est normale dans les meshes vanilla. Les anciennes
+            // versions considéraient toute jupe comme la preuve d'une extension et
+            // reconstruisaient alors des clusters de montagne parfaitement valides.
+            // Cela créait précisément les grandes faces blanches et les ouvertures de
+            // LOD visibles en jeu. Le mode extension dépend uniquement d'une vraie
+            // modification d'emprise ; les attributs shader vanilla restent intacts.
+            var usesIslandExpansion = IsIslandExpansionModeEnabled() || _activeMapMaskDirty;
+            var hadGeometryEdits = forceGeometryRegeneration || usesIslandExpansion ||
+                                   _project.HeightEditState.HasGeometryEdits;
 
             ApplyActiveMapMaskToProject(regenerateText: true);
-            var oceanRingSamples = EnforceOuterOceanSafetyRing();
             var workingMap = BuildWorkingMap();
             if (workingMap.Width <= 0 || workingMap.Height <= 0)
             {
@@ -1888,9 +1939,47 @@ public partial class Terrain3DWindow : Window
             }
 
             var fullBounds = new RectI(0, 0, Math.Max(0, workingMap.Width - 1), Math.Max(0, workingMap.Height - 1));
-            var dirtyBounds = oceanRingSamples > 0 ? fullBounds : GetDirtySampleBoundsFromExactMask();
+            var preliminaryDirtyBounds = GetDirtySampleBoundsFromExactMask();
+            var dirtyTouchesOuterEdge = preliminaryDirtyBounds is { } preliminary &&
+                (preliminary.Left <= 1 || preliminary.Top <= 1 ||
+                 preliminary.Right >= workingMap.Width - 2 || preliminary.Bottom >= workingMap.Height - 2);
+            // v46.64 : une rivière intérieure ne doit jamais déclencher une réécriture
+            // de l'anneau océanique complet. Ce seul appel transformait une petite zone
+            // sale en fullBounds et rééchantillonnait ensuite toutes les montagnes/LOD.
+            var protectOuterRing = usesIslandExpansion || dirtyTouchesOuterEdge;
+            var oceanRingSamples = hadGeometryEdits && protectOuterRing ? EnforceOuterOceanSafetyRing() : 0;
+            if (oceanRingSamples > 0)
+            {
+                workingMap = BuildWorkingMap();
+            }
 
-            if (usesIslandExpansion)
+            var dirtyBounds = oceanRingSamples > 0
+                ? fullBounds
+                : preliminaryDirtyBounds ?? (hadGeometryEdits ? fullBounds : null);
+            // v46.62 : changer le MaterialSet, repeindre les matériaux ou appliquer
+            // des arbres ne constitue pas une édition de hauteur. Jusqu'en 46.61,
+            // "Valider" rééchantillonnait malgré tout chaque Raw1 de chaque LOD ; cela
+            // détruisait les raccords subtils du mesh vanilla et créait les longues
+            // ouvertures visibles en montagne. Dans ce cas, le maillage doit rester
+            // strictement identique octet pour octet (hors UsedMaterialBits).
+            var regenerateGeometry = hadGeometryEdits || oceanRingSamples > 0;
+            // v46.66 : les outils GPU ont déjà modifié les sommets exacts de chaque
+            // LOD et CommitDirectTerrainMeshWrites en a conservé les pages. Ne pas les
+            // remplacer par un rééchantillonnage rectangulaire de la coarse heightmap.
+            // Les normalmaps/tintmaps et les dépendances restent, elles, régénérées.
+            var regenerateMeshGeometry = regenerateGeometry && !preserveDirectMeshWrites;
+
+            if (!regenerateGeometry)
+            {
+                _lastTerrainDependencySyncReport = new TerrainDependencySyncReport
+                {
+                    HeightMapWidth = workingMap.Width,
+                    HeightMapHeight = workingMap.Height,
+                    DirtySampleBounds = null
+                };
+                _lastTerrainDependencySyncReport.Notes.Add("v46.63 : aucune édition géométrique ; hauteurs, indices, raccords et jupes LOD source conservés sans rééchantillonnage.");
+            }
+            else if (usesIslandExpansion)
             {
                 // v42.3 : en mode extension, conserver la heightmap GameData existante comme
                 // source de vérité. Les versions 42.1/42.2 reconstruisaient la GameData depuis
@@ -1909,21 +1998,35 @@ public partial class Terrain3DWindow : Window
                 _lastTerrainDependencySyncReport = _editor.ReplaceCoarseHeightMapAndSyncTerrainDependencies(_project, workingMap, dirtyBounds ?? fullBounds);
             }
 
-            // v26.5 : ne plus faire un simple snapshot des meshes lors de la validation globale.
-            // Le snapshot conservait les anciennes hauteurs des LOD/pages qui n'avaient pas réellement
-            // été édités, ce qui pouvait laisser la montagne réapparaître selon la distance caméra.
-            // On force maintenant une régénération de toutes les pages mesh éditables depuis le LOD
-            // courant/workingMap, puis les height/normal pages sont reconstruites sur cette même source.
             var selectedKey = ResolveAnchorPageKeyForCurrentLod();
             var selectedLod = GetSelectedLod();
-            var state = _localRegenerator.RegenerateAroundBounds(_project, workingMap, "Mesh", selectedKey, fullBounds, fullBounds, 0);
-            state.AnchorMeshLod = sourceLod ?? selectedLod;
-            state.UseCoarseHeightMap = useCoarseHeightMap || usesIslandExpansion;
-            var meshWrites = usesIslandExpansion
-                ? _localRegenerator.GenerateExpandedActiveMeshPageWrites(_project, workingMap, state, BuildMeshRegenerationOptions())
-                : _localRegenerator.GenerateMeshPageWrites(_project, workingMap, state, true, 99, BuildMeshRegenerationOptions());
+            var effectiveDirtyBounds = dirtyBounds ?? fullBounds;
+            var expandedDirtyBounds = usesIslandExpansion
+                ? fullBounds
+                : new RectI(
+                    Math.Max(0, effectiveDirtyBounds.Left - 2),
+                    Math.Max(0, effectiveDirtyBounds.Top - 2),
+                    Math.Min(workingMap.Width - 1, effectiveDirtyBounds.Right + 2),
+                    Math.Min(workingMap.Height - 1, effectiveDirtyBounds.Bottom + 2));
+            var state = _localRegenerator.RegenerateAroundBounds(
+                _project,
+                workingMap,
+                "Mesh",
+                selectedKey,
+                effectiveDirtyBounds,
+                expandedDirtyBounds,
+                0);
+            state.AnchorMeshLod = preserveDirectMeshWrites
+                ? _project.MeshPages.Values.Where(MeshPageClassifier.CanEditGeometry).Min(p => p.Key.Lod)
+                : sourceLod ?? selectedLod;
+            state.UseCoarseHeightMap = (useCoarseHeightMap && !preserveDirectMeshWrites) || usesIslandExpansion;
+            IReadOnlyList<RegeneratedMeshPageWrite> editableMeshWrites = !regenerateMeshGeometry
+                ? Array.Empty<RegeneratedMeshPageWrite>()
+                : usesIslandExpansion
+                    ? _localRegenerator.GenerateExpandedActiveMeshPageWrites(_project, workingMap, state, BuildMeshRegenerationOptions())
+                    : _localRegenerator.GenerateMeshPageWrites(_project, workingMap, state, true, 99, BuildMeshRegenerationOptions());
 
-            ApplyGeneratedMeshWrites(meshWrites);
+            ApplyGeneratedMeshWrites(editableMeshWrites);
 
             // v42.3 : ne jamais rééchantillonner fullBounds depuis les mesh extrapolés lorsqu'on
             // agrandit le masque. Les LOD0/LOD1 ne contiennent pas de géométrie utile, et les LOD2+
@@ -1931,25 +2034,42 @@ public partial class Terrain3DWindow : Window
             // la heightmap GameData vanilla.
             var authoritativeMap = workingMap;
             var restoredOceanRingSamples = 0;
-            if (!usesIslandExpansion && !useCoarseHeightMap)
+            if (regenerateGeometry && !usesIslandExpansion && (!useCoarseHeightMap || preserveDirectMeshWrites))
             {
-                var meshBackedMap = _localRegenerator.BuildMeshBackedCoarseHeightMap(_project, workingMap, ResolveMeshBackedSourceLod(state, selectedLod), fullBounds);
+                var meshBackedMap = _localRegenerator.BuildMeshBackedCoarseHeightMap(
+                    _project,
+                    workingMap,
+                    ResolveMeshBackedSourceLod(state, selectedLod),
+                    expandedDirtyBounds);
                 _editedCoarseSamples = meshBackedMap.Samples.ToArray();
-                restoredOceanRingSamples = EnforceOuterOceanSafetyRing();
+                restoredOceanRingSamples = protectOuterRing ? EnforceOuterOceanSafetyRing() : 0;
                 authoritativeMap = restoredOceanRingSamples > 0 ? BuildWorkingMap() : meshBackedMap;
-                _lastTerrainDependencySyncReport = _editor.ReplaceCoarseHeightMapAndSyncTerrainDependencies(_project, authoritativeMap, fullBounds);
+                _lastTerrainDependencySyncReport = _editor.ReplaceCoarseHeightMapAndSyncTerrainDependencies(
+                    _project,
+                    authoritativeMap,
+                    restoredOceanRingSamples > 0 ? fullBounds : expandedDirtyBounds);
             }
 
-            var normalWrites = _localRegenerator.GenerateAllInterpretedNormalMapWrites(_project, authoritativeMap, state);
-            var oceanMaterialSummary = PaintOuterOceanSafetyRingMaterials();
+            IReadOnlyList<RegeneratedNormalMapWrite> normalWrites = regenerateGeometry
+                ? usesIslandExpansion || restoredOceanRingSamples > 0
+                    ? _localRegenerator.GenerateAllInterpretedNormalMapWrites(_project, authoritativeMap, state)
+                    : _localRegenerator.GenerateInterpretedNormalMapWrites(_project, authoritativeMap, state)
+                : Array.Empty<RegeneratedNormalMapWrite>();
+            var oceanMaterialSummary = regenerateGeometry && protectOuterRing
+                ? PaintOuterOceanSafetyRingMaterials()
+                : "Anneau océanique matériaux conservé (édition intérieure locale).";
             var usedMaterialPages = _editor.ResynchronizeMeshUsedMaterialBitsFromMaterialMap(_project);
             var materialSyncSummary = $"MaterialMap intérieure conservée ; {oceanMaterialSummary} UsedMaterialBits resynchronisés sur {usedMaterialPages} page(s).";
             // v42.1 : "Valider tout le terrain" force maintenant une régénération complète
             // des tintmaps, en DDS DXT1 vanilla-like, et ajoute uniquement les pages manquantes
             // qui recoupent ActiveMapGrid.bits. Si la MaterialMap a été recalée depuis la hauteur,
             // les tintmaps sont générées après cette mise à jour.
-            var tintWrites = _localRegenerator.GenerateAllTintMapWritesVanillaLike(_project, authoritativeMap, state);
-            CommitTerrainValidationToProject(state, meshWrites, tintWrites);
+            IReadOnlyList<RegeneratedTintMapWrite> tintWrites = regenerateGeometry
+                ? usesIslandExpansion || restoredOceanRingSamples > 0
+                    ? _localRegenerator.GenerateAllTintMapWritesVanillaLike(_project, authoritativeMap, state)
+                    : _localRegenerator.GenerateTintMapWrites(_project, authoritativeMap, state)
+                : Array.Empty<RegeneratedTintMapWrite>();
+            CommitTerrainValidationToProject(state, editableMeshWrites, tintWrites);
             UpdateNormalPreview();
             PopulatePageRows(GetSelectedPageRow()?.Page.Key);
             RequestSceneRebuild(immediate: true);
@@ -1961,7 +2081,12 @@ public partial class Terrain3DWindow : Window
             var coastInfo = repairedCoastAnchors > 0
                 ? $"Côte du comptoir réparée : {repairedCoastAnchors} emplacement(s) réparti(s) sur toute la plage."
                 : "Aucune côte de comptoir générée à réparer.";
-            return $"Validation globale terrain terminée.\nMeshes régénérés sur tous les LOD éditables, {meshWrites.Count} mesh page(s), {normalWrites.Count} normalmap(s) et {tintWrites.Count} tintmap(s) régénérées complètement en format DDS DXT1 vanilla-like.\nAnneau océanique : {oceanRingSamples + restoredOceanRingSamples} hauteur(s) protégée(s). {materialSyncSummary}\n{coastInfo}\nHauteurs propagées depuis la surface éditée ; normales de surface recalculées, UV conservés. La topologie est adaptée en cas de modification d’empreinte.\nLes pages normalmap/tintmap manquantes sont ajoutées seulement quand elles recoupent ActiveMapGrid.bits ; LOD0/LOD1 restent sans géométrie et ne sont pas utilisés comme source de hauteur.\n{presetInfo}.\n\n{(_lastTerrainDependencySyncReport?.ToDisplayText() ?? string.Empty)}";
+            var geometryInfo = preserveDirectMeshWrites
+                ? $"Édition GPU multi-LOD : pages mesh directes conservées sans second rééchantillonnage rectangulaire ; {normalWrites.Count} normalmap(s) régénérées."
+                : regenerateGeometry
+                ? $"Géométrie modifiée : {editableMeshWrites.Count} mesh page(s) et {normalWrites.Count} normalmap(s) régénérées."
+                : "Aucune édition de hauteur détectée : géométrie et raccords LOD source conservés intégralement ; 0 mesh et 0 normalmap rééchantillonnés.";
+            return $"Validation globale terrain terminée.\n{geometryInfo} {tintWrites.Count} tintmap(s) régénérées complètement en format DDS DXT1 vanilla-like.\nAnneau océanique : {oceanRingSamples + restoredOceanRingSamples} hauteur(s) protégée(s). {materialSyncSummary}\n{coastInfo}\nLes pages normalmap/tintmap manquantes sont ajoutées seulement quand elles recoupent ActiveMapGrid.bits ; LOD0/LOD1 restent protégés comme pages de métadonnées.\n{presetInfo}.\n\n{(_lastTerrainDependencySyncReport?.ToDisplayText() ?? string.Empty)}";
     }
 
     private void PickRawPresetButton_Click(object sender, RoutedEventArgs e)
@@ -2040,6 +2165,31 @@ public partial class Terrain3DWindow : Window
         IReadOnlyCollection<RegeneratedMeshPageWrite> meshWrites,
         IReadOnlyCollection<RegeneratedTintMapWrite> tintWrites)
     {
+        // v46.63 : la sélection/repeinture du MaterialSet prépare ses écritures mesh
+        // avant l'ouverture de la fenêtre 3D. Une validation sans géométrie ne doit pas
+        // remplacer cet état par un état vide, sinon le ZIP garde les anciens masques.
+        var previous = _project.LocalRegeneration;
+        if (previous is not null && !ReferenceEquals(previous, state))
+        {
+            state.GeneratedMeshPageWrites = previous.GeneratedMeshPageWrites
+                .Concat(state.GeneratedMeshPageWrites)
+                .Where(write => write.HasContent)
+                .GroupBy(write => write.TargetPath, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.Last())
+                .ToList();
+            state.GeneratedNormalMapWrites = previous.GeneratedNormalMapWrites
+                .Concat(state.GeneratedNormalMapWrites)
+                .Where(write => write.HasContent)
+                .GroupBy(write => write.TargetPath, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.Last())
+                .ToList();
+            state.GeneratedTintMapWrites = previous.GeneratedTintMapWrites
+                .Concat(state.GeneratedTintMapWrites)
+                .Where(write => write.HasContent)
+                .GroupBy(write => write.TargetPath, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.Last())
+                .ToList();
+        }
         _editor.ApplyLocalRegeneration(_project, state);
         _editor.ApplyGeneratedMeshPageWrites(_project, state);
         _editor.ApplyGeneratedNormalMapWrites(_project, state);
@@ -2940,8 +3090,11 @@ public partial class Terrain3DWindow : Window
             AdaptiveVertexBudgetMultiplier = 1.15d,
             AdaptiveVertexBudgetPadding = 8,
             PreserveOriginalFootprint = true,
-            // Les UV restent intacts, les normales suivent le relief modifié.
-            RebuildSurfaceAttributes = true,
+            // Les octets Raw4..Raw7 sont des données shader/UV propres au mesh vanilla.
+            // Les recalculer globalement est la cause des plaques blanches au zoom proche.
+            // Les outils conservent donc ces valeurs ; seuls les nouveaux vertices d'une
+            // extension reçoivent des attributs reconstruits dans le générateur dédié.
+            RebuildSurfaceAttributes = false,
             RawAttributePreset = null,
         };
     }
@@ -3080,8 +3233,10 @@ public partial class Terrain3DWindow : Window
         // extension lorsqu'elle est rouverte. Sinon la case revient visuellement
         // à false et une nouvelle plage pouvait régénérer les LOD avec le chemin
         // conservatif, faisant réapparaître l'ancienne bordure terrestre.
-        => IslandExpansionModeCheckBox?.IsChecked == true ||
-           (_activeMapMask.Length > 0 && _activeMapMask.All(static active => active));
+        // Un masque vanilla peut déjà être entièrement actif. Ce n'est pas la preuve
+        // qu'une extension a été demandée dans cette session : cette ancienne
+        // déduction faisait reconstruire une île originale sans aucune édition.
+        => IslandExpansionModeCheckBox?.IsChecked == true;
 
     private int ParseIslandExpansionCellCount()
     {

@@ -17,7 +17,7 @@ namespace Anno1800IslandTool.Pipeline.Services;
 public sealed class MeshBackedHeightSampler
 {
     private readonly Dictionary<(int X, int Z), List<SurfaceTriangle>> _triangles = new();
-    private const double TriangleCellSize = 256d;
+    private const double TriangleCellSize = 32d;
     private readonly Dictionary<(int X, int Z), List<VertexSample>> _cells;
     private readonly double _cellSize;
     private readonly double _defaultRadius;
@@ -54,15 +54,26 @@ public sealed class MeshBackedHeightSampler
             return null;
         }
 
-        var allVertices = pages
+        var sourceVertices = pages
             .SelectMany(page => page.Clusters)
             .SelectMany(cluster => cluster.Vertices)
             .ToList();
 
-        if (allVertices.Count == 0)
+        if (sourceVertices.Count == 0)
         {
             return null;
         }
+
+        // Une jupe vanilla partage X/Z avec la surface mais se trouve plus bas. Elle
+        // ne doit jamais participer à l'interpolation du relief. Le maximum par X/Z
+        // reste valable avant et après restauration des jupes aplaties.
+        var surfaceHeightByPosition = sourceVertices
+            .GroupBy(vertex => (vertex.Raw0, vertex.Raw2))
+            .ToDictionary(group => group.Key, group => group.Max(vertex => vertex.WorldHeight));
+        var allVertices = sourceVertices
+            .GroupBy(vertex => (vertex.Raw0, vertex.Raw2))
+            .Select(group => group.OrderByDescending(vertex => vertex.WorldHeight).First())
+            .ToList();
 
         var spacing = EstimateMedianSpacing(allVertices);
         var cellSize = Math.Clamp(spacing * 2.0, 16.0, 128.0);
@@ -95,7 +106,9 @@ public sealed class MeshBackedHeightSampler
                 var b = cluster.Vertices[ib];
                 var c = cluster.Vertices[ic];
                 // Les jupes sont des coutures verticales, pas une deuxième surface.
-                if (a.Attributes.IsSkirtVertex || b.Attributes.IsSkirtVertex || c.Attributes.IsSkirtVertex) continue;
+                if (IsBelowSurface(a, surfaceHeightByPosition) ||
+                    IsBelowSurface(b, surfaceHeightByPosition) ||
+                    IsBelowSurface(c, surfaceHeightByPosition)) continue;
                 var triangle = new SurfaceTriangle(a.X, a.Z, a.WorldHeight, b.X, b.Z, b.WorldHeight, c.X, c.Z, c.WorldHeight);
                 if (Math.Abs(triangle.Determinant) < 1e-9) continue;
                 var min = ToCell(Math.Min(a.X, Math.Min(b.X, c.X)), Math.Min(a.Z, Math.Min(b.Z, c.Z)), TriangleCellSize);
@@ -110,6 +123,10 @@ public sealed class MeshBackedHeightSampler
         }
         return sampler;
     }
+
+    private static bool IsBelowSurface(MeshVertex vertex, IReadOnlyDictionary<(int X, int Z), float> surfaceHeightByPosition)
+        => surfaceHeightByPosition.TryGetValue((vertex.Raw0, vertex.Raw2), out var surfaceHeight) &&
+           vertex.WorldHeight < surfaceHeight - (1f / 512f);
 
     public bool TrySample(double x, double z, out float height)
     {

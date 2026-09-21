@@ -2,7 +2,8 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering"
-        Title="Anno1800IslandTool v46.46 - peinture par topologie"
+        xmlns:hx="http://helix-toolkit.org/wpf/SharpDX"
+        Title="Anno1800IslandTool v46.69 - pages de hauteur alignées et aperçu de surface"
         Height="1000"
         Width="1780"
         WindowStartupLocation="CenterOwner">
@@ -36,7 +37,8 @@
                             Height="28"
                             Margin="0,6,0,0"
                             Click="LoadMaterialSetButton_Click">Charger materialset...</Button>
-                    <DockPanel Margin="0,6,0,0">
+                    <TextBlock Margin="0,6,0,2" Text="Jeu de matériaux (material_sets)" FontWeight="SemiBold"/>
+                    <DockPanel>
                         <Button DockPanel.Dock="Right" Width="92" Height="28" Margin="6,0,0,0"
                                 Click="UseEmbeddedMaterialSetButton_Click">Utiliser</Button>
                         <ComboBox x:Name="EmbeddedMaterialSetComboBox" Height="28" IsTextSearchEnabled="True"
@@ -54,6 +56,20 @@
                                TextWrapping="Wrap"
                                Foreground="#666"
                                Margin="0,4,0,0"/>
+
+                    <Expander Header="Rendu avec les données du jeu" IsExpanded="True" Margin="0,10,0,0">
+                        <StackPanel Margin="0,6,0,0">
+                            <TextBlock Text="Sélectionne le dossier data extrait du jeu. Les textures DDS du materialset actif seront chargées directement." TextWrapping="Wrap" Foreground="#315D31"/>
+                            <TextBox x:Name="GameDataPathTextBox" Height="27" Margin="0,6,0,0" IsReadOnly="True" TextWrapping="NoWrap"/>
+                            <UniformGrid Columns="2" Margin="0,5,0,0">
+                                <Button Height="28" Margin="0,0,3,0" Click="SelectGameDataPathButton_Click">Choisir data...</Button>
+                                <Button Height="28" Margin="3,0,0,0" Click="ClearGameDataPathButton_Click">Effacer le chemin</Button>
+                            </UniformGrid>
+                            <CheckBox x:Name="UseGameTexturesCheckBox" Content="Utiliser les textures du jeu dans la vue 3D" IsChecked="True" Margin="0,6,0,0" Checked="UseGameTexturesCheckBox_Changed" Unchecked="UseGameTexturesCheckBox_Changed"/>
+                            <CheckBox x:Name="UseIslandTintMapsCheckBox" Content="Appliquer aussi les tintmaps DDS de l’île" IsChecked="True" Margin="0,4,0,0" Checked="UseGameTexturesCheckBox_Changed" Unchecked="UseGameTexturesCheckBox_Changed"/>
+                            <TextBlock x:Name="GameDataStatusTextBlock" Text="Aucun dossier de données sélectionné : couleurs techniques utilisées." TextWrapping="Wrap" Foreground="#666" Margin="0,4,0,0"/>
+                        </StackPanel>
+                    </Expander>
 
                     <CheckBox x:Name="BeachProtectionCheckBox" Margin="0,6,0,0"
                               IsChecked="{Binding ProtectBeachAreas, Mode=TwoWay}"
@@ -331,11 +347,44 @@
 
         <Border Grid.Column="1" BorderBrush="#CCC" BorderThickness="1" Padding="8">
             <DockPanel>
+                <UniformGrid DockPanel.Dock="Top" Columns="4" Margin="0,0,0,7">
+                    <Button x:Name="Show3DViewButton" Height="30" Margin="2" Click="Show3DViewButton_Click">Vue 3D DirectX</Button>
+                    <Button x:Name="Show2DViewButton" Height="30" Margin="2" Click="Show2DViewButton_Click">Vue 2D technique</Button>
+                    <Button Height="30" Margin="2" Click="FrameMaterial3DButton_Click">Cadrer le relief</Button>
+                    <TextBlock x:Name="Material3DRendererTextBlock" Margin="8,0" VerticalAlignment="Center" Text="Direct3D 11 : initialisation..."/>
+                </UniformGrid>
                 <TextBlock x:Name="ImageHintTextBlock"
                            DockPanel.Dock="Top"
                            Text="Clique pour inspecter. Clic droit ou mode Pickup pour prélever en vue peinture. Cliquer/glisser peint quand le mode peinture est activé."
                            Margin="0,0,0,8"/>
-                <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                <Grid>
+                    <Border x:Name="Material3DHost" Background="#101217" BorderBrush="#555" BorderThickness="1">
+                        <hx:Viewport3DX x:Name="MaterialGpuViewport"
+                                       BackgroundColor="#101217"
+                                       ShowCoordinateSystem="True"
+                                       ShowViewCube="True"
+                                       EnableDpiScale="True"
+                                       EnableSwapChainRendering="False"
+                                       UseDefaultGestures="False"
+                                       FXAALevel="Low"
+                                       PreviewMouseMove="MaterialGpuViewport_PreviewMouseMove"
+                                       PreviewMouseLeftButtonDown="MaterialGpuViewport_PreviewMouseLeftButtonDown"
+                                       PreviewMouseLeftButtonUp="MaterialGpuViewport_PreviewMouseLeftButtonUp"
+                                       PreviewMouseRightButtonDown="MaterialGpuViewport_PreviewMouseRightButtonDown"
+                                       PreviewMouseWheel="MaterialGpuViewport_PreviewMouseWheel"
+                                       MouseLeave="MaterialGpuViewport_MouseLeave">
+                            <hx:Viewport3DX.InputBindings>
+                                <MouseBinding Command="hx:ViewportCommands.Rotate" Gesture="RightClick"/>
+                                <MouseBinding Command="hx:ViewportCommands.Pan" Gesture="MiddleClick"/>
+                            </hx:Viewport3DX.InputBindings>
+                            <hx:AmbientLight3D Color="#C8C8C8"/>
+                            <hx:DirectionalLight3D Color="#FFF4DE" Direction="-0.35,-0.8,-0.45"/>
+                            <hx:DirectionalLight3D Color="#AFC8F0" Direction="0.55,-0.25,0.35"/>
+                            <hx:GroupModel3D x:Name="MaterialTerrainGroup"/>
+                            <hx:LineGeometryModel3D x:Name="MaterialBrushRingModel" Color="#FFFFD400" Thickness="5" DepthBias="-150" IsHitTestVisible="False" IsRendering="False"/>
+                        </hx:Viewport3DX>
+                    </Border>
+                    <ScrollViewer x:Name="Material2DHost" Visibility="Collapsed" HorizontalScrollBarVisibility="Auto"
                               VerticalScrollBarVisibility="Auto"
                               PreviewMouseWheel="MapScrollViewer_PreviewMouseWheel">
                     <Grid x:Name="MaterialMapCanvasGrid"
@@ -362,7 +411,8 @@
                                      Fill="#22FF4040"/>
                         </rendering:DirectX11Canvas>
                     </Grid>
-                </ScrollViewer>
+                    </ScrollViewer>
+                </Grid>
             </DockPanel>
         </Border>
     </Grid>

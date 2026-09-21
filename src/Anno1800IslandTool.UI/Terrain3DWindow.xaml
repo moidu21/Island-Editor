@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering"
-        Title="Terrain 3D v46.46 — peinture par topologie"
+        Title="Terrain 3D v46.69 — pages de hauteur alignées et aperçu de surface"
         Width="1780"
         Height="1020"
         WindowStartupLocation="CenterOwner">

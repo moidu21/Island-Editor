@@ -53,6 +53,21 @@ public sealed class NormalMapPageWriter
         values.AddRange(deltaMaps);
 
         var replaced = ReplaceSequentialMapValues(originalText, values, out var replacedCount);
+        replaced = Regex.Replace(replaced, @"<Deltas>(?<body>.*?)</Deltas>", deltas =>
+        {
+            var levelIndex = 0;
+            var body = Regex.Replace(deltas.Groups["body"].Value, @"<None>.*?</None>", match =>
+            {
+                if (levelIndex >= page.DeltaLevels.Count) return match.Value;
+                var scale = page.DeltaLevels[levelIndex++].ScaleFactor;
+                if (!scale.HasValue) return match.Value;
+                var tag = $"<ScaleFactor>{scale.Value}</ScaleFactor>";
+                return Regex.IsMatch(match.Value, @"<ScaleFactor>.*?</ScaleFactor>", RegexOptions.Singleline)
+                    ? Regex.Replace(match.Value, @"<ScaleFactor>.*?</ScaleFactor>", tag, RegexOptions.Singleline)
+                    : match.Value.Replace("</None>", tag + "</None>");
+            }, RegexOptions.Singleline);
+            return "<Deltas>" + body + "</Deltas>";
+        }, RegexOptions.Singleline);
         return replacedCount == values.Count
             ? replaced
             : Write(page, downsampledMap, deltaMaps);
