@@ -55,7 +55,7 @@ public sealed class MeshPageXmlWriter
         {
             sb.AppendLine("      <None>");
             sb.AppendLine($"        <Indices>{string.Join(" ", cluster.Indices)}</Indices>");
-            sb.AppendLine($"        <Vertices>{string.Join(" ", cluster.Vertices.SelectMany(v => v.RawValues).Select(value => FormatMeshValue(value)))}</Vertices>");
+            sb.AppendLine($"        <Vertices>{string.Join(" ", cluster.Vertices.SelectMany(v => v.RawValues).Select((value, index) => FormatMeshValue(index % 8 is 0 or 2 ? unchecked((short)(ushort)value) : value)))}</Vertices>");
             sb.AppendLine($"        <UsedMaterialBits>{cluster.UsedMaterialBits}</UsedMaterialBits>");
             sb.AppendLine(BuildGroundObjectsBlock(cluster.GroundObjects, "        "));
             sb.AppendLine("      </None>");
@@ -116,3 +116,4 @@ public sealed class MeshPageXmlWriter
     private static string EscapeXmlText(string value)
         => (value ?? string.Empty).Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 }
+

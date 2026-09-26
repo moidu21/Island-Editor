@@ -6,6 +6,8 @@ namespace Anno1800IslandTool.Core.Models;
 
 public sealed class IslandProject
 {
+    public Anno1800IslandTool.Core.Common.RectI? EmergedMaterialBounds { get; set; }
+    public HashSet<TerrainPageKey> EmergedTintPages { get; } = new();
     public IslandMetadata Metadata { get; set; } = new();
     public IslandRootDefinition Root { get; set; } = new();
     public Rd3dDefinition Rd3d { get; set; } = new();

@@ -695,7 +695,8 @@ public sealed class LocalTerrainDerivativeRegenerator
     public IReadOnlyList<RegeneratedNormalMapWrite> GenerateInterpretedNormalMapWrites(
         IslandProject project,
         CoarseHeightMap workingMap,
-        TerrainLocalRegenerationState state)
+        TerrainLocalRegenerationState state,
+        bool includeMissingPages = false)
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(workingMap);
@@ -725,6 +726,10 @@ public sealed class LocalTerrainDerivativeRegenerator
             .OrderBy(page => page.Key.Lod).ThenBy(page => page.Key.X).ThenBy(page => page.Key.Y)
             .Select(page => (Page: page, Bounds: dirty, ForcedFullRebuild: false))
             .ToList();
+
+        if (includeMissingPages)
+            pageInputs.AddRange(BuildMissingActiveNormalMapInputs(project, workingMap)
+                .Where(input => TouchesGutter(input.Page)));
 
         return GenerateInterpretedNormalMapWritesFromInputs(project, workingMap, state, pageInputs, "Régénération normalmaps affectées");
     }
@@ -1120,7 +1125,8 @@ public sealed class LocalTerrainDerivativeRegenerator
     public IReadOnlyList<RegeneratedTintMapWrite> GenerateAllTintMapWritesVanillaLike(
         IslandProject project,
         CoarseHeightMap workingMap,
-        TerrainLocalRegenerationState state)
+        TerrainLocalRegenerationState state,
+        bool onlyAffected = false)
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(workingMap);
@@ -1131,7 +1137,8 @@ public sealed class LocalTerrainDerivativeRegenerator
         // (et uniquement celles-ci) via le synchroniseur MaterialMap -> tintmap v31.
         // Cela garde une archive vanilla-like : DDS DXT1 classique, dimensions de page
         // originales, aucun rectangle complet ajouté hors flags TintMapLevels.
-        var replacements = TerrainTintMapExportSynchronizer.BuildAllTintMapReplacements(project, out var syncSummary);
+        var replacements = TerrainTintMapExportSynchronizer.BuildAllTintMapReplacements(project, out var syncSummary,
+            onlyAffected ? state.ExpandedSampleBounds : null);
         var pagesByPath = project.TintMapPages.Values
             .Where(p => !string.IsNullOrWhiteSpace(p.OriginalRelativePath))
             .GroupBy(p => p.OriginalRelativePath.Replace('\\', '/'), StringComparer.OrdinalIgnoreCase)
@@ -1669,11 +1676,51 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
         inputs.Add((affected, page));
     }
 
+    // An enlarged canvas can contain active cells beyond every imported page.
+    // Supply empty pages at those fixed LOD coordinates, rather than stretching
+    // an existing page to cover the new extent.
+    var activeGrid = project.Root.ActiveMapGrid;
+    var activeMask = ActiveMapGridMaskCodec.Decode(activeGrid, project.Root.ActiveMapGridBits, project.Root.ActiveMapRect);
+    var canvasWidth = project.Rd3d.GridWidth > 0 ? project.Rd3d.GridWidth : Math.Max(1, (workingMap.Width - 1) * 16);
+    var canvasHeight = project.Rd3d.GridHeight > 0 ? project.Rd3d.GridHeight : Math.Max(1, (workingMap.Height - 1) * 16);
+    foreach (var template in project.MeshPages.Values.Where(MeshPageClassifier.CanEditGeometry)
+                 .GroupBy(page => page.Key.Lod).Select(group => group.First()).ToArray())
+    {
+        var span = TerrainPageCoverage.ResolvePageWorldSize(TerrainPageCoverage.MeshFamily, template.Key.Lod);
+        var keys = new HashSet<TerrainPageKey>();
+        for (var z = 0; z < activeGrid.Y; z++)
+        for (var x = 0; x < activeGrid.X; x++)
+            if (ActiveMapGridMaskCodec.IsCellActive(activeMask, activeGrid, x, z))
+            {
+                // Metadata permits a grid independent of MapSize/8. One active cell
+                // can therefore intersect several mesh pages after a canvas resize.
+                int firstX = (int)((long)x * canvasWidth / ((long)activeGrid.X * span));
+                int firstZ = (int)((long)z * canvasHeight / ((long)activeGrid.Y * span));
+                int endX = (int)Math.Ceiling((x + 1d) * canvasWidth / activeGrid.X / span);
+                int endZ = (int)Math.Ceiling((z + 1d) * canvasHeight / activeGrid.Y / span);
+                for (int pageZ = firstZ; pageZ < endZ; pageZ++)
+                for (int pageX = firstX; pageX < endX; pageX++)
+                    keys.Add(new TerrainPageKey(template.Key.Lod, pageX, pageZ));
+            }
+        foreach (var key in keys.Where(key => !project.MeshPages.ContainsKey(key)))
+        {
+            var page = new MeshPage { Key = key,
+                OriginalRelativePath = template.OriginalRelativePath[..(template.OriginalRelativePath.LastIndexOf('/') + 1)] + $"{key.X}x{key.Y}.xml",
+                DeclaredWidth = template.DeclaredWidth, DeclaredHeight = template.DeclaredHeight,
+                DeclaredClusterCount = template.DeclaredClusterCount,
+                VertexStride = template.VertexStride, HasEditablePayload = true };
+            var bounds = new RectI(key.X * span / 16, key.Y * span / 16,
+                Math.Min(workingMap.Width - 1, (key.X + 1) * span / 16),
+                Math.Min(workingMap.Height - 1, (key.Y + 1) * span / 16));
+            inputs.Add((new RegeneratedTerrainPageInfo { Family = "Mesh", Key = key, SampleBounds = bounds, IsEditable = true }, page));
+        }
+    }
+
     writes = inputs
         .AsParallel()
         .AsOrdered()
         .WithDegreeOfParallelism(Math.Max(1, Environment.ProcessorCount))
-        .Select(input => BuildExpandedActiveMeshPageWrite(project, input.Page, workingMap, input.Affected.SampleBounds, options, heightSampler))
+        .Select(input => BuildExpandedActiveMeshPageWrite(project, input.Page, workingMap, input.Affected.SampleBounds, options, heightSampler, state.DirtySampleBounds))
         .Where(write => write is { HasContent: true })
         .Select(write => write!)
         .ToList();
@@ -1695,7 +1742,7 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
     return writes;
 }
 
-    private static RegeneratedMeshPageWrite? BuildExpandedActiveMeshPageWrite(IslandProject project, MeshPage page, CoarseHeightMap map, RectI pageSampleBounds, MeshRegenerationOptions? options, Func<double, double, float>? heightSampler)
+    private static RegeneratedMeshPageWrite? BuildExpandedActiveMeshPageWrite(IslandProject project, MeshPage page, CoarseHeightMap map, RectI pageSampleBounds, MeshRegenerationOptions? options, Func<double, double, float>? heightSampler, RectI dirtyBounds)
 {
     var effectiveOptions = options ?? new MeshRegenerationOptions();
     // v43.4 : les shaders terrain utilisent directement Raw4..Raw7 pour la normale,
@@ -1712,7 +1759,7 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
         return BuildConservativeMeshPageWrite(project, page, map, pageSampleBounds, pageSampleBounds, effectiveOptions, heightSampler);
     }
 
-    var rebuiltPage = BuildExpandedActiveMeshPage(project, page, map, pageSampleBounds, effectiveOptions, heightSampler, out var generatedExtensionVertices, out var generatedExtensionTriangles);
+    var rebuiltPage = BuildExpandedActiveMeshPage(project, page, map, pageSampleBounds, effectiveOptions, heightSampler, out var generatedExtensionVertices, out var generatedExtensionTriangles, dirtyBounds);
     if (rebuiltPage.Clusters.Count == 0 || rebuiltPage.Clusters.Sum(c => c.Vertices.Count) == 0)
     {
         return null;
@@ -1743,7 +1790,7 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
     };
 }
 
-    private static MeshPage BuildExpandedActiveMeshPage(IslandProject project, MeshPage page, CoarseHeightMap map, RectI pageSampleBounds, MeshRegenerationOptions options, Func<double, double, float>? heightSampler, out int generatedExtensionVertices, out int generatedExtensionTriangles)
+    private static MeshPage BuildExpandedActiveMeshPage(IslandProject project, MeshPage page, CoarseHeightMap map, RectI pageSampleBounds, MeshRegenerationOptions options, Func<double, double, float>? heightSampler, out int generatedExtensionVertices, out int generatedExtensionTriangles, RectI dirtyBounds)
 {
     generatedExtensionVertices = 0;
     generatedExtensionTriangles = 0;
@@ -1812,6 +1859,14 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
     for (var clusterIndex = 0; clusterIndex < expectedClusterCount; clusterIndex++)
     {
         var sourceCluster = clusterIndex < page.Clusters.Count ? page.Clusters[clusterIndex] : new MeshCluster();
+        var minX = pageMinX + (clusterIndex % clusterGridWidth) * clusterWidth;
+        var minZ = pageMinZ + (clusterIndex / clusterGridWidth) * clusterHeight;
+        if (minX > dirtyBounds.Right * 16d + 16 || minX + clusterWidth < dirtyBounds.Left * 16d - 16
+            || minZ > dirtyBounds.Bottom * 16d + 16 || minZ + clusterHeight < dirtyBounds.Top * 16d - 16)
+        {
+            rebuilt.Clusters.Add(sourceCluster);
+            continue;
+        }
         // Les vertices vanilla existants gardent impérativement Raw3..Raw7. Le même
         // objet options reste activé pour AppendExtensionGeometryToCluster afin que
         // seuls les nouveaux vertices reçoivent normales/tangentes calculées.
@@ -2938,7 +2993,7 @@ private static Dictionary<int, float> FindStructuralSkirtOffsets(MeshCluster clu
 
     foreach (var group in cluster.Vertices
                  .Select((vertex, index) => (Vertex: vertex, Index: index))
-                 .GroupBy(item => (item.Vertex.Raw0, item.Vertex.Raw2))
+                 .GroupBy(item => (item.Vertex.X, item.Vertex.Z))
                  .Where(group => group.Count() > 1))
     {
         var items = group.ToList();
@@ -3295,7 +3350,7 @@ private static string BuildMeshPageXml(MeshPage page, List<List<float>> targetVa
                 return match.Value;
             }
 
-            var formatted = string.Join(" ", values.Select(FormatMeshValue));
+            var formatted = string.Join(" ", values.Select((value, index) => FormatMeshValue(index % 8 is 0 or 2 ? unchecked((short)(ushort)(int)MathF.Round(value)) : value)));
             return $"<Vertices>{Environment.NewLine}        {formatted}{Environment.NewLine}        </Vertices>";
         },
         RegexOptions.IgnoreCase | RegexOptions.Singleline);
@@ -3325,7 +3380,7 @@ private static string BuildMeshPageXmlFromModel(MeshPage page, List<List<float>>
         var cluster = page.Clusters[i];
         sb.AppendLine("      <None>");
         sb.AppendLine($"        <Indices>{string.Join(" ", cluster.Indices)}</Indices>");
-        sb.AppendLine($"        <Vertices>{string.Join(" ", targetValues[i].Select(FormatMeshValue))}</Vertices>");
+        sb.AppendLine($"        <Vertices>{string.Join(" ", targetValues[i].Select((value, index) => FormatMeshValue(index % 8 is 0 or 2 ? unchecked((short)(ushort)(int)MathF.Round(value)) : value)))}</Vertices>");
         sb.AppendLine($"        <UsedMaterialBits>{cluster.UsedMaterialBits}</UsedMaterialBits>");
         if (cluster.GroundObjects.Count == 0)
         {
@@ -3583,3 +3638,4 @@ private static float BilinearSample(CoarseHeightMap map, float sampleX, float sa
         => bytes is null || bytes.Length == 0 ? string.Empty : Encoding.UTF8.GetString(bytes);
 
 }
+

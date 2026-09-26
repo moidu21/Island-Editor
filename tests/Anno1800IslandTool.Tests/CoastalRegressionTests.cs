@@ -11,20 +11,23 @@ namespace Anno1800IslandTool.Tests;
 public class CoastalRegressionTests
 {
     [Theory]
-    [InlineData(0, 600, true)]
-    [InlineData(256, 600, true)]
+    [InlineData(0, 600, false)]
+    [InlineData(256, 600, false)]
     [InlineData(257, 600, false)]
-    [InlineData(12032, 600, true)]
-    [InlineData(600, 12033, true)]
+    [InlineData(12032, 600, false)]
+    [InlineData(600, 12033, false)]
+    [InlineData(12288, 12288, false)]
+    [InlineData(12289, 600, true)]
+    [InlineData(-1, 600, true)]
     public void Border_Does_Not_Depend_On_An_Editable_Footprint(double x, double z, bool expected)
         => Assert.Equal(expected, OceanSafetyBorder.Contains(x, z, 12288, 12288));
 
     [Fact]
-    public void Border_Cells_Stay_Protected_At_Different_Resolutions()
+    public void Border_Cells_Are_Editable_At_Different_Resolutions()
     {
-        Assert.True(OceanSafetyBorder.IntersectsCell(0, 4, 48, 48, 12288, 12288));
+        Assert.False(OceanSafetyBorder.IntersectsCell(0, 4, 48, 48, 12288, 12288));
         Assert.False(OceanSafetyBorder.IntersectsCell(1, 4, 48, 48, 12288, 12288));
-        Assert.True(OceanSafetyBorder.IntersectsCell(1, 4, 96, 96, 12288, 12288));
+        Assert.False(OceanSafetyBorder.IntersectsCell(1, 4, 96, 96, 12288, 12288));
         Assert.False(OceanSafetyBorder.IntersectsCell(2, 4, 96, 96, 12288, 12288));
     }
 
@@ -87,3 +90,4 @@ public class CoastalRegressionTests
         Assert.All(d.Descendants("Water").Single().Element("bits")!.Value.Split(' ',StringSplitOptions.RemoveEmptyEntries), v=>Assert.Equal("0",v));
     }
 }
+

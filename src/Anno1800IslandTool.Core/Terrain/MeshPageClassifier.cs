@@ -10,10 +10,8 @@ namespace Anno1800IslandTool.Core.Terrain;
 public static class MeshPageClassifier
 {
     public const int FirstEditableGeometryLod = 2;
-    // v42.9 : LOD9+ est conservé vanilla tant que le générateur ne sait pas produire
-    // une géométrie et des métadonnées cohérentes à cette distance. Les tests en jeu
-    // montrent que déclarer une couverture LOD9 étendue avec un mesh LOD9 vanilla peut
-    // provoquer des dalles blanches et des crashs lors des transitions zoom/dézoom.
+    // LOD9+ mesh files remain outside the geometry editor. Their RD3D coverage,
+    // level dimensions and height bounds are synchronized separately with the canvas.
     public const int LastEditableGeometryLod = 8;
 
     public static bool IsProtectedMetadataLod(TerrainPageKey key)

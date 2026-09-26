@@ -604,7 +604,8 @@ public sealed class SmokeTests
 
         Assert.DoesNotContain("-9199693229316898788", project.RawContent.RootText);
         Assert.Contains("<ObjectId>42</ObjectId>", project.RawContent.RootText);
-        Assert.Contains("<id>1</id>", project.RawContent.RootText);
+        // Preserve category 2 from the input; the id is not the slot count.
+        Assert.Contains("<id>2</id>", project.RawContent.RootText);
         Assert.Equal(1, Regex.Matches(project.RawContent.RootText, @"<ObjectId>").Count);
     }
 

@@ -39,6 +39,7 @@ public sealed class Rd3dContractValidator : IValidator<IslandProject>
         }
 
         ValidateHasMeshArrayRowStride(report, project);
+        ValidateLevelDimensions(report, project);
 
         return report;
     }
@@ -86,6 +87,39 @@ public sealed class Rd3dContractValidator : IValidator<IslandProject>
     {
         var match = Regex.Match(text, $@"<{Regex.Escape(tag)}>\s*(-?\d+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         return match.Success ? int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture) : null;
+    }
+
+    private static void ValidateLevelDimensions(ValidationReport report, IslandProject project)
+    {
+        var text = project.RawContent.Rd3dText;
+        if (string.IsNullOrWhiteSpace(text)) return;
+        var levels = Regex.Match(text, @"<Levels>(?<body>.*?)</Levels>", RegexOptions.Singleline);
+        var lod = 0;
+        foreach (Match level in Regex.Matches(levels.Groups["body"].Value, @"<None>(?<body>.*?)</None>", RegexOptions.Singleline))
+        {
+            var body = level.Groups["body"].Value;
+            var x = ReadIntTag(body, "LevelSizeX");
+            var z = ReadIntTag(body, "LevelSizeZ");
+            foreach (var tag in new[] { "MinYArray", "MaxYArray", "HasMeshArray" })
+            {
+                var array = Regex.Match(body, $@"<{tag}>(?<body>.*?)</{tag}>", RegexOptions.Singleline).Groups["body"].Value;
+                var w = ReadIntTag(array, tag == "HasMeshArray" ? "x" : "width");
+                var h = ReadIntTag(array, tag == "HasMeshArray" ? "y" : "height");
+                if ((x.HasValue && w.HasValue && x != w) || (z.HasValue && h.HasValue && z != h))
+                    report.Add(ValidationSeverity.Error, ValidationCode.TerrainCoverageDiagnostic,
+                        $"LOD{lod} : LevelSize {x}x{z} différent de {tag} {w}x{h}.", project.Rd3dFilePath);
+            }
+            var step = ReadIntTag(body, "NodeSizeWS");
+            if (step > 0 && x.HasValue && z.HasValue && project.Rd3d.GridWidth > 0 && project.Rd3d.GridHeight > 0)
+            {
+                var expectedX = (int)Math.Ceiling(project.Rd3d.GridWidth / (32.0 * step.Value));
+                var expectedZ = (int)Math.Ceiling(project.Rd3d.GridHeight / (32.0 * step.Value));
+                if (x != expectedX || z != expectedZ)
+                    report.Add(ValidationSeverity.Error, ValidationCode.TerrainCoverageDiagnostic,
+                        $"LOD{lod} : LevelSize {x}x{z}, attendu {expectedX}x{expectedZ} pour NodeSizeWS={step}.", project.Rd3dFilePath);
+            }
+            lod++;
+        }
     }
 
     private static List<int> ReadIntListTag(string text, string tag)

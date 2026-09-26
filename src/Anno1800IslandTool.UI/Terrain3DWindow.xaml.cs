@@ -41,7 +41,7 @@ public partial class Terrain3DWindow : Window
     private const int ParallelBrushVertexThreshold = 2048;
     private const int ParallelCoarseUpdateSampleThreshold = 2048;
     private const double ViewportPointMargin = 0.5;
-    private const double OuterOceanSafetyWidthWorld = 256.0;
+    private const double OuterOceanSafetyWidthWorld = 0.0;
     private const double OuterOceanDeepWidthWorld = 64.0;
     private const float OuterOceanDeepHeightWorld = -8.0f;
     private const float OuterOceanShoreHeightWorld = -0.25f;
@@ -468,6 +468,7 @@ public partial class Terrain3DWindow : Window
             MergeDirtyRegionFromWorldBounds(region.MinX, region.MinZ, region.MaxX, region.MaxZ);
         }
 
+        OriginalBeachCleaner.Remove(_project);
         ExtendIslandToMaximumActiveMask();
         var oceanRingSamples = EnforceOuterOceanSafetyRing();
         ApplyActiveMapMaskToProject(regenerateText: true);
@@ -587,6 +588,7 @@ public partial class Terrain3DWindow : Window
             _extensionMaterialFillSourceMask = before.ToArray();
         }
 
+        OriginalBeachCleaner.Remove(_project);
         _activeMapMask = next;
         _activeMapMaskDirty = true;
         _extensionMaterialFillPending |= addedCells > 0;
@@ -600,7 +602,10 @@ public partial class Terrain3DWindow : Window
         // Une page mesh peut recouper à la fois une cellule active et une cellule retirée.
         // On réapplique donc le masque sur toute la heightmap, pas seulement sur le delta,
         // afin qu'aucun ancien îlot ne survive dans une page partiellement active.
-        var outsideSamples = EnforceInactiveFootprintSamplesAsDeepWater(next, grid);
+        // Adding a cell must not rewrite the original island's inactive outskirts.
+        // A global cleanup both alters untouched relief and expands a small edit to
+        // the entire (potentially 1920-tile) canvas.
+        var outsideSamples = removedCells > 0 ? EnforceInactiveFootprintSamplesAsDeepWater(next, grid) : 0;
         var oceanRingSamples = EnforceOuterOceanSafetyRing();
         ApplyActiveMapMaskToProject(regenerateText: true);
 
@@ -639,7 +644,7 @@ public partial class Terrain3DWindow : Window
             _project,
             workingMap,
             dirtyBounds);
-        var footprintMaterialSummary = SynchronizeMaterialMapToFootprint(next, grid);
+        var footprintMaterialSummary = SynchronizeMaterialMapToFootprint(next, grid, dirtyBounds);
         var oceanMaterialSummary = PaintOuterOceanSafetyRingMaterials();
         var usedMaterialPages = _editor.ResynchronizeMeshUsedMaterialBitsFromMaterialMap(_project);
 
@@ -649,8 +654,8 @@ public partial class Terrain3DWindow : Window
             workingMap,
             "Mesh",
             ResolveAnchorPageKeyForCurrentLod(),
-            fullBounds,
-            fullBounds,
+            dirtyBounds,
+            dirtyBounds,
             0);
         state.AnchorMeshLod = selectedLod;
         var meshWrites = _localRegenerator.GenerateExpandedActiveMeshPageWrites(
@@ -659,8 +664,8 @@ public partial class Terrain3DWindow : Window
             state,
             BuildMeshRegenerationOptions());
         ApplyGeneratedMeshWrites(meshWrites);
-        var normalWrites = _localRegenerator.GenerateAllInterpretedNormalMapWrites(_project, workingMap, state);
-        var tintWrites = _localRegenerator.GenerateAllTintMapWritesVanillaLike(_project, workingMap, state);
+        var normalWrites = _localRegenerator.GenerateInterpretedNormalMapWrites(_project, workingMap, state, includeMissingPages: true);
+        var tintWrites = _localRegenerator.GenerateAllTintMapWritesVanillaLike(_project, workingMap, state, onlyAffected: true);
 
         var suppressedPages = SynchronizeSuppressedTerrainPages(next, grid);
         CommitTerrainValidationToProject(state, meshWrites, tintWrites);
@@ -668,6 +673,9 @@ public partial class Terrain3DWindow : Window
         var objectSummary = SynchronizePlacementPointsToFootprint(next, grid);
         _project.IsModified = true;
         _project.ModifiedSections.Add("DrawableIslandFootprint");
+        // The footprint has already been regenerated and committed above. A later
+        // "validate and close" must not launch another full-canvas expansion.
+        IslandExpansionModeCheckBox.IsChecked = false;
 
         MarkDirtyOperation(
             $"Emprise DX11 v46.15 : +{addedCells} / -{removedCells} cellule(s), " +
@@ -848,7 +856,7 @@ public partial class Terrain3DWindow : Window
         return changed;
     }
 
-    private string SynchronizeMaterialMapToFootprint(IReadOnlyList<bool> activeMask, Int2 grid)
+    private string SynchronizeMaterialMapToFootprint(IReadOnlyList<bool> activeMask, Int2 grid, RectI? sampleBounds = null)
     {
         var source = _project.Rd3d.MaterialMap;
         if (grid.X <= 0 || grid.Y <= 0 || activeMask.Count < grid.X * grid.Y ||
@@ -862,9 +870,10 @@ public partial class Terrain3DWindow : Window
         var rootWidth = ResolveRootWidthForActiveMask();
         var rootHeight = ResolveRootHeightForActiveMask();
         const int deepWaterMaterialId = 3;
-        for (var y = 0; y < map.Height; y++)
+        var bounds = sampleBounds ?? new RectI(0, 0, map.Width, map.Height);
+        for (var y = Math.Max(0, bounds.Top - 2); y < Math.Min(map.Height, bounds.Bottom + 2); y++)
         {
-            for (var x = 0; x < map.Width; x++)
+            for (var x = Math.Max(0, bounds.Left - 2); x < Math.Min(map.Width, bounds.Right + 2); x++)
             {
                 if (IsMaterialCellActiveInMask(activeMask, grid, rootWidth, rootHeight, map.Width, map.Height, x, y))
                 {
@@ -3225,7 +3234,9 @@ public partial class Terrain3DWindow : Window
         _extensionMaterialFillSourceMask = _activeMapMask.ToArray();
         _activeMapMaskDirty = false;
         _extensionMaterialFillPending = false;
-        ApplyActiveMapMaskToProject(regenerateText: true);
+        // Loading the mask is not an edit. Rewriting every derived grid here is
+        // particularly expensive after expanding the canvas to 1920 tiles.
+        ApplyActiveMapMaskToProject(regenerateText: false);
     }
 
     private bool IsIslandExpansionModeEnabled()
@@ -3328,7 +3339,7 @@ public partial class Terrain3DWindow : Window
                 var wasPreviouslyActive = ActiveMapGridMaskCodec.IsWorldPointActive(previousActiveMask, grid, worldX, worldZ, worldWidth, worldHeight);
                 var isOuterOceanBorder = worldX <= oceanBorderWidthX || worldX >= worldWidth - oceanBorderWidthX ||
                                          worldZ <= oceanBorderWidthZ || worldZ >= worldHeight - oceanBorderWidthZ;
-                if (wasPreviouslyActive && !isOuterOceanBorder)
+                if (wasPreviouslyActive)
                 {
                     continue;
                 }
@@ -3346,130 +3357,9 @@ public partial class Terrain3DWindow : Window
         return changed;
     }
 
-    private int EnforceOuterOceanSafetyRing()
-    {
-        var map = _project.GameData.TerrainHeightMap;
-        if (map.Width <= 1 || map.Height <= 1 ||
-            _editedCoarseSamples.Length < map.Width * map.Height)
-        {
-            return 0;
-        }
-
-        var worldWidth = Math.Max(1d, _project.Rd3d.GridWidth > 0
-            ? _project.Rd3d.GridWidth
-            : _project.Root.MapSize * 32d);
-        var worldHeight = Math.Max(1d, _project.Rd3d.GridHeight > 0
-            ? _project.Rd3d.GridHeight
-            : _project.Root.MapSize * 32d);
-        var changed = 0;
-        for (var y = 0; y < map.Height; y++)
-        {
-            var worldZ = y * (worldHeight / (map.Height - 1d));
-            for (var x = 0; x < map.Width; x++)
-            {
-                var worldX = x * (worldWidth / (map.Width - 1d));
-                var edgeDistance = Math.Min(
-                    Math.Min(worldX, worldWidth - worldX),
-                    Math.Min(worldZ, worldHeight - worldZ));
-                if (edgeDistance > OuterOceanSafetyWidthWorld)
-                {
-                    continue;
-                }
-
-                var targetWorld = ResolveOuterOceanTargetHeight(edgeDistance);
-                var sampleIndex = (y * map.Width) + x;
-                var currentWorld = TerrainHeightEncoding.SampleToWorldHeight(
-                    _editedCoarseSamples[sampleIndex],
-                    TerrainHeightSampleEncoding.GameDataRawUInt16);
-                if (currentWorld <= targetWorld + 0.0001f)
-                {
-                    continue;
-                }
-
-                _editedCoarseSamples[sampleIndex] = TerrainHeightEncoding.WorldHeightToGameDataRaw(targetWorld);
-                changed++;
-            }
-        }
-
-        if (changed > 0)
-        {
-            MergeDirtyRegionFromWorldBounds(0, 0, worldWidth, worldHeight);
-            MarkDirtyOperation($"Anneau océanique v46.14 : {changed} échantillon(s) abaissé(s) sous l’eau sur {OuterOceanSafetyWidthWorld:0} unités de bord");
-        }
-        return changed;
-    }
-
-    private string PaintOuterOceanSafetyRingMaterials()
-    {
-        var touchesOuterBoundary = true; // The reserved ocean border cannot be disabled by editing the mask.
-
-        var source = _project.Rd3d.MaterialMap;
-        if (source.Width <= 0 || source.Height <= 0 || !source.HasAnyData)
-        {
-            return "Anneau océanique : MaterialMap absente, correction des matériaux ignorée.";
-        }
-
-        var map = source.Clone();
-        var beforeIds = map.PackedMaterialIds.ToArray();
-        var beforeAlphas = map.PackedMaterialAlphas.ToArray();
-        var options = BuildAutomaticHeightMaterialOptions();
-        var heightMap = BuildWorkingMap();
-        var worldWidth = Math.Max(1d, _project.Rd3d.GridWidth > 0
-            ? _project.Rd3d.GridWidth
-            : _project.Root.MapSize * 32d);
-        var worldHeight = Math.Max(1d, _project.Rd3d.GridHeight > 0
-            ? _project.Rd3d.GridHeight
-            : _project.Root.MapSize * 32d);
-        var visited = 0;
-        for (var y = 0; y < map.Height; y++)
-        {
-            var worldZ = (y + 0.5d) / map.Height * worldHeight;
-            for (var x = 0; x < map.Width; x++)
-            {
-                var worldX = (x + 0.5d) / map.Width * worldWidth;
-                var edgeDistance = Math.Min(
-                    Math.Min(worldX, worldWidth - worldX),
-                    Math.Min(worldZ, worldHeight - worldZ));
-                var sampleX = Math.Clamp((int)Math.Round(x / (double)Math.Max(1, map.Width - 1) * Math.Max(0, heightMap.Width - 1)), 0, Math.Max(0, heightMap.Width - 1));
-                var sampleY = Math.Clamp((int)Math.Round(y / (double)Math.Max(1, map.Height - 1) * Math.Max(0, heightMap.Height - 1)), 0, Math.Max(0, heightMap.Height - 1));
-                var sampleIndex = (sampleY * heightMap.Width) + sampleX;
-                var isSubmerged = sampleIndex >= 0 && sampleIndex < heightMap.Samples.Length &&
-                    TerrainHeightEncoding.CoarseSampleToWorldHeight(heightMap, heightMap.Samples[sampleIndex]) <= -0.02f;
-                if ((!touchesOuterBoundary || edgeDistance > OuterOceanSafetyWidthWorld) && !isSubmerged)
-                {
-                    continue;
-                }
-
-                visited++;
-                // Le corail (ID 4) crée une ligne jaune sur les grandes plages droites.
-                // Tout terrain réellement sous l'eau, y compris la bordure extérieure,
-                // reçoit donc le matériau sous-marin neutre (ID 3, GroundType=None).
-                map.SetDominantMaterialSafe(x, y, options.DeepWaterMaterialId, TerrainMaterialPackEncoding.MaxPackedSlotValue);
-            }
-        }
-
-        var changedCells = beforeAlphas.Zip(map.PackedMaterialAlphas, static (before, after) => before != after).Count(static changed => changed);
-        var changedBlocks = beforeIds.Zip(map.PackedMaterialIds, static (before, after) => before != after).Count(static changed => changed);
-        if (changedCells == 0 && changedBlocks == 0)
-        {
-            return $"Anneau océanique : {visited} texel(s) de bord déjà en matériaux sous-marins.";
-        }
-
-        var result = new TerrainMaterialPaintResult
-        {
-            CellsVisited = visited,
-            CellsChanged = changedCells,
-            BlocksChanged = changedBlocks,
-            AffectedBounds = new RectI(0, 0, Math.Max(0, map.Width - 1), Math.Max(0, map.Height - 1))
-        };
-        result.AffectedMaterialIds.Add(options.DeepWaterMaterialId);
-        result.Messages.Add("v46.14 : matériau sous-marin neutre forcé sur tous les texels sous l'eau et sur l’anneau extérieur afin d’éviter herbe, corail jaune et écume sur terre.");
-        var editState = _project.MaterialEditState ?? new TerrainMaterialEditState();
-        editState.AddGeneratedOperation(result, "v46.14 nettoyage sous-marin et anneau océanique");
-        _editor.ReplaceTerrainMaterialMap(_project, map, editState);
-        return $"Eau/anneau océanique : {changedCells} texel(s) et {changedBlocks} bloc(s) matériau corrigés.";
-    }
-
+    // The full XML extent is editable. Do not lower or repaint a reserved border.
+    private int EnforceOuterOceanSafetyRing() => 0;
+    private string PaintOuterOceanSafetyRingMaterials() => "Bords libres : aucune bande oceanique imposee.";
     private bool ActiveFootprintTouchesOuterMapBoundary()
     {
         var grid = _project.Root.ActiveMapGrid;
@@ -3618,6 +3508,7 @@ public partial class Terrain3DWindow : Window
         }
         if (regenerateText)
         {
+            if (changed) OriginalBeachCleaner.Remove(_project);
             _editor.RegenerateAllTexts(_project);
         }
     }
@@ -9791,3 +9682,7 @@ public partial class Terrain3DWindow : Window
         public string Summary => $"déclarés={Page.DeclaredClusterCount}, parsed={Page.ParsedClusterCount}, stride={Page.VertexStride}, éditable={(Page.HasEditablePayload ? "oui" : "non")}";
     }
 }
+
+
+
+

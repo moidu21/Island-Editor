@@ -479,7 +479,7 @@ public sealed class IslandExporter : IIslandWriter
             }
         }
 
-        var shouldRegenerateTintMaps = project.HeightEditState?.HasGeometryEdits == true ||
+        var shouldRegenerateTintMaps = project.EmergedMaterialBounds is not null || project.HeightEditState?.HasGeometryEdits == true ||
             (project.LocalRegeneration?.GeneratedTintMapWrites.Any(write => write.HasContent) == true);
 
         // Les tintmaps source sont des données dérivées délicates. Une conversion de
@@ -536,7 +536,9 @@ public sealed class IslandExporter : IIslandWriter
 
         var tintSyncSummary = "Tintmaps source conservées : aucune édition géométrique.";
         var syncedTintMaps = shouldRegenerateTintMaps
-            ? TerrainTintMapExportSynchronizer.BuildAllTintMapReplacements(project, out tintSyncSummary)
+            ? TerrainTintMapExportSynchronizer.BuildAllTintMapReplacements(project, out tintSyncSummary,
+                onlyMaterialRepairs: project.EmergedMaterialBounds is not null && project.HeightEditState?.HasGeometryEdits != true &&
+                    project.LocalRegeneration?.GeneratedTintMapWrites.Any(w => w.HasContent) != true)
             : new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
         foreach (var pair in syncedTintMaps)
         {

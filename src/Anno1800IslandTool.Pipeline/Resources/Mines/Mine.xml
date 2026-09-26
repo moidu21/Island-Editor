@@ -1,0 +1,38 @@
+<None>
+                    <guid>1000029</guid>
+                    <ID>-9199693229316898762</ID>
+                    <ObjectFolderID>6</ObjectFolderID>
+                    <Position>234,5 6,253151 201,5</Position>
+                    <ParticipantID>
+                      <id>8</id>
+                    </ParticipantID>
+                    <Blocking />
+                    <Building />
+                    <QuestObject>
+                      <QuestIDs />
+                      <ObjectWasVisible>
+                        <None>False</None>
+                        <None>False</None>
+                      </ObjectWasVisible>
+                      <OverwriteVisualParticipant />
+                    </QuestObject>
+                    <Infolayer>
+                      <Icons />
+                    </Infolayer>
+                    <Mesh>
+                      <Flags>
+                        <flags>1</flags>
+                      </Flags>
+                      <SequenceData>
+                        <CurrentSequenceID>1000</CurrentSequenceID>
+                        <CurrentSequenceStartTime>157800</CurrentSequenceStartTime>
+                        <IdleSequenceID>1000</IdleSequenceID>
+                      </SequenceData>
+                      <Orientation>0 0 0 1</Orientation>
+                    </Mesh>
+                    <RandomMapObject />
+                    <Selection />
+                    <SoundEmitter>
+                      <TimeBudget>500</TimeBudget>
+                    </SoundEmitter>
+                  </None>

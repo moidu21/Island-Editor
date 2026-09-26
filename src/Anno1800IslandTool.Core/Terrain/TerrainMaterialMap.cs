@@ -223,7 +223,19 @@ public sealed class TerrainMaterialMap
         };
 
     public int GetDominantMaterialId(int x, int y)
-        => GetCell(x, y).DominantMaterialId;
+    {
+        EnsureCoordinates(x, y);
+        var ids = PackedMaterialIds.Length == 0 ? 0u : PackedMaterialIds[GetMaterialIdBlockIndex(x, y)];
+        var alphas = PackedMaterialAlphas.Length == 0 ? 0u : PackedMaterialAlphas[GetAlphaIndex(x, y)];
+        var bestSlot = 0;
+        var bestWeight = (int)(alphas & TerrainMaterialPackEncoding.SlotMask);
+        for (var slot = 1; slot < TerrainMaterialPackEncoding.SlotCount; slot++)
+        {
+            var weight = (int)((alphas >> (slot * TerrainMaterialPackEncoding.BitsPerSlot)) & TerrainMaterialPackEncoding.SlotMask);
+            if (weight > bestWeight) { bestWeight = weight; bestSlot = slot; }
+        }
+        return (int)((ids >> (bestSlot * TerrainMaterialPackEncoding.BitsPerSlot)) & TerrainMaterialPackEncoding.SlotMask);
+    }
 
     public IReadOnlyDictionary<int, int> CountDominantMaterials(int maxSamples = 0)
     {

@@ -7,6 +7,11 @@ namespace Anno1800IslandTool.Core.Terrain;
 public sealed class TerrainTopologyMaterialOptions
 {
     public int FlatMaterialId { get; set; } = 2;
+    public bool FlatTilingEnabled { get; set; }
+    public int FlatTilingMaterialId { get; set; } = 2;
+    public int FlatTileSize { get; set; } = 8;
+    public int FlatTileContrast { get; set; } = 12;
+    public bool FlatTilingOverlayAboveBase { get; set; } = true;
     public int GentleSlopeMaterialId { get; set; } = 2;
     public int SteepSlopeMaterialId { get; set; } = 16;
     public int RidgeMaterialId { get; set; } = 16;
@@ -25,6 +30,9 @@ public sealed class TerrainTopologyMaterialOptions
 
     public void Normalize()
     {
+        FlatTileSize = Math.Clamp(FlatTileSize, 2, 128);
+        FlatTileContrast = Math.Clamp(FlatTileContrast, 0, 31);
+        FlatTilingMaterialId = TerrainMaterialPackEncoding.ClampSlot(FlatTilingMaterialId);
         FlatSlopeMaximum = Math.Max(0f, float.IsFinite(FlatSlopeMaximum) ? FlatSlopeMaximum : 0.18f);
         SteepSlopeMinimum = Math.Max(FlatSlopeMaximum, float.IsFinite(SteepSlopeMinimum) ? SteepSlopeMinimum : 1.15f);
         CurvatureSensitivity = Math.Max(0.001f, float.IsFinite(CurvatureSensitivity) ? CurvatureSensitivity : 0.35f);

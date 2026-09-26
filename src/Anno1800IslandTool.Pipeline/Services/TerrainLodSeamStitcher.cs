@@ -51,7 +51,7 @@ public sealed class TerrainLodSeamStitcher
                 foreach (var vertex in pair.Value.Clusters.SelectMany(cluster => cluster.Vertices))
                 {
                     if (vertex.X < minX || vertex.X > maxX || vertex.Z < minZ || vertex.Z > maxZ) continue;
-                    var key = (vertex.Raw0, vertex.Raw2);
+                    var key = (vertex.X, vertex.Z);
                     if (!groups.TryGetValue(key, out var list)) groups[key] = list = new();
                     list.Add((vertex, pair.Key));
                 }
@@ -108,3 +108,4 @@ public sealed class TerrainLodSeamStitchReport
         => $"Raccords LOD : {SeamsAdjusted} bord(s), {VerticesAdjusted} sommet(s), " +
            $"{PagesTouched.Count} page(s), correction maximale {MaximumWorldAdjustment:0.###}.";
 }
+

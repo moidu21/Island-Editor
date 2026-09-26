@@ -18,7 +18,7 @@ public static class ActiveMapGridMaskCodec
         => Math.Max(0, grid.Y) * WordsPerRow(grid);
 
     public static bool HasAnyActiveCell(IReadOnlyList<bool>? mask)
-        => mask is not null && mask.Any(v => v);
+        => mask is bool[] cells ? Array.IndexOf(cells, true) >= 0 : mask is not null && mask.Any(v => v);
 
     public static int CountActiveCells(IReadOnlyList<bool>? mask)
         => mask is null ? 0 : mask.Count(v => v);

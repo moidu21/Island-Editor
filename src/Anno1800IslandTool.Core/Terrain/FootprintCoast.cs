@@ -54,11 +54,11 @@ public sealed class FootprintCoast
                     var hb = b.WorldHeight - waterLevel;
                     if ((ha >= 0f) == (hb >= 0f) || Math.Abs(ha - hb) < 0.000001f) continue;
                     var t = ha / (ha - hb);
-                    intersections.Add(new Vector2(a.Raw0 + ((b.Raw0 - a.Raw0) * t), a.Raw2 + ((b.Raw2 - a.Raw2) * t)));
+                    intersections.Add(new Vector2(a.X + ((b.X - a.X) * t), a.Z + ((b.Z - a.Z) * t)));
                 }
                 if (intersections.Count != 2 || Vector2.DistanceSquared(intersections[0], intersections[1]) < 0.01f) continue;
                 var land = vertices.Where(v => v.WorldHeight >= waterLevel)
-                    .Select(v => new Vector2(v.Raw0, v.Raw2)).Aggregate(Vector2.Zero, (sum, p) => sum + p);
+                    .Select(v => new Vector2(v.X, v.Z)).Aggregate(Vector2.Zero, (sum, p) => sum + p);
                 land /= Math.Max(1, vertices.Count(v => v.WorldHeight >= waterLevel));
                 var aPoint = intersections[0];
                 var bPoint = intersections[1];
@@ -261,3 +261,4 @@ public sealed record OutwardBeachProfile(double AddedLandWidth = 256, double Wat
         return (float)(BeachWorldHeight + (SeaWorldHeight - BeachWorldHeight) * Smooth((distance - AddedLandWidth) / Math.Max(1, WaterWidth)));
     }
 }
+

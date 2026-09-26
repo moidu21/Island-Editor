@@ -29,9 +29,20 @@ public sealed class IslandProjectEditor
 
     public void ApplyMetadataEdits(IslandProject project, MetadataEditModel edits, bool syncDerivedDimensions)
     {
-        var oldInternalName = project.Metadata.IslandInternalName;
+        var previousActiveRect = project.Root.ActiveMapRect;
         var previousActiveGrid = project.Root.ActiveMapGrid;
         var previousActiveGridBits = project.Root.ActiveMapGridBits.ToList();
+        var sizeChanged = edits.MapSize != project.Root.MapSize;
+        if (sizeChanged)
+        {
+            IslandCanvasResizer.Resize(project, edits.MapSize);
+            if (edits.ActiveMapGrid.Equals(project.Root.ActiveMapGrid))
+            {
+                previousActiveGrid = project.Root.ActiveMapGrid;
+                previousActiveGridBits = project.Root.ActiveMapGridBits.ToList();
+            }
+        }
+        var oldInternalName = project.Metadata.IslandInternalName;
         project.Metadata.IslandInternalName = edits.IslandInternalName?.Trim() ?? string.Empty;
         project.Root.MapSize = edits.MapSize;
         project.Root.ActiveMapGrid = edits.ActiveMapGrid;
@@ -61,11 +72,21 @@ public sealed class IslandProjectEditor
             project.AnnoEditorLevelFilePath = RemapInternalNameInPath(project.AnnoEditorLevelFilePath, oldInternalName, project.Metadata.IslandInternalName);
         }
 
-        if (syncDerivedDimensions)
+        var selectedActiveBits = project.Root.ActiveMapGridBits;
+        if (syncDerivedDimensions && !sizeChanged)
         {
             SyncDerivedDimensions(project);
         }
 
+        // Metadata values are explicit overrides, including when the canvas is resized.
+        // Synchronizing the height/material arrays must not replace these trial values.
+        project.Root.ActiveMapGrid = project.Metadata.ActiveMapGrid = edits.ActiveMapGrid;
+        project.Root.ActiveMapRect = project.Metadata.ActiveMapRect = edits.ActiveMapRect;
+        project.Root.ActiveMapGridBits = selectedActiveBits;
+
+        if (sizeChanged || !previousActiveRect.Equals(project.Root.ActiveMapRect) || !previousActiveGrid.Equals(project.Root.ActiveMapGrid)
+            || !previousActiveGridBits.SequenceEqual(project.Root.ActiveMapGridBits))
+            OriginalBeachCleaner.Remove(project);
         _regenerator.RegenerateRootText(project);
         _regenerator.RegenerateAnnoEditorLevelText(project);
         _regenerator.RegenerateRd3dText(project);
@@ -230,6 +251,21 @@ public sealed class IslandProjectEditor
             return 0;
         }
 
+        // Lazy imports still need local material palettes updated before export.
+        using (var archive = File.Exists(project.Metadata.SourceArchivePath)
+            ? System.IO.Compression.ZipFile.OpenRead(project.Metadata.SourceArchivePath) : null)
+        {
+            if (archive is not null)
+            foreach (var page in project.MeshPages.Values.Where(p => p.Key.Lod <= 8 && p.Clusters.Count == 0).ToList())
+            {
+                var entry = archive.GetEntry(page.OriginalRelativePath.Replace('\\','/'));
+                if (entry is null) continue;
+                using var reader = new StreamReader(entry.Open());
+                project.MeshPages[page.Key] = new MeshPageReader().Read(page.OriginalRelativePath,page.Key,reader.ReadToEnd(),false);
+            }
+        }
+        var paletteIndex = new TerrainMaterialMaskIndex(project.Rd3d.MaterialMap);
+        NearTerrainMetadata.Ensure(project,paletteIndex);
         project.LocalRegeneration ??= new TerrainLocalRegenerationState();
         var existingWrites = project.LocalRegeneration.GeneratedMeshPageWrites
             .Where(w => w.HasContent)
@@ -256,8 +292,8 @@ public sealed class IslandProjectEditor
             {
                 var cluster = page.Clusters[clusterIndex];
                 var recomputed = cluster.Vertices.Count > 0
-                    ? RecomputeUsedMaterialBitsFromMaterialMap(project, cluster.Vertices, cluster.UsedMaterialBits)
-                    : RecomputeUsedMaterialBitsFromMaterialMap(project, key, page, clusterIndex, cluster.UsedMaterialBits);
+                    ? RecomputeUsedMaterialBitsFromMaterialMap(project, cluster.Vertices, cluster.UsedMaterialBits, paletteIndex)
+                    : RecomputeUsedMaterialBitsFromMaterialMap(project, key, page, clusterIndex, cluster.UsedMaterialBits, paletteIndex);
                 if (recomputed == cluster.UsedMaterialBits)
                 {
                     continue;
@@ -299,7 +335,7 @@ public sealed class IslandProjectEditor
         return changedPages;
     }
 
-    private static int RecomputeUsedMaterialBitsFromMaterialMap(IslandProject project, IReadOnlyList<MeshVertex> vertices, int originalBits)
+    private static int RecomputeUsedMaterialBitsFromMaterialMap(IslandProject project, IReadOnlyList<MeshVertex> vertices, int originalBits, TerrainMaterialMaskIndex paletteIndex)
     {
         if (vertices.Count == 0 || project.Rd3d.MaterialMap.Width <= 0 || project.Rd3d.MaterialMap.Height <= 0 || !project.Rd3d.MaterialMap.HasAnyData)
         {
@@ -318,10 +354,10 @@ public sealed class IslandProjectEditor
         var minRawZ = vertices.Min(v => v.Z);
         var maxRawZ = vertices.Max(v => v.Z);
 
-        return RecomputeUsedMaterialBitsFromMaterialMap(project, minRawX, maxRawX, minRawZ, maxRawZ, gridWidth, gridHeight, originalBits);
+        return RecomputeUsedMaterialBitsFromMaterialMap(project, minRawX, maxRawX, minRawZ, maxRawZ, gridWidth, gridHeight, originalBits, paletteIndex);
     }
 
-    private static int RecomputeUsedMaterialBitsFromMaterialMap(IslandProject project, TerrainPageKey key, MeshPage page, int clusterIndex, int originalBits)
+    private static int RecomputeUsedMaterialBitsFromMaterialMap(IslandProject project, TerrainPageKey key, MeshPage page, int clusterIndex, int originalBits, TerrainMaterialMaskIndex paletteIndex)
     {
         if (project.Rd3d.MaterialMap.Width <= 0 || project.Rd3d.MaterialMap.Height <= 0 || !project.Rd3d.MaterialMap.HasAnyData)
         {
@@ -357,10 +393,10 @@ public sealed class IslandProjectEditor
         var minRawZ = Math.Clamp(pageMinZ + (row * clusterHeight), 0.0, gridHeight);
         var maxRawZ = Math.Clamp(pageMinZ + ((row + 1) * clusterHeight), 0.0, gridHeight);
 
-        return RecomputeUsedMaterialBitsFromMaterialMap(project, minRawX, maxRawX, minRawZ, maxRawZ, gridWidth, gridHeight, originalBits);
+        return RecomputeUsedMaterialBitsFromMaterialMap(project, minRawX, maxRawX, minRawZ, maxRawZ, gridWidth, gridHeight, originalBits, paletteIndex);
     }
 
-    private static int RecomputeUsedMaterialBitsFromMaterialMap(IslandProject project, double minRawX, double maxRawX, double minRawZ, double maxRawZ, int gridWidth, int gridHeight, int originalBits)
+    private static int RecomputeUsedMaterialBitsFromMaterialMap(IslandProject project, double minRawX, double maxRawX, double minRawZ, double maxRawZ, int gridWidth, int gridHeight, int originalBits, TerrainMaterialMaskIndex paletteIndex)
     {
         var knownMaterialIds = project.MaterialSet?.Materials.Select(material => material.Id).ToHashSet();
         uint allowedMask = 0;
@@ -384,20 +420,7 @@ public sealed class IslandProjectEditor
         var maxX = Math.Clamp((int)Math.Ceiling(maxRawX / Math.Max(1.0, gridWidth) * materialMap.Width) + padding, 0, materialMap.Width - 1);
         var minY = Math.Clamp((int)Math.Floor(minRawZ / Math.Max(1.0, gridHeight) * materialMap.Height) - padding, 0, materialMap.Height - 1);
         var maxY = Math.Clamp((int)Math.Ceiling(maxRawZ / Math.Max(1.0, gridHeight) * materialMap.Height) + padding, 0, materialMap.Height - 1);
-        uint localMask = 0;
-        for (var y = minY; y <= maxY; y++)
-        for (var x = minX; x <= maxX; x++)
-        {
-            var cell = materialMap.GetCell(x, y);
-            for (var slot = 0; slot < TerrainMaterialPackEncoding.SlotCount &&
-                               slot < cell.MaterialIds.Length && slot < cell.AlphaWeights.Length; slot++)
-            {
-                if (TerrainMaterialPackEncoding.ClampSlot(cell.AlphaWeights[slot]) > 0)
-                {
-                    localMask |= 1u << TerrainMaterialPackEncoding.ClampSlot(cell.MaterialIds[slot]);
-                }
-            }
-        }
+        uint localMask = paletteIndex.Query(minX, minY, maxX, maxY);
 
         var preserved = unchecked((uint)originalBits);
         var combined = preserved | localMask;
@@ -1033,15 +1056,15 @@ public sealed class IslandProjectEditor
 
     private void SyncDerivedDimensions(IslandProject project)
     {
-        var mapSize = project.Metadata.MapSize;
-        project.Rd3d.GridWidth = _dimensions.ComputeGridWidth(mapSize);
-        project.Rd3d.GridHeight = _dimensions.ComputeGridHeight(mapSize);
-        project.Rd3d.MaterialMapWidth = _dimensions.ComputeMaterialMapSize(mapSize);
-        project.Rd3d.MaterialMapHeight = _dimensions.ComputeMaterialMapSize(mapSize);
-        project.Rd3d.TintMapWidth = _dimensions.ComputeTintMapSize(mapSize);
-        project.Rd3d.TintMapHeight = _dimensions.ComputeTintMapSize(mapSize);
-        project.GameData.TerrainHeightMap.Width = _dimensions.ComputeHeightMapSize(mapSize);
-        project.GameData.TerrainHeightMap.Height = _dimensions.ComputeHeightMapSize(mapSize);
+        var size = project.Metadata.MapSize;
+        var side = checked(size * 2 + 1);
+        var map = project.GameData.TerrainHeightMap;
+        if (map.Width != side || map.Height != side || map.Samples.Length != checked(side * side)
+            || project.Rd3d.MaterialMap.Width != size * 2 || project.Rd3d.MaterialMap.Height != size * 2)
+            IslandCanvasResizer.Resize(project, size);
+        project.Rd3d.GridWidth = project.Rd3d.GridHeight = checked(size * 32);
+        project.Rd3d.MaterialMapWidth = project.Rd3d.MaterialMapHeight = checked(size * 2);
+        project.Rd3d.TintMapWidth = project.Rd3d.TintMapHeight = checked(size * 4);
     }
 
     private static void MarkDirty(IslandProject project, params string[] sections)
@@ -1083,3 +1106,4 @@ public sealed class IslandProjectEditor
     }
 
 }
+

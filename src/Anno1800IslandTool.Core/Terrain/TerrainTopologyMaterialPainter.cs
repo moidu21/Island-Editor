@@ -115,6 +115,34 @@ public static class TerrainTopologyMaterialPainter
                     materialMap.SetDominantMaterialSafe(x, y, materialId, options.ClampedStrength);
                 }
 
+                if (decision.Role == TerrainTopologyRole.Flat && options.FlatTilingEnabled
+                    && options.FlatTilingMaterialId != materialId)
+                {
+                    // Keep an opaque base, as in native multi-layer material cells.
+                    // Never evict a neighbour's material merely to add a decorative layer.
+                    var ids = materialMap.GetMaterialIdBlock(x/materialMap.MaterialIdBlockSize,y/materialMap.MaterialIdBlockSize);
+                    int slot = Array.IndexOf(ids, options.FlatTilingMaterialId);
+                    if (slot < 0)
+                    {
+                        slot = Array.IndexOf(materialMap.GetBlockAlphaUsage(x/materialMap.MaterialIdBlockSize,y/materialMap.MaterialIdBlockSize),0);
+                        if (slot >= 0)
+                        {
+                            ids[slot] = options.FlatTilingMaterialId;
+                            materialMap.SetMaterialIdBlock(x/materialMap.MaterialIdBlockSize,y/materialMap.MaterialIdBlockSize,ids);
+                        }
+                    }
+                    if (slot >= 0)
+                    {
+                        double wave = Math.Cos((x+.5)*Math.PI/options.FlatTileSize)*Math.Cos((y+.5)*Math.PI/options.FlatTileSize);
+                        var weights = materialMap.GetCellAlphaWeights(x,y);
+                        int baseSlot = Array.IndexOf(ids,materialId);
+                        int accent=(int)Math.Round(options.FlatTileContrast*(.5+.5*wave));
+                        if(baseSlot>=0) weights[baseSlot]=options.FlatTilingOverlayAboveBase?31:31-accent;
+                        weights[slot]=options.FlatTilingOverlayAboveBase?accent:31;
+                        materialMap.SetCellAlphaWeights(x,y,weights);
+                        result.AffectedMaterialIds.Add(options.FlatTilingMaterialId);
+                    }
+                }
                 var afterBlock = materialMap.PackedMaterialIds[blockIndex];
                 var afterAlpha = materialMap.PackedMaterialAlphas[alphaIndex];
                 if (beforeBlock == afterBlock && beforeAlpha == afterAlpha)

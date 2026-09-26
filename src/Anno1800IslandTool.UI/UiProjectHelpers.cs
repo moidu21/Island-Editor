@@ -111,7 +111,7 @@ internal static class UiProjectHelpers
                     continue;
                 }
 
-                points.Add((packed[0], packed[2]));
+                points.Add((vertex.X, vertex.Z));
             }
 
             foreach (var go in cluster.GroundObjects)
@@ -430,3 +430,4 @@ internal static class UiProjectHelpers
 
     public static string FormatFloat(float value) => value.ToString("0.###", CultureInfo.InvariantCulture);
 }
+

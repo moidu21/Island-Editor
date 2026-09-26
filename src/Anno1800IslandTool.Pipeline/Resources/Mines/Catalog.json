@@ -1,0 +1,90 @@
+[
+  {
+    "Guid": "1000029",
+    "Label": "Mine aléatoire — classique",
+    "Region": "Selon la session",
+    "WorkAreaGuid": "1000253",
+    "Container": "GameObject",
+    "WorkAreaContainer": "GameObject"
+  },
+  {
+    "Guid": "1010500",
+    "Label": "Charbon",
+    "Region": "Moderate",
+    "WorkAreaGuid": "1000253",
+    "Container": "GameObject",
+    "WorkAreaContainer": "GameObject"
+  },
+  {
+    "Guid": "1010501",
+    "Label": "Fer",
+    "Region": "Moderate",
+    "WorkAreaGuid": "1000253",
+    "Container": "GameObject",
+    "WorkAreaContainer": "GameObject"
+  },
+  {
+    "Guid": "1010503",
+    "Label": "Zinc",
+    "Region": "Moderate",
+    "WorkAreaGuid": "1000253",
+    "Container": "GameObject",
+    "WorkAreaContainer": "GameObject"
+  },
+  {
+    "Guid": "1010504",
+    "Label": "Cuivre",
+    "Region": "Moderate",
+    "WorkAreaGuid": "1000253",
+    "Container": "GameObject",
+    "WorkAreaContainer": "GameObject"
+  },
+  {
+    "Guid": "1010505",
+    "Label": "Calcaire / ciment",
+    "Region": "Moderate",
+    "WorkAreaGuid": "1000253",
+    "Container": "GameObject",
+    "WorkAreaContainer": "GameObject"
+  },
+  {
+    "Guid": "1010507",
+    "Label": "Or",
+    "Region": "Moderate",
+    "WorkAreaGuid": "1000253",
+    "Container": "GameObject",
+    "WorkAreaContainer": "GameObject"
+  },
+  {
+    "Guid": "614",
+    "Label": "Mine aléatoire — Nouveau Monde (DLC)",
+    "Region": "Colony01",
+    "WorkAreaGuid": "618",
+    "Container": "EditorObject",
+    "WorkAreaContainer": "EditorObject"
+  },
+  {
+    "Guid": "1372",
+    "Label": "Bauxite (DLC)",
+    "Region": "Colony01",
+    "WorkAreaGuid": "618",
+    "Container": "GameObject",
+    "WorkAreaContainer": "EditorObject"
+  },
+  {
+    "Guid": "1386",
+    "Label": "Minerai DLC12 1",
+    "Region": "Colony01",
+    "WorkAreaGuid": "618",
+    "Container": "GameObject",
+    "WorkAreaContainer": "EditorObject"
+  },
+  {
+    "Guid": "1387",
+    "Label": "Minerai DLC12 2",
+    "Region": "Colony01",
+    "WorkAreaGuid": "618",
+    "Container": "GameObject",
+    "WorkAreaContainer": "EditorObject"
+  }
+]

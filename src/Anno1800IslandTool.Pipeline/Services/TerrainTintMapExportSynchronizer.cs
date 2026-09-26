@@ -20,7 +20,7 @@ public static class TerrainTintMapExportSynchronizer
         MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount)
     };
 
-    public static IReadOnlyDictionary<string, byte[]> BuildAllTintMapReplacements(IslandProject project, out string summary)
+    public static IReadOnlyDictionary<string, byte[]> BuildAllTintMapReplacements(IslandProject project, out string summary, RectI? sampleBounds = null, bool onlyMaterialRepairs = false)
     {
         ArgumentNullException.ThrowIfNull(project);
 
@@ -55,6 +55,11 @@ public static class TerrainTintMapExportSynchronizer
         }
 
         var targets = BuildTintPageMaterialTargets(project, existingTintPages, defaultPageSize, out var expectedTotal, out var existingTargetCount, out var missingTargetCount);
+        if (onlyMaterialRepairs) targets = targets.Where(target => project.EmergedTintPages.Contains(target.Key)).ToList();
+        if (sampleBounds is { } dirty)
+            targets = targets.Where(target => target.SampleBounds.Right >= dirty.Left - 1
+                && target.SampleBounds.Left <= dirty.Right + 1 && target.SampleBounds.Bottom >= dirty.Top - 1
+                && target.SampleBounds.Top <= dirty.Bottom + 1).ToList();
         if (targets.Count == 0)
         {
             summary = "Synchronisation tintmaps v43.1 : aucune page tintmap ne recoupe le masque actif.";
@@ -65,7 +70,8 @@ public static class TerrainTintMapExportSynchronizer
         Parallel.ForEach(targets, CpuParallelOptions, target =>
         {
             var pixels = BuildTintPixelsForPage(project, target.SampleBounds, target.Width, target.Height);
-            if (TryDecodeDxt1DdsToBgra32(target.ReferenceDdsBytes, out var refWidth, out var refHeight, out var referencePixels))
+            var repaired = project.EmergedTintPages.Contains(target.Key);
+            if (!repaired && TryDecodeDxt1DdsToBgra32(target.ReferenceDdsBytes, out var refWidth, out var refHeight, out var referencePixels))
             {
                 var syntheticWeight = target.AlreadyExists ? 0.72f : 0.64f;
                 BlendTintPixelsWithReference(pixels, target.Width, target.Height, referencePixels, refWidth, refHeight, syntheticWeight);
@@ -398,7 +404,9 @@ public static class TerrainTintMapExportSynchronizer
         var fineNoise = HashNoise01((int)Math.Floor(sampleX / 3.0), (int)Math.Floor(sampleY / 3.0)) - 0.5f;
 
         var landHeight01 = SmoothStep(0.0f, 16.0f, height);
-        var waterColor = (R: 130f, G: Lerp(74f, 86f, SmoothStep(-5.0f, 0.0f, height)), B: 128f);
+        // Tint modulates the actual underwater material; it must not add a magenta dye.
+        var waterLuminance = Lerp(112f, 128f, SmoothStep(-5.0f, 0.0f, height));
+        var waterColor = (R: waterLuminance, G: waterLuminance, B: waterLuminance);
         var beachColor = (R: 132f, G: 126f + (broadNoise * 5f), B: 130f);
         var grassColor = (R: 126f + (broadNoise * 3f), G: 116f + (landHeight01 * 12f) + (broadNoise * 8f) + (fineNoise * 3f), B: 128f + (fineNoise * 2f));
         // Tint roche presque neutre : le matériau de falaise fournit sa couleur.

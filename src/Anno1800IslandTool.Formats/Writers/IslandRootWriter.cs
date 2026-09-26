@@ -25,7 +25,7 @@ public sealed class IslandRootWriter
         sb.AppendLine("  </ActiveMapGrid>");
         sb.AppendLine($"  <ActiveMapRect>{root.ActiveMapRect.Left} {root.ActiveMapRect.Top} {root.ActiveMapRect.Right} {root.ActiveMapRect.Bottom}</ActiveMapRect>");
         sb.AppendLine("  <ObjectMetaInfo>");
-        var slotObjectsBlock = BuildSlotObjectsBlock(root.SlotObjects);
+        var slotObjectsBlock = SlotObjectsXmlWriter.Write(root.SlotObjects, root.RawUnknownFields.GetValueOrDefault("__raw"));
         if (!string.IsNullOrWhiteSpace(slotObjectsBlock))
         {
             sb.Append(slotObjectsBlock);
@@ -38,34 +38,6 @@ public sealed class IslandRootWriter
 
     private static string FormatActiveMapGridBits(IReadOnlyList<uint> bits)
         => string.Join(" ", bits.Select(value => unchecked((int)value).ToString(CultureInfo.InvariantCulture)));
-
-    private static string BuildSlotObjectsBlock(IReadOnlyList<SlotObjectDefinition> slots)
-    {
-        if (slots is null || slots.Count == 0)
-        {
-            return string.Empty;
-        }
-
-        var sb = new StringBuilder();
-        sb.AppendLine("    <SlotObjects>");
-        sb.AppendLine("      <None>");
-        sb.AppendLine("        <value>");
-        sb.AppendLine($"          <id>{slots.Count}</id>");
-        sb.AppendLine("        </value>");
-        sb.AppendLine("      </None>");
-        sb.AppendLine("      <None>");
-        foreach (var slot in slots)
-        {
-            sb.AppendLine("        <None>");
-            sb.AppendLine($"          <ObjectId>{slot.ObjectId.ToString(CultureInfo.InvariantCulture)}</ObjectId>");
-            sb.AppendLine($"          <ObjectGuid>{slot.ObjectGuid}</ObjectGuid>");
-            sb.AppendLine($"          <Position>{FormatFloat(slot.Position.X)} {FormatFloat(slot.Position.Y)} {FormatFloat(slot.Position.Z)}</Position>");
-            sb.AppendLine("        </None>");
-        }
-        sb.AppendLine("      </None>");
-        sb.Append("    </SlotObjects>");
-        return sb.ToString();
-    }
 
     private static string FormatFloat(float value)
         => value.ToString("0.######", CultureInfo.InvariantCulture).Replace('.', ',');

@@ -120,6 +120,9 @@ public partial class Terrain3DGpuWindow
             _pendingTreeInstances.ToArray(),
             _pendingRiverPoints.ToArray(),
             _pendingRiverSlotClicks.ToArray(),
+            _pendingMines.ToArray(),
+            _mineEntrance,
+            _mineAsset,
             _footprintDirty,
             _selectedCoast,
             _coastStart,
@@ -176,6 +179,11 @@ public partial class Terrain3DGpuWindow
         _pendingRiverPoints.AddRange(snapshot.RiverPoints);
         _pendingRiverSlotClicks.Clear();
         _pendingRiverSlotClicks.AddRange(snapshot.RiverSlotClicks);
+        _pendingMines.Clear();
+        _pendingMines.AddRange(snapshot.Mines);
+        _mineEntrance = snapshot.MineEntrance;
+        _mineAsset = snapshot.MineAsset;
+        RefreshMinePreview();
         _footprintDirty = snapshot.FootprintDirty;
         _selectedCoast = snapshot.SelectedCoast;
         _coastStart = snapshot.CoastStart;
@@ -276,6 +284,7 @@ public partial class Terrain3DGpuWindow
                left.TreeInstances.SequenceEqual(right.TreeInstances) &&
                left.RiverPoints.SequenceEqual(right.RiverPoints) &&
                left.RiverSlotClicks.SequenceEqual(right.RiverSlotClicks) &&
+               left.Mines.SequenceEqual(right.Mines) && left.MineEntrance.Equals(right.MineEntrance) && Equals(left.MineAsset,right.MineAsset) &&
                ReferenceEquals(left.SelectedCoast, right.SelectedCoast) &&
                left.CoastStart.Equals(right.CoastStart) &&
                left.CoastLength.Equals(right.CoastLength) &&
@@ -293,6 +302,9 @@ public partial class Terrain3DGpuWindow
         GpuTreeInstance[] TreeInstances,
         Vector3[] RiverPoints,
         Vector3[] RiverSlotClicks,
+        Anno1800IslandTool.Pipeline.Services.MineSlotPlacement[] Mines,
+        Anno1800IslandTool.Core.Common.Float3? MineEntrance,
+        Anno1800IslandTool.Pipeline.Services.MineSlotAsset? MineAsset,
         bool FootprintDirty,
         FootprintCoast? SelectedCoast,
         double CoastStart,

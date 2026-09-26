@@ -36,6 +36,8 @@ public partial class TerrainMaterialMapWindow : Window
     private readonly Stack<MaterialToolSnapshot> _materialUndoHistory = new();
     private readonly Stack<MaterialToolSnapshot> _materialRedoHistory = new();
     private MaterialToolSnapshot? _activeMaterialHistoryAction;
+    private string? _observedTerrainText;
+    private string? _observedRd3dText;
 
     public event EventHandler? ProjectApplied;
 
@@ -47,6 +49,8 @@ public partial class TerrainMaterialMapWindow : Window
         BeachProtectionCheckBox.DataContext = this;
         _editor = editor ?? throw new ArgumentNullException(nameof(editor));
         _workingMap = _project.Rd3d.MaterialMap.Clone();
+        _observedTerrainText = _project.RawContent.GameDataText;
+        _observedRd3dText = _project.RawContent.Rd3dText;
         MaterialSetSelectionCoordinator.SelectionChanged += MaterialSetSelectionCoordinator_SelectionChanged;
 
         PopulateEmbeddedMaterialSets();
@@ -329,7 +333,7 @@ public partial class TerrainMaterialMapWindow : Window
             ? $"Materialset chargé : {fileName}. rd3d.xml pointera vers {gameMaterialSetPath} à l'export."
             : $"Materialset chargé : {fileName}. rd3d.xml n'a pas été modifié.";
 
-        return $"{message} {terrainCount} matériau(x) terrain Type=0 disponible(s), {objectCount} autre(s). Les palettes peinture et seuils hauteur sont actualisées. {environmentReport}";
+        return $"{message} {terrainCount} matériau(x) terrain Type=0 disponible(s), {objectCount} autre(s). Les palettes de peinture et de topologie sont actualisées. {environmentReport}";
     }
 
     private void MaterialMapImage_MouseMove(object sender, MouseEventArgs e)
@@ -493,7 +497,20 @@ public partial class TerrainMaterialMapWindow : Window
             return false;
         }
 
-        _workingMap = _project.Rd3d.MaterialMap.Clone();
+        var current = _project.Rd3d.MaterialMap;
+        if (ReferenceEquals(_observedTerrainText, _project.RawContent.GameDataText)
+            && ReferenceEquals(_observedRd3dText, _project.RawContent.Rd3dText)
+            && current.Width == _workingMap.Width && current.Height == _workingMap.Height
+            && current.MaterialIdBlockSize == _workingMap.MaterialIdBlockSize
+            && current.PackedMaterialIds.AsSpan().SequenceEqual(_workingMap.PackedMaterialIds)
+            && current.PackedMaterialAlphas.AsSpan().SequenceEqual(_workingMap.PackedMaterialAlphas))
+        {
+            status = "Carte et terrain inchangés.";
+            return false;
+        }
+        _observedTerrainText = _project.RawContent.GameDataText;
+        _observedRd3dText = _project.RawContent.Rd3dText;
+        _workingMap = current.Clone();
         _editState = new TerrainMaterialEditState();
         ResetMaterialHistory();
         InvalidateCoastTransitionBase();
@@ -1104,6 +1121,7 @@ public partial class TerrainMaterialMapWindow : Window
     private void RefreshTopologyMaterialSelectors()
     {
         var rows = _paletteRows.Where(r => r.IsTerrain).ToList();
+        SetCoastComboItems(FlatTilingMaterialComboBox, rows, SelectMaterialByKeywords(rows, new[] { "dirt", "mud", "earth", "soil" }, 2));
         SetCoastComboItems(TopologyFlatMaterialComboBox, rows, SelectMaterialByKeywords(rows, new[] { "grass", "meadow", "earth" }, 2));
         SetCoastComboItems(TopologyGentleMaterialComboBox, rows, SelectMaterialByKeywords(rows, new[] { "grass", "earth", "dirt" }, 2));
         SetCoastComboItems(TopologySteepMaterialComboBox, rows, SelectMaterialByKeywords(rows, new[] { "rock", "cliff", "stone" }, 16));
@@ -1114,10 +1132,14 @@ public partial class TerrainMaterialMapWindow : Window
     private void SetTopologyControls(TerrainTopologyMaterialOptions options)
     {
         SetCoastComboById(TopologyFlatMaterialComboBox, options.FlatMaterialId);
+        SetCoastComboById(FlatTilingMaterialComboBox, options.FlatTilingMaterialId);
         SetCoastComboById(TopologyGentleMaterialComboBox, options.GentleSlopeMaterialId);
         SetCoastComboById(TopologySteepMaterialComboBox, options.SteepSlopeMaterialId);
         SetCoastComboById(TopologyRidgeMaterialComboBox, options.RidgeMaterialId);
         SetCoastComboById(TopologyHollowMaterialComboBox, options.HollowMaterialId);
+        FlatTilingCheckBox.IsChecked = options.FlatTilingEnabled;
+        FlatTileSizeTextBox.Text = (options.FlatTileSize / 2).ToString(CultureInfo.InvariantCulture);
+        FlatTileContrastTextBox.Text = options.FlatTileContrast.ToString(CultureInfo.InvariantCulture);
         TopologyFlatSlopeTextBox.Text = options.FlatSlopeMaximum.ToString("0.###", CultureInfo.InvariantCulture);
         TopologySteepSlopeTextBox.Text = options.SteepSlopeMinimum.ToString("0.###", CultureInfo.InvariantCulture);
         TopologyCurvatureTextBox.Text = options.CurvatureSensitivity.ToString("0.###", CultureInfo.InvariantCulture);
@@ -1127,11 +1149,21 @@ public partial class TerrainMaterialMapWindow : Window
         TopologyPreserveWaterBeachCheckBox.IsChecked = options.PreserveExistingWaterAndBeach;
     }
 
+    internal bool IsTilingOverlayAbove(int baseId, int overlayId)
+    {
+        var materials=_project.MaterialSet?.Materials;
+        return materials is null || materials.FindIndex(m=>m.Id==overlayId)>materials.FindIndex(m=>m.Id==baseId);
+    }
+
     private TerrainTopologyMaterialOptions ReadTopologyOptions()
     {
         var options = new TerrainTopologyMaterialOptions
         {
             FlatMaterialId = SelectedCoastMaterialId(TopologyFlatMaterialComboBox, 2),
+            FlatTilingEnabled = FlatTilingCheckBox.IsChecked == true,
+            FlatTilingMaterialId = SelectedCoastMaterialId(FlatTilingMaterialComboBox, 2),
+            FlatTileSize = ParseIntTextBox(FlatTileSizeTextBox, 4) * 2,
+            FlatTileContrast = ParseIntTextBox(FlatTileContrastTextBox, 12),
             GentleSlopeMaterialId = SelectedCoastMaterialId(TopologyGentleMaterialComboBox, 2),
             SteepSlopeMaterialId = SelectedCoastMaterialId(TopologySteepMaterialComboBox, 16),
             RidgeMaterialId = SelectedCoastMaterialId(TopologyRidgeMaterialComboBox, 16),
@@ -1161,6 +1193,7 @@ public partial class TerrainMaterialMapWindow : Window
             }
         }
 
+        options.FlatTilingOverlayAboveBase = IsTilingOverlayAbove(options.FlatMaterialId,options.FlatTilingMaterialId);
         options.Normalize();
         return options;
     }

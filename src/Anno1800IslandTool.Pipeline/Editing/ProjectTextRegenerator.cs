@@ -36,6 +36,9 @@ public sealed class ProjectTextRegenerator
 
     public void RegenerateRd3dText(IslandProject project)
     {
+        var emerged = Anno1800IslandTool.Pipeline.Services.EmergedTerrainMaterials.Ensure(project);
+        if (emerged > 0 || Anno1800IslandTool.Pipeline.Services.NearTerrainMetadata.HasMissing(project))
+            new IslandProjectEditor().ResynchronizeMeshUsedMaterialBitsFromMaterialMap(project);
         if (Anno1800IslandTool.Pipeline.Services.CoastalMaterialUnderlay.Ensure(project) > 0)
             new IslandProjectEditor().ResynchronizeMeshUsedMaterialBitsFromMaterialMap(project);
         var fallback = _rd3dWriter.Write(project.Rd3d);
@@ -577,14 +580,9 @@ public sealed class ProjectTextRegenerator
             sb.Append(levelsBody, last, range.ContentStart - last);
 
             var levelBody = levelsBody.Substring(range.ContentStart, range.ContentLength);
-            // v43.0 : HasMeshArray est une métadonnée de coverage/streaming, pas seulement
-            // une liste de fichiers mesh régénérés. LOD0/LOD1 n'ont pas de géométrie injectée,
-            // mais leur coverage proche doit suivre l'emprise active pour éviter que le moteur
-            // continue à limiter l'île à l'ancien masque. LOD9+ reste vanilla.
-            if (lod <= MeshPageClassifier.LastEditableGeometryLod)
-            {
-                levelBody = ReplaceRd3dSingleLevelHasMeshArray(levelBody, rd3d, heightMap, root, mask, gridWidth, gridHeight, lod);
-            }
+            // Coverage metadata must follow the canvas at every level, including LOD9.
+            // This does not inject geometry into metadata-only mesh files.
+            levelBody = ReplaceRd3dSingleLevelHasMeshArray(levelBody, rd3d, heightMap, root, mask, gridWidth, gridHeight, lod);
 
             sb.Append(levelBody);
             last = range.ContentStart + range.ContentLength;
@@ -628,7 +626,8 @@ public sealed class ProjectTextRegenerator
             return levelBody;
         }
 
-        var hasMesh = BuildRd3dHasMeshArray(root, activeMask, gridWidth, gridHeight, width, height);
+        var nodeSize = ReadIntTag(levelBody, "NodeSizeWS") ?? 0;
+        var hasMesh = BuildRd3dHasMeshArray(root, activeMask, gridWidth, gridHeight, width, height, nodeSize);
         var updatedHasMesh = ReplaceTagValue(hasMeshBody!, "x", width.ToString(CultureInfo.InvariantCulture));
         updatedHasMesh = ReplaceTagValue(updatedHasMesh, "y", height.ToString(CultureInfo.InvariantCulture));
         updatedHasMesh = ReplaceTagValue(updatedHasMesh, "bits", FormatIntList(PackBitsAlignedRows(hasMesh, width, height)));
@@ -641,17 +640,17 @@ public sealed class ProjectTextRegenerator
         int gridWidth,
         int gridHeight,
         int levelWidth,
-        int levelHeight)
+        int levelHeight, int nodeSize = 0)
     {
         var result = new bool[levelWidth * levelHeight];
         for (var y = 0; y < levelHeight; y++)
         {
-            var minWorldY = y / (double)levelHeight * gridHeight;
-            var maxWorldY = (y + 1) / (double)levelHeight * gridHeight;
+            var minWorldY = nodeSize > 0 ? y * (double)nodeSize * 32 : y / (double)levelHeight * gridHeight;
+            var maxWorldY = nodeSize > 0 ? Math.Min(gridHeight, (y + 1) * (double)nodeSize * 32) : (y + 1) / (double)levelHeight * gridHeight;
             for (var x = 0; x < levelWidth; x++)
             {
-                var minWorldX = x / (double)levelWidth * gridWidth;
-                var maxWorldX = (x + 1) / (double)levelWidth * gridWidth;
+                var minWorldX = nodeSize > 0 ? x * (double)nodeSize * 32 : x / (double)levelWidth * gridWidth;
+                var maxWorldX = nodeSize > 0 ? Math.Min(gridWidth, (x + 1) * (double)nodeSize * 32) : (x + 1) / (double)levelWidth * gridWidth;
                 result[(y * levelWidth) + x] = ActiveMapGridMaskCodec.IntersectsWorldBounds(
                     activeMask,
                     root.ActiveMapGrid,
@@ -747,7 +746,7 @@ public sealed class ProjectTextRegenerator
             return levelBody;
         }
 
-        var flags = BuildRd3dHasMeshArray(root, activeMask, gridWidth, gridHeight, width, height)
+        var flags = BuildRd3dHasMeshArray(root, activeMask, gridWidth, gridHeight, width, height, 16 << lod)
             .Select(active => active ? 1 : 0)
             .ToArray();
         var updatedFlags = ReplaceTagValue(flagsBody!, "width", width.ToString(CultureInfo.InvariantCulture));
@@ -814,13 +813,7 @@ public sealed class ProjectTextRegenerator
             sb.Append(levelsBody, last, range.ContentStart - last);
 
             var block = levelsBody.Substring(range.ContentStart, range.ContentLength);
-            // v43.0 : les bounds proches LOD0/LOD1 participent au coverage/culling même si
-            // aucune géométrie n'est injectée dans leurs fichiers mesh. On synchronise donc
-            // MinY/MaxY pour LOD0..LOD8 et on laisse LOD9+ vanilla.
-            if (lod <= MeshPageClassifier.LastEditableGeometryLod)
-            {
-                block = ReplaceRd3dSingleLevelBounds(block, heightMap);
-            }
+            block = ReplaceRd3dSingleLevelBounds(block, heightMap);
 
             sb.Append(block);
             last = range.ContentStart + range.ContentLength;
@@ -846,7 +839,10 @@ public sealed class ProjectTextRegenerator
             return levelBody;
         }
 
-        var (mins, maxs) = BuildRd3dLevelMinMaxArrays(heightMap, width, height);
+        var nodeSize = ReadIntTag(levelBody, "NodeSizeWS") ?? 0;
+        var (mins, maxs) = BuildRd3dLevelMinMaxArrays(heightMap, width, height, nodeSize);
+        levelBody = ReplaceTagValue(levelBody, "LevelSizeX", width.ToString(CultureInfo.InvariantCulture));
+        levelBody = ReplaceTagValue(levelBody, "LevelSizeZ", height.ToString(CultureInfo.InvariantCulture));
 
         var updatedMin = ReplaceTagValue(minBody!, "width", width.ToString(CultureInfo.InvariantCulture));
         updatedMin = ReplaceTagValue(updatedMin, "height", height.ToString(CultureInfo.InvariantCulture));
@@ -879,7 +875,7 @@ public sealed class ProjectTextRegenerator
         return fine.ToString(CultureInfo.InvariantCulture);
     }
 
-    private static (int[] Mins, int[] Maxs) BuildRd3dLevelMinMaxArrays(CoarseHeightMap heightMap, int levelWidth, int levelHeight)
+    private static (int[] Mins, int[] Maxs) BuildRd3dLevelMinMaxArrays(CoarseHeightMap heightMap, int levelWidth, int levelHeight, int nodeSize = 0)
     {
         var mins = new int[levelWidth * levelHeight];
         var maxs = new int[levelWidth * levelHeight];
@@ -889,6 +885,8 @@ public sealed class ProjectTextRegenerator
         {
             var top = (int)Math.Floor((double)y / levelHeight * heightMap.Height);
             var bottom = (int)Math.Ceiling((double)(y + 1) / levelHeight * heightMap.Height) - 1;
+            // NodeSizeWS fixes the spacing; a rounded final row is shorter, not all rows.
+            if (nodeSize > 0) { top = y * nodeSize * 2; bottom = (y + 1) * nodeSize * 2; }
             top = Math.Clamp(top, 0, heightMap.Height - 1);
             bottom = Math.Clamp(bottom, top, heightMap.Height - 1);
 
@@ -896,6 +894,7 @@ public sealed class ProjectTextRegenerator
             {
                 var left = (int)Math.Floor((double)x / levelWidth * heightMap.Width);
                 var right = (int)Math.Ceiling((double)(x + 1) / levelWidth * heightMap.Width) - 1;
+                if (nodeSize > 0) { left = x * nodeSize * 2; right = (x + 1) * nodeSize * 2; }
                 left = Math.Clamp(left, 0, heightMap.Width - 1);
                 right = Math.Clamp(right, left, heightMap.Width - 1);
 
@@ -1708,7 +1707,7 @@ public sealed class ProjectTextRegenerator
 
     private static string ReplaceSlotObjects(string text, IReadOnlyList<SlotObjectDefinition> slots)
     {
-        var generated = BuildSlotObjectsBlock(slots);
+        var generated = SlotObjectsXmlWriter.Write(slots, text);
         // Les anciennes versions pouvaient insérer un nouveau bloc à chaque
         // régénération. On repart toujours d'un texte débarrassé de tous les
         // SlotObjects afin de garantir un singleton propre dans ObjectMetaInfo.
@@ -1733,34 +1732,6 @@ public sealed class ProjectTextRegenerator
         }
 
         return PseudoXmlSafety.InsertBeforeOuterRootClosingTagOrAppend(text, generated);
-    }
-
-    private static string BuildSlotObjectsBlock(IReadOnlyList<SlotObjectDefinition> slots)
-    {
-        if (slots is null || slots.Count == 0)
-        {
-            return string.Empty;
-        }
-
-        var sb = new StringBuilder();
-        sb.AppendLine("<SlotObjects>");
-        sb.AppendLine("  <None>");
-        sb.AppendLine("    <value>");
-        sb.AppendLine($"      <id>{slots.Count}</id>");
-        sb.AppendLine("    </value>");
-        sb.AppendLine("  </None>");
-        sb.AppendLine("  <None>");
-        foreach (var slot in slots)
-        {
-            sb.AppendLine("    <None>");
-            sb.AppendLine($"      <ObjectId>{slot.ObjectId.ToString(CultureInfo.InvariantCulture)}</ObjectId>");
-            sb.AppendLine($"      <ObjectGuid>{slot.ObjectGuid}</ObjectGuid>");
-            sb.AppendLine($"      <Position>{FormatFloat(slot.Position.X)} {FormatFloat(slot.Position.Y)} {FormatFloat(slot.Position.Z)}</Position>");
-            sb.AppendLine("    </None>");
-        }
-        sb.AppendLine("  </None>");
-        sb.Append("</SlotObjects>");
-        return sb.ToString();
     }
 
     private static string FormatFloat(float value)

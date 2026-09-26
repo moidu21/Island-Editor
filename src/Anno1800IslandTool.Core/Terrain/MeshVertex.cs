@@ -14,9 +14,9 @@ public sealed class MeshVertex
     public int Raw6 { get; set; }
     public int Raw7 { get; set; }
 
-    public int X => Raw0;
+    public int X => unchecked((ushort)Raw0);
     public int HeightRaw => Raw1;
-    public int Z => Raw2;
+    public int Z => unchecked((ushort)Raw2);
 
     /// <summary>
     /// Ancienne hauteur fine interne : Raw1 - 32767. Conservée pour compatibilité UI/comparaisons.

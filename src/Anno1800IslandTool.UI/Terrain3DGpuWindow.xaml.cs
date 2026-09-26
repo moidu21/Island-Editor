@@ -176,6 +176,7 @@ public partial class Terrain3DGpuWindow : Window
         InitializeFootprintMask();
         InitializeTreeBiomeDisplay();
         InitializeRiverSlotUi();
+        InitializeMineUi();
         UpdateMaximumIslandSizeDisplay();
         UpdateNavigationBinding();
         PopulateLods(preferredLod);
@@ -415,6 +416,7 @@ public partial class Terrain3DGpuWindow : Window
                 ScheduleBrushRingRefresh();
             }
             DrawMaximumAreaBoundary();
+            RefreshMinePreview();
             StatusTextBlock.Text = BuildStatusText(build.Positions.Length, build.Indices.Length / 3, stopwatch.Elapsed);
         }
         catch (OperationCanceledException)
@@ -690,6 +692,13 @@ public partial class Terrain3DGpuWindow : Window
             _isPainting = true;
             GpuViewport.CaptureMouse();
             ApplyFootprintBrush(args.HitTestResult.PointHit, mode == GpuBrushMode.AddFootprint);
+            e.Handled = true;
+            return;
+        }
+        if (mode == GpuBrushMode.Mine)
+        {
+            AddMinePoint(args.HitTestResult.PointHit);
+            CompleteToolHistoryAction();
             e.Handled = true;
             return;
         }
@@ -1246,7 +1255,21 @@ public partial class Terrain3DGpuWindow : Window
     }
 
     private void BrushToolListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        => RefreshActiveToolUi();
+    {
+        RefreshActiveToolUi();
+        if (GpuToolTabs is null) return;
+        var mode=GetBrushMode();
+        GpuToolTabs.SelectedIndex=mode is GpuBrushMode.Mine or GpuBrushMode.Trees or GpuBrushMode.River or GpuBrushMode.Beach or GpuBrushMode.MeshBeach ? 1
+            : mode is GpuBrushMode.AddFootprint or GpuBrushMode.RemoveFootprint ? 2 : 0;
+        if(GpuToolTabs.SelectedItem is TabItem tab && tab.Content is ScrollViewer viewer && viewer.Content is StackPanel panel)
+        foreach(var expander in panel.Children.OfType<Expander>())
+        {
+            var title=expander.Header?.ToString()??"";
+            if(GpuToolTabs.SelectedIndex==1)expander.IsExpanded=mode==GpuBrushMode.Mine?title.StartsWith("Mines"):
+                mode==GpuBrushMode.Trees?title.Contains("arbres"):mode==GpuBrushMode.River?title.Contains("rivière"):title.Contains("plage");
+            if(GpuToolTabs.SelectedIndex==2&&title.Contains("emprise"))expander.IsExpanded=true;
+        }
+    }
 
     private void RefreshActiveToolUi()
     {
@@ -1295,6 +1318,7 @@ public partial class Terrain3DGpuWindow : Window
             GpuBrushMode.RemoveFootprint => "Retirer une zone : peignez les parties à supprimer. Le mesh, les dérivés et le masque gameplay seront retirés à l’application.",
             GpuBrushMode.Trees => "Arbres : cliquez ou peignez sur la terre. Le rayon, le motif et la densité déterminent la forêt créée.",
             GpuBrushMode.MeshBeach => "Plage sur maillage : choisissez directement une ligne où le relief traverse le niveau de la mer, sans utiliser le contour vert de l'empreinte.",
+            GpuBrushMode.Mine => "Mine : cliquez l’entrée, puis la montagne. Les deux points définissent l’orientation et la zone de travail.",
             GpuBrushMode.River => "Rivière : cliquez les points dans l’ordre de l’écoulement. L’aperçu arrondit automatiquement les changements de direction.",
             _ => "Déplacer : bouton gauche ou droit pour tourner, molette maintenue pour déplacer, roulette pour zoomer."
         };
@@ -1513,6 +1537,7 @@ public partial class Terrain3DGpuWindow : Window
             _hasDirectProjectCommit = _applyMaximumExpansion is not null;
             InitializeFootprintMask();
             DrawMaximumAreaBoundary();
+            RefreshMinePreview();
             RebaseTransactionAfterDirectCommit();
             var selectedLod = GetSelectedLod();
             _initializing = true;
@@ -1819,6 +1844,8 @@ public partial class Terrain3DGpuWindow : Window
         var validated = false;
         try
         {
+            if (_mineEntrance is not null)
+                throw new InvalidOperationException("Terminez le placement de la mine par un second clic, ou retirez le dernier placement.");
             if (_validateEntireTerrain is null)
                 throw new InvalidOperationException("Le service de validation complète n’est pas disponible.");
             StatusTextBlock.Text = "Validation complète de tous les LOD et dérivés en cours…";
@@ -1836,6 +1863,8 @@ public partial class Terrain3DGpuWindow : Window
             }
             var summary = _validateEntireTerrain(GetSelectedLod(), GetChangedWorldRegions());
             _hasDirectProjectCommit = true;
+            RebaseTransactionAfterDirectCommit();
+            CommitPendingMines();
             RebaseTransactionAfterDirectCommit();
             InitializeFootprintMask();
             if (!closeAfterValidation) await ReloadGpuGeometryAsync();
@@ -1889,6 +1918,7 @@ public partial class Terrain3DGpuWindow : Window
         9 => GpuBrushMode.Trees,
         10 => GpuBrushMode.MeshBeach,
         11 => GpuBrushMode.River,
+        12 => GpuBrushMode.Mine,
         _ => GpuBrushMode.Navigation
     };
 
@@ -2181,7 +2211,8 @@ public partial class Terrain3DGpuWindow : Window
         RemoveFootprint,
         Trees,
         MeshBeach,
-        River
+        River,
+        Mine
     }
 
     private enum GpuBrushPattern

@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering"
-        Title="Terrain 3D v46.69 — pages de hauteur alignées et aperçu de surface"
+        Title="Terrain 3D v46.77 — matériaux carrelés et menus organisés"
         Width="1780"
         Height="1020"
         WindowStartupLocation="CenterOwner">
@@ -275,3 +275,4 @@
                    Text="v42 terrain 3D : extension d’île via masque ActiveMapGrid.bits précis, sans remplissage rectangulaire. Mesh/MaterialMap/GameData/normalmaps/tintmaps sont dérivés du masque actif autant que possible ; les nouveaux triangles ne sont injectés que dans les cellules actives hors footprint vanilla. Flatten prend la hauteur du centre du pinceau. X/Z, indices, nombre/ordre des vertices et Raw3..7 viennent du mesh courant/édité ; Raw1/Y, UsedMaterialBits et normal/height pages sont resynchronisés. Navigation = outil Navigation. Peinture = outil actif + clic gauche. Pan = clic droit, zoom = molette."/>
     </Grid>
 </Window>
+

@@ -146,14 +146,14 @@ public sealed class MeshPageReader
         {
             foreach (var vertex in cluster.Vertices)
             {
-                minX = Math.Min(minX, vertex.Raw0);
-                maxX = Math.Max(maxX, vertex.Raw0);
+                minX = Math.Min(minX, vertex.X);
+                maxX = Math.Max(maxX, vertex.X);
                 minRawHeight = Math.Min(minRawHeight, vertex.Raw1);
                 maxRawHeight = Math.Max(maxRawHeight, vertex.Raw1);
                 minDecodedHeight = Math.Min(minDecodedHeight, vertex.DecodedHeight);
                 maxDecodedHeight = Math.Max(maxDecodedHeight, vertex.DecodedHeight);
-                minZ = Math.Min(minZ, vertex.Raw2);
-                maxZ = Math.Max(maxZ, vertex.Raw2);
+                minZ = Math.Min(minZ, vertex.Z);
+                maxZ = Math.Max(maxZ, vertex.Z);
             }
         }
 
@@ -260,3 +260,4 @@ public sealed class MeshPageReader
         return GroundObjectKind.Decoration;
     }
 }
+

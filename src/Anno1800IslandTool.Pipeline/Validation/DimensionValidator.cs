@@ -24,18 +24,18 @@ public sealed class DimensionValidator : IValidator<IslandProject>
         if (project.Root.ActiveMapGrid.X != 0 && project.Root.ActiveMapGrid.X != expectedActiveGrid)
         {
             report.Add(
-                ValidationSeverity.Error,
+                ValidationSeverity.Warning,
                 ValidationCode.InconsistentDimensions,
-                $"ActiveMapGrid.X incohérent. Attendu {expectedActiveGrid}, obtenu {project.Root.ActiveMapGrid.X}.",
+                $"ActiveMapGrid.X personnalisé : {project.Root.ActiveMapGrid.X} (valeur habituelle {expectedActiveGrid}). Export autorisé.",
                 project.Metadata.RootIslandFileName);
         }
 
         if (project.Root.ActiveMapGrid.Y != 0 && project.Root.ActiveMapGrid.Y != expectedActiveGrid)
         {
             report.Add(
-                ValidationSeverity.Error,
+                ValidationSeverity.Warning,
                 ValidationCode.InconsistentDimensions,
-                $"ActiveMapGrid.Y incohérent. Attendu {expectedActiveGrid}, obtenu {project.Root.ActiveMapGrid.Y}.",
+                $"ActiveMapGrid.Y personnalisé : {project.Root.ActiveMapGrid.Y} (valeur habituelle {expectedActiveGrid}). Export autorisé.",
                 project.Metadata.RootIslandFileName);
         }
 

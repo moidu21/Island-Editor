@@ -17,6 +17,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
     private TerrainMaterialCellPattern? _pickedCellPattern;
     private bool _isPainting;
     private bool _isRefreshing;
+    private System.Windows.Threading.DispatcherTimer? _mapPreviewTimer;
     private bool _isApplyingEmbeddedMaterialSet;
     private bool _isUpdatingCoastControls;
     private bool _isUpdatingCellEditor;
@@ -51,7 +52,6 @@ public partial class TerrainMaterialMapLargeWindow : Window
         ViewModeComboBox.ItemsSource = new[]
         {
             new LargeViewModeRow(UiLocalizationManager.T("Matériaux / peinture"), LargeViewMode.PaintMap),
-            new LargeViewModeRow(UiLocalizationManager.T("Seuils hauteur monde"), LargeViewMode.CoastThresholds),
             new LargeViewModeRow(UiLocalizationManager.T("Topologie du relief"), LargeViewMode.Topology)
         };
         ViewModeComboBox.SelectedIndex = 0;
@@ -75,7 +75,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
         RefreshUndoRedoState();
         LoadSavedGameDataPath();
         SetMaterialView3D(true);
-        Closed += (_, _) => DisposeMaterial3D();
+        Closed += (_, _) => { _mapPreviewTimer?.Stop(); DisposeMaterial3D(); };
     }
 
     public void RefreshFromParentData(bool refreshPalette)
@@ -197,10 +197,14 @@ public partial class TerrainMaterialMapLargeWindow : Window
         var rows = _ownerWindow.GetTerrainMaterialPaletteRows().ToList();
         var options = _ownerWindow.GetTopologyOptionsForLargeWindow();
         SetCoastComboItems(TopologyFlatMaterialComboBox, rows, options.FlatMaterialId);
+        SetCoastComboItems(FlatTilingMaterialComboBox, rows, options.FlatTilingMaterialId);
         SetCoastComboItems(TopologyGentleMaterialComboBox, rows, options.GentleSlopeMaterialId);
         SetCoastComboItems(TopologySteepMaterialComboBox, rows, options.SteepSlopeMaterialId);
         SetCoastComboItems(TopologyRidgeMaterialComboBox, rows, options.RidgeMaterialId);
         SetCoastComboItems(TopologyHollowMaterialComboBox, rows, options.HollowMaterialId);
+        FlatTilingCheckBox.IsChecked = options.FlatTilingEnabled;
+        FlatTileSizeTextBox.Text = (options.FlatTileSize / 2).ToString(CultureInfo.InvariantCulture);
+        FlatTileContrastTextBox.Text = options.FlatTileContrast.ToString(CultureInfo.InvariantCulture);
         TopologyFlatSlopeTextBox.Text = FormatFloat(options.FlatSlopeMaximum);
         TopologySteepSlopeTextBox.Text = FormatFloat(options.SteepSlopeMinimum);
         TopologyCurvatureTextBox.Text = FormatFloat(options.CurvatureSensitivity);
@@ -218,6 +222,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
 
     private void RefreshMapImage()
     {
+        _mapPreviewTimer?.Stop();
         BrushPreviewEllipse.Visibility = Visibility.Collapsed;
         if (CurrentViewMode == LargeViewMode.CoastThresholds)
         {
@@ -943,6 +948,10 @@ public partial class TerrainMaterialMapLargeWindow : Window
         var options = new TerrainTopologyMaterialOptions
         {
             FlatMaterialId = SelectedCoastMaterialId(TopologyFlatMaterialComboBox, 2),
+            FlatTilingEnabled = FlatTilingCheckBox.IsChecked == true,
+            FlatTilingMaterialId = SelectedCoastMaterialId(FlatTilingMaterialComboBox, 2),
+            FlatTileSize = ParseIntTextBox(FlatTileSizeTextBox, 4) * 2,
+            FlatTileContrast = ParseIntTextBox(FlatTileContrastTextBox, 12),
             GentleSlopeMaterialId = SelectedCoastMaterialId(TopologyGentleMaterialComboBox, 2),
             SteepSlopeMaterialId = SelectedCoastMaterialId(TopologySteepMaterialComboBox, 16),
             RidgeMaterialId = SelectedCoastMaterialId(TopologyRidgeMaterialComboBox, 16),
@@ -972,6 +981,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
             }
         }
 
+        options.FlatTilingOverlayAboveBase = _ownerWindow.IsTilingOverlayAbove(options.FlatMaterialId,options.FlatTilingMaterialId);
         options.Normalize();
         return options;
     }
@@ -1102,7 +1112,14 @@ public partial class TerrainMaterialMapLargeWindow : Window
 
         if (CurrentViewMode == LargeViewMode.CoastThresholds)
         {
-            RefreshMapImage();
+            if (_mapPreviewTimer is null)
+            {
+                _mapPreviewTimer = new System.Windows.Threading.DispatcherTimer
+                { Interval = TimeSpan.FromMilliseconds(160) };
+                _mapPreviewTimer.Tick += (_, _) => RefreshMapImage();
+            }
+            _mapPreviewTimer.Stop();
+            _mapPreviewTimer.Start();
         }
     }
 
@@ -1145,6 +1162,16 @@ public partial class TerrainMaterialMapLargeWindow : Window
         var step = e.Delta > 0 ? 25 : -25;
         ZoomSlider.Value = Math.Clamp(ZoomSlider.Value + step, ZoomSlider.Minimum, ZoomSlider.Maximum);
         e.Handled = true;
+    }
+
+    private void MenuScrollViewer_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        // Scrolling the menu must not change a focused combo/slider and rebuild the terrain.
+        if (sender is ScrollViewer scroll && Keyboard.Modifiers == ModifierKeys.None)
+        {
+            scroll.ScrollToVerticalOffset(scroll.VerticalOffset - e.Delta);
+            e.Handled = true;
+        }
     }
 
     private void UpdateSliderLabels()
