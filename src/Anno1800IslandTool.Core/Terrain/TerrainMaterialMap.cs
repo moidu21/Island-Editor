@@ -222,7 +222,7 @@ public sealed class TerrainMaterialMap
             PackedMaterialAlphas = PackedMaterialAlphas.ToArray()
         };
 
-    public int GetDominantMaterialId(int x, int y)
+    public int GetDominantMaterialId(int x, int y, IReadOnlyDictionary<int, int>? drawOrder = null)
     {
         EnsureCoordinates(x, y);
         var ids = PackedMaterialIds.Length == 0 ? 0u : PackedMaterialIds[GetMaterialIdBlockIndex(x, y)];
@@ -232,12 +232,16 @@ public sealed class TerrainMaterialMap
         for (var slot = 1; slot < TerrainMaterialPackEncoding.SlotCount; slot++)
         {
             var weight = (int)((alphas >> (slot * TerrainMaterialPackEncoding.BitsPerSlot)) & TerrainMaterialPackEncoding.SlotMask);
-            if (weight > bestWeight) { bestWeight = weight; bestSlot = slot; }
+            var id = (int)((ids >> (slot * TerrainMaterialPackEncoding.BitsPerSlot)) & TerrainMaterialPackEncoding.SlotMask);
+            var bestId = (int)((ids >> (bestSlot * TerrainMaterialPackEncoding.BitsPerSlot)) & TerrainMaterialPackEncoding.SlotMask);
+            if (weight > bestWeight || (weight > 0 && weight == bestWeight && drawOrder is not null &&
+                drawOrder.GetValueOrDefault(id, -1) > drawOrder.GetValueOrDefault(bestId, -1)))
+            { bestWeight = weight; bestSlot = slot; }
         }
         return (int)((ids >> (bestSlot * TerrainMaterialPackEncoding.BitsPerSlot)) & TerrainMaterialPackEncoding.SlotMask);
     }
 
-    public IReadOnlyDictionary<int, int> CountDominantMaterials(int maxSamples = 0)
+    public IReadOnlyDictionary<int, int> CountDominantMaterials(int maxSamples = 0, IReadOnlyDictionary<int, int>? drawOrder = null)
     {
         var counts = new Dictionary<int, int>();
         if (Width <= 0 || Height <= 0 || !HasAnyData)
@@ -254,7 +258,7 @@ public sealed class TerrainMaterialMap
         {
             for (var x = 0; x < Width; x += step)
             {
-                var id = GetDominantMaterialId(x, y);
+                var id = GetDominantMaterialId(x, y, drawOrder);
                 counts[id] = counts.TryGetValue(id, out var current) ? current + 1 : 1;
             }
         }

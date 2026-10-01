@@ -88,9 +88,10 @@ public sealed class GameplayStructureValidator : IValidator<IslandProject>
                 gameDataPath);
         }
 
-        ValidateBlockDimensions(project, report, "RegrowManager", expectedWidth: project.Rd3d.MaterialMapWidth, expectedHeight: project.Rd3d.MaterialMapHeight, description: "RegrowManager.TreeMap");
-        ValidateBlockDimensions(project, report, "AreaIDs", expectedWidth: project.Rd3d.MaterialMapWidth, expectedHeight: project.Rd3d.MaterialMapHeight, description: "AreaIDs");
-        ValidateBlockDimensions(project, report, "SpawnAreaPoints", expectedWidth: project.Rd3d.MaterialMapWidth, expectedHeight: project.Rd3d.MaterialMapHeight, description: "SpawnAreaPoints");
+        var mapSize = project.Root.MapSize > 0 ? project.Root.MapSize : project.Metadata.MapSize;
+        ValidateBlockDimensions(project, report, "RegrowManager", mapSize, mapSize, "RegrowManager.TreeMap");
+        ValidateBlockDimensions(project, report, "AreaIDs", mapSize, mapSize, "AreaIDs");
+        // SpawnAreaPoints contains spatial records, not a material-resolution map.
 
         if (project.GameData.GameplayBlocks.TryGetValue("RegrowManager", out var regrow) && regrow.IsPresent && regrow.BitCount == 0)
         {
@@ -122,7 +123,7 @@ public sealed class GameplayStructureValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.SuspiciousGameplayBlock,
-                $"Le bloc {description} a une taille {info.Width}x{info.Height}, attendue plutôt {expectedWidth}x{expectedHeight} d'après RD3D.",
+                $"Le bloc {description} a une taille {info.Width}x{info.Height}, attendue {expectedWidth}x{expectedHeight} d'après MapSize.",
                 gameDataPath);
         }
     }

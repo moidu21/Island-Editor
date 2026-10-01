@@ -69,7 +69,7 @@ public class BeachAndTilingTests
         var map=p.Rd3d.MaterialMap;
         map.SetDominantMaterialSafe(1,1,1);
         var original=map.PackedMaterialAlphas.ToArray();
-        var options=new TerrainTopologyMaterialOptions{FlatMaterialId=1,FlatTilingMaterialId=11,FlatTilingEnabled=true};
+        var options=new TerrainTopologyMaterialOptions{FlatMaterialId=1,FlatTilingMaterialId=11,FlatTilingEnabled=true,PreserveExistingWaterAndBeach=true};
         options.PreservedMaterialIds.Add(3);
         TerrainTopologyMaterialPainter.Apply(map,p.GameData.TerrainHeightMap,options,out _,new RectI(0,0,8,8));
         for(int y=0;y<map.Height;y++)for(int x=0;x<map.Width;x++)if(x!=1||y!=1)

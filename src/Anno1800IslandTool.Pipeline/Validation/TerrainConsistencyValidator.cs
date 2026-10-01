@@ -399,7 +399,10 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
             meshEditableLods = meshAllLods.Where(l => l >= 2).ToList();
         }
 
-        var normalMissingForMesh = meshEditableLods.Where(l => !normalLods.Contains(l)).ToList();
+        // The native normalmap pyramid ends at L5; distant mesh L6-L8
+        // do not require additional files at matching LOD numbers.
+        var normalMeshLods = meshEditableLods.Where(l => l <= 5).ToList();
+        var normalMissingForMesh = normalMeshLods.Where(l => !normalLods.Contains(l)).ToList();
         if (normalMissingForMesh.Count > 0)
         {
             report.Add(
@@ -412,7 +415,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.TerrainCoverageDiagnostic,
-                $"[OK] NormalMap : LOD présents pour tous les LOD mesh éditables/probables ({string.Join(", ", meshEditableLods.Select(l => "L" + l.ToString(CultureInfo.InvariantCulture)))}). ");
+                $"[OK] NormalMap : LOD présents pour les niveaux mesh concernés jusqu'à L5 ({string.Join(", ", normalMeshLods.Select(l => "L" + l.ToString(CultureInfo.InvariantCulture)))}). Les mesh L6 et suivants ne nécessitent pas de normalmap de même numéro.");
         }
 
         var normalWithoutMeshLod = normalLods.Where(l => !meshAllLods.Contains(l)).ToList();

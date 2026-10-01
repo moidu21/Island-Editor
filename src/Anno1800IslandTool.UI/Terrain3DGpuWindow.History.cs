@@ -121,6 +121,7 @@ public partial class Terrain3DGpuWindow
             _pendingRiverPoints.ToArray(),
             _pendingRiverSlotClicks.ToArray(),
             _pendingMines.ToArray(),
+            _pendingDeposits.ToArray(),
             _mineEntrance,
             _mineAsset,
             _footprintDirty,
@@ -179,6 +180,8 @@ public partial class Terrain3DGpuWindow
         _pendingRiverPoints.AddRange(snapshot.RiverPoints);
         _pendingRiverSlotClicks.Clear();
         _pendingRiverSlotClicks.AddRange(snapshot.RiverSlotClicks);
+        _pendingDeposits.Clear();
+        _pendingDeposits.AddRange(snapshot.Deposits);
         _pendingMines.Clear();
         _pendingMines.AddRange(snapshot.Mines);
         _mineEntrance = snapshot.MineEntrance;
@@ -284,6 +287,7 @@ public partial class Terrain3DGpuWindow
                left.TreeInstances.SequenceEqual(right.TreeInstances) &&
                left.RiverPoints.SequenceEqual(right.RiverPoints) &&
                left.RiverSlotClicks.SequenceEqual(right.RiverSlotClicks) &&
+               left.Deposits.SequenceEqual(right.Deposits) &&
                left.Mines.SequenceEqual(right.Mines) && left.MineEntrance.Equals(right.MineEntrance) && Equals(left.MineAsset,right.MineAsset) &&
                ReferenceEquals(left.SelectedCoast, right.SelectedCoast) &&
                left.CoastStart.Equals(right.CoastStart) &&
@@ -303,6 +307,7 @@ public partial class Terrain3DGpuWindow
         Vector3[] RiverPoints,
         Vector3[] RiverSlotClicks,
         Anno1800IslandTool.Pipeline.Services.MineSlotPlacement[] Mines,
+        Anno1800IslandTool.Pipeline.Services.DepositPlacement[] Deposits,
         Anno1800IslandTool.Core.Common.Float3? MineEntrance,
         Anno1800IslandTool.Pipeline.Services.MineSlotAsset? MineAsset,
         bool FootprintDirty,

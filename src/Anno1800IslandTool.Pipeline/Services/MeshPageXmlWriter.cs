@@ -33,7 +33,7 @@ public sealed class MeshPageXmlWriter
 
             if (clusterIndex > 0)
             {
-                return PseudoXmlSafety.EnsureSingleRootOrFallback(replaced, WriteFullPageFromModel(page));
+                return MeshInt16Text.NormalizeXml(PseudoXmlSafety.EnsureSingleRootOrFallback(replaced, WriteFullPageFromModel(page)));
             }
         }
 
@@ -55,7 +55,7 @@ public sealed class MeshPageXmlWriter
         {
             sb.AppendLine("      <None>");
             sb.AppendLine($"        <Indices>{string.Join(" ", cluster.Indices)}</Indices>");
-            sb.AppendLine($"        <Vertices>{string.Join(" ", cluster.Vertices.SelectMany(v => v.RawValues).Select((value, index) => FormatMeshValue(index % 8 is 0 or 2 ? unchecked((short)(ushort)value) : value)))}</Vertices>");
+            sb.AppendLine($"        <Vertices>{string.Join(" ", cluster.Vertices.SelectMany(v => v.RawValues).Select((value, index) => MeshInt16Text.Format(value)))}</Vertices>");
             sb.AppendLine($"        <UsedMaterialBits>{cluster.UsedMaterialBits}</UsedMaterialBits>");
             sb.AppendLine(BuildGroundObjectsBlock(cluster.GroundObjects, "        "));
             sb.AppendLine("      </None>");

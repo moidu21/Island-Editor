@@ -47,6 +47,8 @@ public sealed class IslandExporter : IIslandWriter
             .ToList();
 
         var coreWrites = BuildTargetedCoreWrites(project);
+        coreWrites.AddRange(IslandIntegrationTemplates.Create(project).Select(pair => (pair.Key, pair.Value)));
+        coreWrites.Add(("_anno1800islandtool/river-beds.json", System.Text.Json.JsonSerializer.Serialize(project.GeneratedRiverBedDepths)));
 
         using var outputArchive = ZipFile.Open(outputArchivePath, ZipArchiveMode.Create);
 
@@ -68,7 +70,7 @@ public sealed class IslandExporter : IIslandWriter
         {
             var entry = outputArchive.CreateEntry(BuildTargetArchivePath(project, write.TargetPath), CompressionLevel.Optimal);
             using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(false));
-            writer.Write(write.XmlText);
+            writer.Write(MeshInt16Text.NormalizeXml(write.XmlText));
         }
 
         foreach (var write in tintWrites)
@@ -199,6 +201,9 @@ public sealed class IslandExporter : IIslandWriter
         using var outputArchive = ZipFile.Open(outputArchivePath, ZipArchiveMode.Create);
 
         var replacements = CollectReplacementContent(project, options);
+        foreach (var helper in IslandIntegrationTemplates.Create(project))
+            replacements[helper.Key] = Encoding.UTF8.GetBytes(helper.Value);
+        replacements["_anno1800islandtool/river-beds.json"] = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(project.GeneratedRiverBedDepths);
         foreach (var suppressed in replacements.Keys.Where(path => IsSuppressedTerrainPath(project, path)).ToList())
         {
             replacements.Remove(suppressed);
@@ -226,7 +231,13 @@ public sealed class IslandExporter : IIslandWriter
             else
             {
                 using var inputStream = sourceEntry.Open();
-                inputStream.CopyTo(targetStream);
+                if (normalizedSourcePath.Contains("/meshes/", StringComparison.OrdinalIgnoreCase) && normalizedSourcePath.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
+                {
+                    using var reader = new StreamReader(inputStream);
+                    var repaired = Encoding.UTF8.GetBytes(MeshInt16Text.NormalizeXml(reader.ReadToEnd()));
+                    targetStream.Write(repaired);
+                }
+                else inputStream.CopyTo(targetStream);
                 copiedEntries++;
             }
         }
@@ -521,7 +532,7 @@ public sealed class IslandExporter : IIslandWriter
             {
                 if (generatedMeshPage.HasContent && IsSupportedGeneratedMeshWrite(generatedMeshPage))
                 {
-                    replacements[generatedMeshPage.TargetPath.Replace('\\', '/')] = Encoding.UTF8.GetBytes(generatedMeshPage.XmlText);
+                    replacements[generatedMeshPage.TargetPath.Replace('\\', '/')] = Encoding.UTF8.GetBytes(MeshInt16Text.NormalizeXml(generatedMeshPage.XmlText));
                 }
             }
 

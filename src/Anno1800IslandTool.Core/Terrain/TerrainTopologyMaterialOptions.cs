@@ -6,6 +6,11 @@ namespace Anno1800IslandTool.Core.Terrain;
 /// </summary>
 public sealed class TerrainTopologyMaterialOptions
 {
+    public float WorldWidth { get; set; }
+    public float WorldHeight { get; set; }
+    public bool OnlyEmergedLand { get; set; }
+    public bool UseNativeCells { get; set; } = true;
+    public Dictionary<TerrainTopologyRole, TopologyCellRecipe> CellRecipes { get; } = new();
     public int FlatMaterialId { get; set; } = 2;
     public bool FlatTilingEnabled { get; set; }
     public int FlatTilingMaterialId { get; set; } = 2;
@@ -23,7 +28,8 @@ public sealed class TerrainTopologyMaterialOptions
     public int AnalysisRadius { get; set; } = 2;
     public int Strength { get; set; } = TerrainMaterialPackEncoding.MaxPackedSlotValue;
     public bool UseBlend { get; set; }
-    public bool PreserveExistingWaterAndBeach { get; set; } = true;
+    public bool PreserveExistingWaterAndBeach { get; set; } = false;
+    public int? OpaqueBaseMaterialId { get; set; }
     public HashSet<int> PreservedMaterialIds { get; } = new();
 
     public int ClampedStrength => TerrainMaterialPackEncoding.ClampSlot(Strength);

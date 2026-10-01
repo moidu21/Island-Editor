@@ -75,6 +75,10 @@ public sealed class IslandFileDiscovery
         var path = FilePathNormalizer.Normalize(relativePath);
         var fileName = Path.GetFileName(path);
 
+        if (fileName.Equals("addtoasset.xml", StringComparison.OrdinalIgnoreCase) ||
+            fileName.Equals("formaptemplate.xml", StringComparison.OrdinalIgnoreCase) ||
+            fileName.Equals("formaptemplate_filedb.xml", StringComparison.OrdinalIgnoreCase)) return FileKind.Unknown;
+
         if (string.IsNullOrWhiteSpace(fileName))
         {
             return FileKind.Unknown;

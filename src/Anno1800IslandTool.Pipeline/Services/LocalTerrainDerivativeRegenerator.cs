@@ -1912,7 +1912,10 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
                 // ce qui évite de rouvrir les fentes sur les montagnes.
                 var partiallyActive = hasActiveMask && !IsWorldBoundsFullyActive(
                     activeMask, activeGrid, clusterMinX, clusterMinZ, clusterMaxX, clusterMaxZ, gridWidth, gridHeight);
-                var coastal = partiallyActive || RequiresCoastalRetessellation(project, map, clusterMinX, clusterMaxX, clusterMinZ, clusterMaxZ);
+                // Existing triangles do not guarantee coverage of the expanded rectangle.
+                // Rebuild partial legacy clusters rather than layering overlapping patches.
+                var incomplete = MeshSurfaceCoverage.IsIncomplete(sourceCluster, clusterMinX, clusterMaxX, clusterMinZ, clusterMaxZ);
+                var coastal = partiallyActive || incomplete || RequiresCoastalRetessellation(project, map, clusterMinX, clusterMaxX, clusterMinZ, clusterMaxZ);
                 var coverageCluster = sourceCluster;
                 if (coastal)
                 {
@@ -3350,7 +3353,7 @@ private static string BuildMeshPageXml(MeshPage page, List<List<float>> targetVa
                 return match.Value;
             }
 
-            var formatted = string.Join(" ", values.Select((value, index) => FormatMeshValue(index % 8 is 0 or 2 ? unchecked((short)(ushort)(int)MathF.Round(value)) : value)));
+            var formatted = string.Join(" ", values.Select((value, index) => MeshInt16Text.Format(value)));
             return $"<Vertices>{Environment.NewLine}        {formatted}{Environment.NewLine}        </Vertices>";
         },
         RegexOptions.IgnoreCase | RegexOptions.Singleline);
@@ -3380,7 +3383,7 @@ private static string BuildMeshPageXmlFromModel(MeshPage page, List<List<float>>
         var cluster = page.Clusters[i];
         sb.AppendLine("      <None>");
         sb.AppendLine($"        <Indices>{string.Join(" ", cluster.Indices)}</Indices>");
-        sb.AppendLine($"        <Vertices>{string.Join(" ", targetValues[i].Select((value, index) => FormatMeshValue(index % 8 is 0 or 2 ? unchecked((short)(ushort)(int)MathF.Round(value)) : value)))}</Vertices>");
+        sb.AppendLine($"        <Vertices>{string.Join(" ", targetValues[i].Select((value, index) => MeshInt16Text.Format(value)))}</Vertices>");
         sb.AppendLine($"        <UsedMaterialBits>{cluster.UsedMaterialBits}</UsedMaterialBits>");
         if (cluster.GroundObjects.Count == 0)
         {

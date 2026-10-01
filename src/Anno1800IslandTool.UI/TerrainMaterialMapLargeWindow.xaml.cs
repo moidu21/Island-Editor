@@ -202,6 +202,9 @@ public partial class TerrainMaterialMapLargeWindow : Window
         SetCoastComboItems(TopologySteepMaterialComboBox, rows, options.SteepSlopeMaterialId);
         SetCoastComboItems(TopologyRidgeMaterialComboBox, rows, options.RidgeMaterialId);
         SetCoastComboItems(TopologyHollowMaterialComboBox, rows, options.HollowMaterialId);
+        NativeCellsCheckBox.IsChecked=options.UseNativeCells;
+        EmergedOnlyCheckBox.IsChecked=options.OnlyEmergedLand;
+        TopologyProfileTextBlock.Text=_ownerWindow.TopologyProfileLabel;
         FlatTilingCheckBox.IsChecked = options.FlatTilingEnabled;
         FlatTileSizeTextBox.Text = (options.FlatTileSize / 2).ToString(CultureInfo.InvariantCulture);
         FlatTileContrastTextBox.Text = options.FlatTileContrast.ToString(CultureInfo.InvariantCulture);
@@ -947,6 +950,8 @@ public partial class TerrainMaterialMapLargeWindow : Window
     {
         var options = new TerrainTopologyMaterialOptions
         {
+            UseNativeCells=NativeCellsCheckBox.IsChecked==true,
+            OnlyEmergedLand=EmergedOnlyCheckBox.IsChecked==true,
             FlatMaterialId = SelectedCoastMaterialId(TopologyFlatMaterialComboBox, 2),
             FlatTilingEnabled = FlatTilingCheckBox.IsChecked == true,
             FlatTilingMaterialId = SelectedCoastMaterialId(FlatTilingMaterialComboBox, 2),
@@ -967,9 +972,6 @@ public partial class TerrainMaterialMapLargeWindow : Window
 
         if (options.PreserveExistingWaterAndBeach)
         {
-            options.PreservedMaterialIds.Add(SelectedCoastMaterialId(DeepWaterMaterialComboBox, 3));
-            options.PreservedMaterialIds.Add(SelectedCoastMaterialId(ShallowWaterMaterialComboBox, 4));
-            options.PreservedMaterialIds.Add(SelectedCoastMaterialId(BeachMaterialComboBox, 1));
             foreach (var row in _ownerWindow.GetTerrainMaterialPaletteRows().Where(row =>
                          row.Label.Contains("water", StringComparison.OrdinalIgnoreCase) ||
                          row.Label.Contains("underwater", StringComparison.OrdinalIgnoreCase) ||
@@ -981,6 +983,8 @@ public partial class TerrainMaterialMapLargeWindow : Window
             }
         }
 
+        options.OpaqueBaseMaterialId = _ownerWindow.GetOpaqueBaseMaterialId();
+        _ownerWindow.ConfigureTopologyContext(options);
         options.FlatTilingOverlayAboveBase = _ownerWindow.IsTilingOverlayAbove(options.FlatMaterialId,options.FlatTilingMaterialId);
         options.Normalize();
         return options;

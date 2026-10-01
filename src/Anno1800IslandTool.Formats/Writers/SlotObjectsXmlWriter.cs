@@ -27,7 +27,8 @@ public static class SlotObjectsXmlWriter
             catch (System.Xml.XmlException) { /* The conservative text regenerator supplies a valid fallback. */ }
         }
         int Category(SlotObjectDefinition slot) => categories.TryGetValue(slot.ObjectId, out var c) ? c
-            : slot.ObjectGuid is "1000253" or "100419" or "618" or "117742" ? 3 : 1;
+            : slot.ObjectGuid == "100419" ? 15
+            : slot.ObjectGuid is "1000253" or "618" or "117742" ? 3 : 1;
         string F(float f) => f.ToString("R", CultureInfo.InvariantCulture).Replace('.', ',');
         var result = new XElement("SlotObjects");
         foreach (var group in slots.GroupBy(Category))

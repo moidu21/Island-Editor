@@ -248,9 +248,14 @@ public static class GeneratedRiverService
         catch (System.Xml.XmlException) { return gameDataText; }
 
         var rivers = document.Descendants("None").Where(IsRiverObject).ToArray();
-        if (rivers.Length == 0) return gameDataText;
-
         mapSize = Math.Max(1, mapSize);
+        var grid = document.Descendants("WorldManager").Elements("RiverGrid").FirstOrDefault();
+        if (grid is not null)
+        {
+            grid.SetElementValue("x", mapSize);
+            grid.SetElementValue("y", mapSize);
+            grid.SetElementValue("bits", string.Join(" ", new byte[((mapSize + 7) / 8) * mapSize]));
+        }
         foreach (var river in rivers)
         {
             var nodes = river.Descendants("BezierCurve").Elements("None").ToArray();
@@ -339,6 +344,24 @@ public static class GeneratedRiverService
         => node.Element("guid")?.Value.Trim() == "1001608" &&
            long.TryParse(node.Element("ID")?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) &&
            id >= FirstGeneratedRiverId && id < LastGeneratedRiverId;
+
+    public static IReadOnlyList<(GeneratedRiverPoint[] Points, float Width, float Depth)> ReadGeneratedBeds(IslandProject project)
+    {
+        var result = new List<(GeneratedRiverPoint[], float, float)>();
+        if (string.IsNullOrWhiteSpace(project.RawContent.GameDataText)) return result;
+        var doc = XDocument.Parse(project.RawContent.GameDataText);
+        foreach (var obj in doc.Descendants("None").Where(IsGeneratedRiverObject))
+        {
+            var nodes = obj.Descendants("BezierCurve").Elements("None").ToArray();
+            var points = nodes.Select(n => ParsePoint(n.Element("p")?.Value)).Where(p => p is not null).Select(p => p!).ToArray();
+            if (points.Length < 2) continue;
+            var id = long.Parse(obj.Element("ID")!.Value, CultureInfo.InvariantCulture);
+            var depth = project.GeneratedRiverBedDepths.GetValueOrDefault(id, 2f);
+            if (!float.IsFinite(depth) || depth <= 0) continue;
+            result.Add((points, nodes.Select(n => Number(n.Element("w")?.Value, 4f)).Average(), depth));
+        }
+        return result;
+    }
 
     private static bool IsRiverObject(XElement node)
         => node.Element("guid")?.Value.Trim() == "1001608" && node.Element("River") is not null;

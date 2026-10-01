@@ -345,7 +345,7 @@ public partial class Terrain3DGpuWindow
                 var currentDecoded = TerrainStructuralHeightEditor.GetSurfaceDecodedHeight(column);
                 var localSurfaceHeight = waterHeight - RiverWaterBankOverlapWorld;
                 var bedDecoded = TerrainHeightEncoding.WorldHeightToLegacyFineHeight((float)(localSurfaceHeight - depthWorld));
-                var targetDecoded = (float)(currentDecoded + ((Math.Min(currentDecoded, bedDecoded) - currentDecoded) * blend));
+                var targetDecoded = Math.Min(currentDecoded, TerrainHeightEncoding.WorldHeightToLegacyFineHeight((float)(localSurfaceHeight - depthWorld * blend)));
                 // Move vertical connector copies with their surface, retaining their
                 // depth. Assigning an absolute river height collapses the connectors.
                 foreach (var vertex in column)

@@ -31,15 +31,8 @@ public partial class MainWindow
             var gameDataObjectCount = 0;
             if (!string.IsNullOrWhiteSpace(_currentProject.RawContent.GameDataText))
             {
-                var gameDataSnapshot = GameDataAreaObjectsXmlEditor.Extract(_currentProject.RawContent.GameDataText!);
-                gameDataObjectCount = gameDataSnapshot.Containers.Sum(container => container.Objects.Count);
-                if (gameDataSnapshot.Containers.Count > 0)
-                {
-                    gameDataWithoutObjects = GameDataAreaObjectsXmlEditor.ReplaceObjects(
-                        _currentProject.RawContent.GameDataText!,
-                        gameDataSnapshot,
-                        Array.Empty<AreaObjectEdit>());
-                }
+                (gameDataWithoutObjects, gameDataObjectCount) =
+                    Anno1800IslandTool.Pipeline.Services.GameDataObjectCleaner.ClearPlacedObjects(_currentProject.RawContent.GameDataText!);
             }
 
             var confirmation = string.Format(

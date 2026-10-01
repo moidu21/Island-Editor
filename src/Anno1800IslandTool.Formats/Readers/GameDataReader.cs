@@ -54,6 +54,9 @@ public sealed class GameDataReader
         {
             var block = ReadBalancedBlock(text, tag);
             var info = AnalyzeBlock(tag, block);
+            // Empty managers (including <AreaManager />) are present in vanilla
+            // islands. Presence and populated content are different properties.
+            info.IsPresent = Regex.IsMatch(text, @"<" + Regex.Escape(tag) + @"(?=[\s/>])", RegexOptions.IgnoreCase);
             result.GameplayBlocks[tag] = info;
             if (info.IsPresent)
             {

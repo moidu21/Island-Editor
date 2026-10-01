@@ -49,6 +49,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        Closing += (_, e) => e.Cancel = new QuitConfirmationWindow { Owner = this }.ShowDialog() != true;
         _updatingLanguageSelector = true;
         UiLocalizationManager.FillLanguageCombo(LanguageSelectorComboBox);
         _updatingLanguageSelector = false;

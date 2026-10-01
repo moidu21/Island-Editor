@@ -21,7 +21,7 @@ public partial class Terrain3DWindow
         MergeDirtyRegionFromWorldBounds(result.MinX, result.MinZ, result.MaxX, result.MaxZ);
         var validation = ValidateEntireTerrainCore(definition.Lod, useCoarseHeightMap: false, forceGeometryRegeneration: true);
 
-        return $"OBJ chargé : {result.SourceVertices:N0} sommets et {result.SourceTriangles:N0} triangles source ; " +
+        return (result.ConvertedWorldMachineAxes ? UiLocalizationManager.T("World Machine : axe vertical Z converti vers Y. ") : string.Empty) + $"OBJ chargé : {result.SourceVertices:N0} sommets et {result.SourceTriangles:N0} triangles source ; " +
                $"{result.ImportedVertices:N0} sommets et {result.ImportedTriangles:N0} triangles répartis dans {result.PagesChanged} page(s) du LOD {definition.Lod}. " +
                $"Éléments terrain utilisés : {result.UsedObjectNames} ({result.UsableSourceTriangles:N0} triangles). " +
                (string.IsNullOrWhiteSpace(result.IgnoredObjectNames) ? string.Empty : $"Éléments décoratifs ignorés : {result.IgnoredObjectNames}. ") +
@@ -29,3 +29,4 @@ public partial class Terrain3DWindow
                $"{result.IgnoredVerticalTriangles:N0} triangle(s) vertical(aux) ignoré(s). Raw0 à Raw7, UV, normales et tangentes ont été reconstruits.\n" + validation;
     }
 }
+

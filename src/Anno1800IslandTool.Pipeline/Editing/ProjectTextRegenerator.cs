@@ -20,11 +20,20 @@ public sealed class ProjectTextRegenerator
 
     public void RegenerateRootText(IslandProject project)
     {
+        Anno1800IslandTool.Pipeline.Services.MineSlotService.RepairGeneratedSlots(project);
         var fallback = _rootWriter.Write(project.Root);
         var candidate = string.IsNullOrWhiteSpace(project.RawContent.RootText)
             ? fallback
             : UpdateRootText(project.RawContent.RootText!, project.Root);
         project.RawContent.RootText = PseudoXmlSafety.EnsureSingleRootOrFallback(candidate, fallback);
+        if (project.RawContent.RootText.Contains("<SourceMap>", StringComparison.Ordinal))
+        {
+            var template = Anno1800IslandTool.Pipeline.Export.IslandIntegrationTemplates.Create(project)["formaptemplate.xml"];
+            var path = System.Xml.Linq.XDocument.Parse(template).Descendants("MapFilePath").Single().Value;
+            var old = Regex.Match(project.RawContent.RootText, @"<SourceMap>(.*?)</SourceMap>", RegexOptions.Singleline).Groups[1].Value;
+            if (old.Trim().EndsWith(".a7me", StringComparison.OrdinalIgnoreCase)) path += "e";
+            project.RawContent.RootText = ReplaceTagValue(project.RawContent.RootText, "SourceMap", System.Security.SecurityElement.Escape(path));
+        }
     }
 
     public void RegenerateAnnoEditorLevelText(IslandProject project)
@@ -37,6 +46,8 @@ public sealed class ProjectTextRegenerator
     public void RegenerateRd3dText(IslandProject project)
     {
         var emerged = Anno1800IslandTool.Pipeline.Services.EmergedTerrainMaterials.Ensure(project);
+        if (emerged > 0 || project.IsModified)
+            emerged += Anno1800IslandTool.Pipeline.Services.TerrainSurfaceUnderlay.Ensure(project);
         if (emerged > 0 || Anno1800IslandTool.Pipeline.Services.NearTerrainMetadata.HasMissing(project))
             new IslandProjectEditor().ResynchronizeMeshUsedMaterialBitsFromMaterialMap(project);
         if (Anno1800IslandTool.Pipeline.Services.CoastalMaterialUnderlay.Ensure(project) > 0)
@@ -57,6 +68,7 @@ public sealed class ProjectTextRegenerator
         var sourceText = string.IsNullOrWhiteSpace(project.RawContent.GameDataText)
             ? fallback
             : project.RawContent.GameDataText!;
+        sourceText = Anno1800IslandTool.Pipeline.Services.MineSlotService.RestoreGeneratedSequences(sourceText);
         var candidate = UpdateGameDataText(sourceText, project.Metadata.MapSize, project.GameData, project.Root);
         var safeText = GeneratedCoastGeometry.RepairBounds(PseudoXmlSafety.EnsureSingleRootOrFallback(candidate, fallback));
         var irrigatedBiome = Anno1800IslandTool.Pipeline.Services.GeneratedRiverService.UsesIrrigation(project);
@@ -176,294 +188,10 @@ public sealed class ProjectTextRegenerator
         // ne vient pas des DDS tintmaps de pages, mais de TintMapLevels/BaseTextureData.
         // Quand une île est étendue en rectangle complet, cette map garde l'empreinte
         // vanilla et produit une frontière sombre/clair sur les plantes.
-        if (!preserveManualGlobalTintBaseTextureData)
-        {
-            text = SynchronizeRd3dGlobalTintBaseTextureData(text, rd3d, gameDataHeightMap, root);
-        }
+        // BaseTextureData stores BC1 blocks (two RGB565 endpoints and 32 selector bits),
+        // not four signed colour channels. Export must preserve these packed bytes.
         return text;
     }
-
-
-    private static string SynchronizeRd3dGlobalTintBaseTextureData(string text, Rd3dDefinition rd3d, CoarseHeightMap? heightMap, IslandRootDefinition? root)
-    {
-        if (!ShouldRegenerateRd3dGlobalTintBaseTexture(root))
-        {
-            return text;
-        }
-
-        var tintMapLevelsBody = ReadBalancedBlock(text, "TintMapLevels");
-        if (string.IsNullOrWhiteSpace(tintMapLevelsBody))
-        {
-            return text;
-        }
-
-        var baseTextureBody = ReadBalancedBlock(tintMapLevelsBody!, "BaseTextureData");
-        if (string.IsNullOrWhiteSpace(baseTextureBody) || !baseTextureBody!.Contains("<map>", StringComparison.OrdinalIgnoreCase))
-        {
-            return text;
-        }
-
-        var width = ReadIntTag(baseTextureBody, "width") ?? 0;
-        var height = ReadIntTag(baseTextureBody, "height") ?? 0;
-        if (width <= 0 || height <= 0)
-        {
-            return text;
-        }
-
-        var values = ReadIntListTag(baseTextureBody, "map");
-        var channelCount = values.Count / Math.Max(1, width * height);
-        if (channelCount < 4 || values.Count < width * height * channelCount)
-        {
-            return text;
-        }
-
-        var regenerated = RetileGlobalTintBaseTexture(values, width, height, channelCount, rd3d, heightMap);
-        var updatedBaseTexture = ReplaceTagValue(baseTextureBody, "width", width.ToString(CultureInfo.InvariantCulture));
-        updatedBaseTexture = ReplaceTagValue(updatedBaseTexture, "height", height.ToString(CultureInfo.InvariantCulture));
-        updatedBaseTexture = ReplaceTagValue(updatedBaseTexture, "map", FormatIntList(regenerated));
-
-        var updatedTintMapLevels = ReplaceBalancedBlock(tintMapLevelsBody!, "BaseTextureData", updatedBaseTexture);
-        return ReplaceBalancedBlock(text, "TintMapLevels", updatedTintMapLevels);
-    }
-
-    private static bool ShouldRegenerateRd3dGlobalTintBaseTexture(IslandRootDefinition? root)
-    {
-        if (root is null || root.ActiveMapGrid.X <= 0 || root.ActiveMapGrid.Y <= 0)
-        {
-            return false;
-        }
-
-        var maskWords = root.ActiveMapGridBits.Count > 0
-            ? root.ActiveMapGridBits
-            : ActiveMapGridMaskCodec.EncodeRect(root.ActiveMapGrid, root.ActiveMapRect);
-        var activeMask = ActiveMapGridMaskCodec.Decode(root.ActiveMapGrid, maskWords, root.ActiveMapRect);
-        var expected = root.ActiveMapGrid.X * root.ActiveMapGrid.Y;
-        return expected > 0 && activeMask.Length >= expected && activeMask.Take(expected).All(active => active);
-    }
-
-    private static int[] RetileGlobalTintBaseTexture(
-        IReadOnlyList<int> source,
-        int width,
-        int height,
-        int channelCount,
-        Rd3dDefinition rd3d,
-        CoarseHeightMap? heightMap)
-    {
-        var result = new int[width * height * channelCount];
-        var cropX0 = Math.Clamp(width / 6, 0, Math.Max(0, width - 1));
-        var cropY0 = Math.Clamp(height / 6, 0, Math.Max(0, height - 1));
-        var cropX1 = Math.Clamp(width - cropX0 - 1, cropX0, Math.Max(cropX0, width - 1));
-        var cropY1 = Math.Clamp(height - cropY0 - 1, cropY0, Math.Max(cropY0, height - 1));
-        var cropWidth = Math.Max(1, cropX1 - cropX0 + 1);
-        var cropHeight = Math.Max(1, cropY1 - cropY0 + 1);
-
-        // Valeur constante observée dans TintsMap/base neutre. On ne l'utilise que comme
-        // ancre pour eau/plage/terrain douteux ; la terre garde une vraie variation.
-        ReadOnlySpan<int> neutral = stackalloc[] { -31728, 31727, 0, 0 };
-
-        for (var y = 0; y < height; y++)
-        {
-            for (var x = 0; x < width; x++)
-            {
-                var warpX = (ValueNoise01((x / 32.0) + 17.0, (y / 32.0) + 31.0) - 0.5) * 26.0;
-                var warpY = (ValueNoise01((x / 32.0) + 71.0, (y / 32.0) + 11.0) - 0.5) * 26.0;
-                var sx = cropX0 + MirrorCoordinate((int)Math.Round(x + warpX + 37.0), cropWidth);
-                var sy = cropY0 + MirrorCoordinate((int)Math.Round(y + warpY + 53.0), cropHeight);
-                var sourceIndex = ((sy * width) + sx) * channelCount;
-                var targetIndex = ((y * width) + x) * channelCount;
-
-                var materialFactor = ComputeGlobalTintBaseMaterialFactor(rd3d, heightMap, x, y, width, height);
-                for (var c = 0; c < channelCount; c++)
-                {
-                    var value = source[sourceIndex + c];
-                    if (c < neutral.Length && materialFactor < 0.999f)
-                    {
-                        value = BlendSigned16(neutral[c], value, materialFactor);
-                    }
-
-                    result[targetIndex + c] = ClampSigned16(value);
-                }
-
-                // v44.8 : certaines zones vanilla retuilées contiennent une composante Cr trop forte.
-                // Sur prop_plant.fx cela teinte directement les buissons et peut les pousser vers le rouge.
-                // On garde l'orange autorisé, mais on force G >= ~50% de R après décodage YCC.
-                ClampGlobalTintBaseRedToOrange(result, targetIndex, channelCount);
-            }
-        }
-
-        return result;
-    }
-
-    private static float ComputeGlobalTintBaseMaterialFactor(Rd3dDefinition rd3d, CoarseHeightMap? heightMap, int x, int y, int width, int height)
-    {
-        var materialMap = rd3d.MaterialMap;
-        var factor = 1.0f;
-        if (materialMap.Width > 0 && materialMap.Height > 0 && materialMap.HasAnyData)
-        {
-            var materialX = Math.Clamp((int)Math.Floor((x + 0.5) / Math.Max(1.0, width) * materialMap.Width), 0, materialMap.Width - 1);
-            var materialY = Math.Clamp((int)Math.Floor((y + 0.5) / Math.Max(1.0, height) * materialMap.Height), 0, materialMap.Height - 1);
-            var cell = materialMap.GetCell(materialX, materialY);
-            var water = 0;
-            var beach = 0;
-            var total = 0;
-            for (var slot = 0; slot < TerrainMaterialPackEncoding.SlotCount && slot < cell.MaterialIds.Length && slot < cell.AlphaWeights.Length; slot++)
-            {
-                var id = TerrainMaterialPackEncoding.ClampSlot(cell.MaterialIds[slot]);
-                var alpha = TerrainMaterialPackEncoding.ClampSlot(cell.AlphaWeights[slot]);
-                if (alpha <= 0)
-                {
-                    continue;
-                }
-
-                total += alpha;
-                if (id is 3 or 4)
-                {
-                    water += alpha;
-                }
-                else if (id is 1 or 8 or 12 or 20 or 23 or 31)
-                {
-                    beach += alpha;
-                }
-            }
-
-            if (total > 0)
-            {
-                var waterRatio = water / (float)total;
-                var beachRatio = beach / (float)total;
-                factor = MathF.Min(factor, 1.0f - (waterRatio * 0.55f) - (beachRatio * 0.22f));
-            }
-        }
-
-        if (heightMap is not null && heightMap.Width > 1 && heightMap.Height > 1)
-        {
-            var sampleX = (x + 0.5) / Math.Max(1.0, width) * (heightMap.Width - 1);
-            var sampleY = (y + 0.5) / Math.Max(1.0, height) * (heightMap.Height - 1);
-            var worldHeight = TerrainHeightEncoding.SampleCoarseHeightMapWorld(heightMap, sampleX, sampleY);
-            if (worldHeight < -1.25f)
-            {
-                factor = MathF.Min(factor, 0.40f);
-            }
-            else if (worldHeight < 0.8f)
-            {
-                factor = MathF.Min(factor, 0.72f);
-            }
-        }
-
-        return Math.Clamp(factor, 0.35f, 1.0f);
-    }
-
-    private static int MirrorCoordinate(int value, int size)
-    {
-        if (size <= 1)
-        {
-            return 0;
-        }
-
-        var period = size * 2;
-        var v = value % period;
-        if (v < 0)
-        {
-            v += period;
-        }
-
-        return v < size ? v : (period - 1 - v);
-    }
-
-    private static float ValueNoise01(double x, double y)
-    {
-        var x0 = (int)Math.Floor(x);
-        var y0 = (int)Math.Floor(y);
-        var tx = (float)(x - x0);
-        var ty = (float)(y - y0);
-        tx = tx * tx * (3f - (2f * tx));
-        ty = ty * ty * (3f - (2f * ty));
-        var a = Lerp(HashNoise01(x0, y0), HashNoise01(x0 + 1, y0), tx);
-        var b = Lerp(HashNoise01(x0, y0 + 1), HashNoise01(x0 + 1, y0 + 1), tx);
-        return Lerp(a, b, ty);
-    }
-
-    private static float HashNoise01(int x, int y)
-    {
-        unchecked
-        {
-            var h = (uint)(x * 374761393) + (uint)(y * 668265263);
-            h = (h ^ (h >> 13)) * 1274126177u;
-            h ^= h >> 16;
-            return h / (float)uint.MaxValue;
-        }
-    }
-
-    private static float Lerp(float a, float b, float t)
-        => a + ((b - a) * Math.Clamp(t, 0f, 1f));
-
-    private static int BlendSigned16(int anchor, int value, float valueWeight)
-        => ClampSigned16((int)MathF.Round((anchor * (1f - valueWeight)) + (value * valueWeight)));
-
-    private static int ClampSigned16(int value)
-        => Math.Clamp(value, short.MinValue, short.MaxValue);
-
-    private const float GlobalTintBaseOrangeGreenRatio = 0.50f;
-    private const float GlobalTintBaseMaxCrOffset = 0.245f;
-
-    private static void ClampGlobalTintBaseRedToOrange(int[] values, int index, int channelCount)
-    {
-        if (channelCount < 3 || index < 0 || index + 2 >= values.Length)
-        {
-            return;
-        }
-
-        var cb = DecodeTintPow2(Signed16ToUnorm(values[index])) - 0.5f;
-        var y = Signed16ToUnorm(values[index + 1]);
-        var cr = DecodeTintPow2(Signed16ToUnorm(values[index + 2])) - 0.5f;
-
-        var r = y + (1.402f * cr);
-        var g = y - (0.344f * cb) - (0.714f * cr);
-        if (r <= 0f || g >= GlobalTintBaseOrangeGreenRatio * r)
-        {
-            return;
-        }
-
-        var denom = 0.714f + (1.402f * GlobalTintBaseOrangeGreenRatio);
-        if (denom <= 0.0001f)
-        {
-            return;
-        }
-
-        var cap = (((1f - GlobalTintBaseOrangeGreenRatio) * y) - (0.344f * cb)) / denom;
-        cap = MathF.Min(cap, GlobalTintBaseMaxCrOffset);
-        if (cr <= cap)
-        {
-            return;
-        }
-
-        values[index + 2] = UnormToSigned16(EncodeTintPow2(Math.Clamp(cap + 0.5f, 0f, 1f)));
-    }
-
-    private static float Signed16ToUnorm(int value)
-    {
-        var clamped = (short)Math.Clamp(value, short.MinValue, short.MaxValue);
-        return (ushort)clamped / 65535f;
-    }
-
-    private static int UnormToSigned16(float value)
-    {
-        var raw = (int)MathF.Round(Math.Clamp(value, 0f, 1f) * 65535f);
-        return raw >= 32768 ? raw - 65536 : raw;
-    }
-
-    private static float DecodeTintPow2(float encoded)
-    {
-        var t = (encoded * 2f) - 1f;
-        return Math.Clamp((t * MathF.Abs(t) * 0.5f) + 0.5f, 0f, 1f);
-    }
-
-    private static float EncodeTintPow2(float decoded)
-    {
-        var t = Math.Clamp((decoded * 2f) - 1f, -1f, 1f);
-        var signedRoot = MathF.Sqrt(MathF.Abs(t)) * MathF.Sign(t);
-        return Math.Clamp((signedRoot * 0.5f) + 0.5f, 0f, 1f);
-    }
-
 
     private static string SynchronizeRd3dCoarseHeightData(string text, CoarseHeightMap? heightMap)
     {
@@ -870,7 +598,10 @@ public sealed class ProjectTextRegenerator
             world = Rd3dCoarseHeightMinimumWorld;
         }
 
-        world = Math.Max(Rd3dCoarseHeightMinimumWorld, world);
+        // RD3D stores signed Int16 heights in 1/256 world units. GameData
+        // supports a wider range; 128 world units would otherwise emit 32768
+        // and fail FileDBReader's Int16 conversion. Clamp, never wrap to ocean.
+        world = Math.Clamp(world, Rd3dCoarseHeightMinimumWorld, short.MaxValue / 256f);
         var fine = (int)Math.Round(world * 256f, MidpointRounding.AwayFromZero);
         return fine.ToString(CultureInfo.InvariantCulture);
     }
@@ -1350,12 +1081,13 @@ public sealed class ProjectTextRegenerator
         var updatedValues = new int[cellCount * 2];
         for (var i = 0; i < cellCount; i++)
         {
-            // v42 : la première couche AreaIDs suit maintenant le masque ActiveMapGrid.bits.
+            // Each pair encodes one little-endian ushort area ID (1 or 8193).
             // Sans masque valide on conserve le comportement historique via masks.Active=true.
             updatedValues[i * 2] = masks.Active[i] ? 1 : 0;
             updatedValues[(i * 2) + 1] = masks.BuildableLowFlat[i] ? 32 : 0;
         }
 
+        Anno1800IslandTool.Pipeline.Services.GameplayAreaOwnership.RestoreObjectAreas(text, root, width, height, updatedValues, masks.Active);
         var updated = ReplaceTagValue(body, "x", width.ToString(CultureInfo.InvariantCulture));
         updated = ReplaceTagValue(updated, "y", height.ToString(CultureInfo.InvariantCulture));
         updated = ReplaceTagValue(updated, "val", FormatIntList(updatedValues));

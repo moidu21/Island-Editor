@@ -74,7 +74,8 @@ public static class GeneratedBeachZones
         foreach (var item in document.Descendants().Where(e => e.Element("guid")?.Value == "1003910"))
         {
             if (!long.TryParse(item.Element("ID")?.Value, out var id) || !IsGeneratedId(id)) continue;
-            var points = item.Descendants("p").Select(e => Numbers(e.Value)).ToArray();
+            var entries = item.Descendants("BezierCurve").Elements().ToArray();
+            var points = entries.Select(e => Numbers(e.Element("p")?.Value)).ToArray();
             var direction = Numbers(item.Descendants("d").FirstOrDefault()?.Value);
             if (direction.Length < 2) continue;
             var normal = new Vector2(direction[0], direction[1]);
@@ -86,7 +87,10 @@ public static class GeneratedBeachZones
                 var start = new Vector2(points[i - 1][0], points[i - 1][2]);
                 var end = new Vector2(points[i][0], points[i][2]);
                 if (Vector2.DistanceSquared(start, end) < .0001f) continue;
-                result.Add(new(id, start, end, normal, points[i - 1][1]));
+                var localDirection = Numbers(entries[i - 1].Element("d")?.Value);
+                var localNormal = localDirection.Length >= 2 ? new Vector2(localDirection[0], localDirection[1]) : normal;
+                if (localNormal.LengthSquared() < .1f) localNormal = normal;
+                result.Add(new(id, start, end, Vector2.Normalize(localNormal), points[i - 1][1]));
             }
         }
         return MergeCollinear(result);

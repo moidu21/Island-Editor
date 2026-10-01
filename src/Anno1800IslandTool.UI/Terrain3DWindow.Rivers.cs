@@ -34,6 +34,7 @@ public partial class Terrain3DWindow
         var irrigatedBiome = GeneratedRiverService.UsesIrrigation(_project);
         var id = _editor.AddGeneratedRiver(_project, new GeneratedRiverDefinition(points, (float)river.WidthTiles,
             IrrigationRadius: (float)river.IrrigationRadius, RiverSlots: slots));
+        _project.GeneratedRiverBedDepths[id] = (float)river.BedDepth;
         _preserveDirectRiverMeshWritesOnNextValidation = CommitDirectTerrainMeshWrites(
             "Rivière : hauteur locale, profondeur fixe, eau superposée aux berges et pages LOD conservées après peinture des matériaux.");
         if (irrigatedBiome)
@@ -52,6 +53,7 @@ public partial class Terrain3DWindow
             .ToArray();
         if (touchedKeys.Length == 0) return false;
 
+        TerrainMeshNormalRebuilder.Rebuild(_project, touchedKeys);
         var snapshots = _localRegenerator.SnapshotCurrentMeshPageWrites(_project, touchedKeys);
         if (snapshots.Count == 0) return false;
 
@@ -77,3 +79,4 @@ public partial class Terrain3DWindow
         return true;
     }
 }
+

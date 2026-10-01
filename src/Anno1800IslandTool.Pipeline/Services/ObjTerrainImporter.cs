@@ -27,7 +27,10 @@ public sealed record ObjTerrainImportResult(
     double MinX,
     double MinZ,
     double MaxX,
-    double MaxZ);
+    double MaxZ)
+{
+    public bool ConvertedWorldMachineAxes { get; init; }
+}
 
 /// <summary>Import OBJ volontairement strict : positions et faces polygonales,
 /// triangulation en éventail, puis création des huit champs Raw du terrain.</summary>
@@ -154,7 +157,7 @@ public static class ObjTerrainImporter
             pagesChanged, heightField.IgnoredVerticalTriangles, selectedTriangles.Count,
             usedNames.Length == 0 ? "surface OBJ" : string.Join(", ", usedNames),
             string.Join(", ", ignoredNames), minHeight, maxHeight,
-            terrainPositions.Min(v => v.X), terrainPositions.Min(v => v.Z), terrainPositions.Max(v => v.X), terrainPositions.Max(v => v.Z));
+            terrainPositions.Min(v => v.X), terrainPositions.Min(v => v.Z), terrainPositions.Max(v => v.X), terrainPositions.Max(v => v.Z)) { ConvertedWorldMachineAxes = parsed.WorldMachineZUp };
     }
 
     private static (float SourceLow, float SourceHigh, float MinimumHeight, float MaximumHeight) ResolveAutomaticHeightRange(
@@ -389,9 +392,12 @@ public static class ObjTerrainImporter
         var vertices = new List<Vector3>();
         var triangles = new List<ObjSourceTriangle>();
         var objectName = string.Empty;
+        var worldMachineZUp = false;
         foreach (var source in lines)
         {
             var line = source.Trim();
+            if (line.StartsWith("# Mesh Output from World Machine", StringComparison.OrdinalIgnoreCase))
+                worldMachineZUp = true;
             if (line.Length == 0 || line[0] == '#') continue;
             var parts = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length >= 2 && (parts[0] == "o" || parts[0] == "g"))
@@ -412,7 +418,16 @@ public static class ObjTerrainImporter
                         triangles.Add(new ObjSourceTriangle(face[0], face[i], face[i + 1], objectName));
             }
         }
-        return new ParsedObj(vertices, triangles);
+        // World Machine Mesh Output uses XY for the ground plane and Z for elevation.
+        // Rotate -90 degrees around X before terrain projection/filtering and fitting.
+        // This preserves handedness and distances. Generic OBJ files retain their Y-up convention.
+        if (worldMachineZUp)
+            for (var i = 0; i < vertices.Count; i++)
+            {
+                var v = vertices[i];
+                vertices[i] = new Vector3(v.X, v.Z, -v.Y);
+            }
+        return new ParsedObj(vertices, triangles, worldMachineZUp);
     }
 
     private static List<ObjSourceTriangle> SelectUsableTerrainTriangles(IReadOnlyList<ObjSourceTriangle> triangles)
@@ -563,7 +578,7 @@ public static class ObjTerrainImporter
 
     private sealed record PageState(ClusterBucket[] Buckets);
     private sealed record HeightFieldMesh(Vector3[] Positions, List<(int A, int B, int C)> Triangles, int IgnoredVerticalTriangles);
-    private sealed record ParsedObj(List<Vector3> Vertices, List<ObjSourceTriangle> Triangles);
+    private sealed record ParsedObj(List<Vector3> Vertices, List<ObjSourceTriangle> Triangles, bool WorldMachineZUp);
     private sealed record ObjSourceTriangle(int A, int B, int C, string ObjectName);
     private sealed class ClusterBucket
     {

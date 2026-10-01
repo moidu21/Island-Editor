@@ -51,24 +51,8 @@ public sealed class MaterialSetValidator : IValidator<IslandProject>
                 project.Rd3dFilePath ?? "rd3d.xml");
         }
 
-        var propFiles = new HashSet<string>(project.Rd3d.PropGrid.FileNames
-            .Where(f => !string.IsNullOrWhiteSpace(f))
-            .Select(NormalizeFileName), StringComparer.OrdinalIgnoreCase);
-
-        var materialPropFiles = project.MaterialSet.Materials
-            .Where(m => !string.IsNullOrWhiteSpace(m.ObjectFileName))
-            .Select(m => NormalizeFileName(m.ObjectFileName!))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        foreach (var missingProp in materialPropFiles.Where(p => !propFiles.Contains(p)))
-        {
-            report.Add(
-                ValidationSeverity.Info,
-                ValidationCode.MissingPropReference,
-                $"Le materialset référence l'objet '{missingProp}', absent des FileNames du PropGrid. Cela peut être normal si le jeu le résout ailleurs, mais mérite vérification.",
-                project.MaterialSet.FileName);
-        }
+        // Material vegetation is referenced independently of PropGrid instances.
+        // A material object need not be instantiated in PropGrid.FileNames.
 
         return report;
     }

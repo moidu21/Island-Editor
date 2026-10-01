@@ -826,6 +826,7 @@ public partial class TerrainMaterialMapWindow : Window
     {
         options.Normalize();
         var previewMap = _workingMap.Clone();
+        ConfigureTopologyContext(options);
         var result = TerrainTopologyMaterialPainter.Apply(previewMap, _project.GameData.TerrainHeightMap, options, out var stats, activeMaterialCellPredicate: BuildWritableMaterialCellPredicate(previewMap));
         status = FormatTopologyText("Vue topologie : {0} cellule(s), {1} bloc(s). {2}", result.CellsChanged, result.BlocksChanged, BuildTopologyStatsText(stats));
         details = BuildTopologyDetails(options, result, stats);
@@ -870,6 +871,7 @@ public partial class TerrainMaterialMapWindow : Window
         var active = BuildActiveMaterialCellPredicate(map);
         var blocked = _project.ProtectBeachMaterial
             ? GeneratedBeachZones.ProtectedMaterialBlocks(_project, map) : new HashSet<int>();
+        blocked.UnionWith(RiverMaterialProtection.ProtectedMaterialBlocks(_project, map));
         return (x, y) => (active is null || active(x, y)) && !blocked.Contains(map.GetMaterialIdBlockIndex(x, y));
     }
 
@@ -1121,13 +1123,33 @@ public partial class TerrainMaterialMapWindow : Window
     private void RefreshTopologyMaterialSelectors()
     {
         var rows = _paletteRows.Where(r => r.IsTerrain).ToList();
-        SetCoastComboItems(FlatTilingMaterialComboBox, rows, SelectMaterialByKeywords(rows, new[] { "dirt", "mud", "earth", "soil" }, 2));
-        SetCoastComboItems(TopologyFlatMaterialComboBox, rows, SelectMaterialByKeywords(rows, new[] { "grass", "meadow", "earth" }, 2));
-        SetCoastComboItems(TopologyGentleMaterialComboBox, rows, SelectMaterialByKeywords(rows, new[] { "grass", "earth", "dirt" }, 2));
-        SetCoastComboItems(TopologySteepMaterialComboBox, rows, SelectMaterialByKeywords(rows, new[] { "rock", "cliff", "stone" }, 16));
-        SetCoastComboItems(TopologyRidgeMaterialComboBox, rows, SelectMaterialByKeywords(rows, new[] { "rock", "cliff", "snow", "stone" }, 16));
-        SetCoastComboItems(TopologyHollowMaterialComboBox, rows, SelectMaterialByKeywords(rows, new[] { "dirt", "mud", "earth", "grass" }, 2));
+        var profile=TerrainTopologyProfile.Create(_project.MaterialSet);
+        var defaults=profile.Options;
+        SetCoastComboItems(FlatTilingMaterialComboBox, rows, rows.FirstOrDefault(r=>r.Id==defaults.FlatTilingMaterialId));
+        SetCoastComboItems(TopologyFlatMaterialComboBox, rows, rows.FirstOrDefault(r=>r.Id==defaults.FlatMaterialId));
+        SetCoastComboItems(TopologyGentleMaterialComboBox, rows, rows.FirstOrDefault(r=>r.Id==defaults.GentleSlopeMaterialId));
+        SetCoastComboItems(TopologySteepMaterialComboBox, rows, rows.FirstOrDefault(r=>r.Id==defaults.SteepSlopeMaterialId));
+        SetCoastComboItems(TopologyRidgeMaterialComboBox, rows, rows.FirstOrDefault(r=>r.Id==defaults.RidgeMaterialId));
+        SetCoastComboItems(TopologyHollowMaterialComboBox, rows, rows.FirstOrDefault(r=>r.Id==defaults.HollowMaterialId));
+        defaults.OnlyEmergedLand=true;
+        SetTopologyControls(defaults);
+        TopologyProfileTextBlock.Text=profile.Label;
+
     }
+
+    private void ResetTopologyProfileButton_Click(object sender,RoutedEventArgs e)
+    {
+        RefreshTopologyMaterialSelectors();
+        _largeWindow?.RefreshFromParentData(refreshPalette:true);
+    }
+    internal void ConfigureTopologyContext(TerrainTopologyMaterialOptions options)
+    {
+        options.WorldWidth=options.WorldHeight=_project.Root.MapSize;
+        options.CellRecipes.Clear();
+        foreach(var recipe in TerrainTopologyProfile.Create(_project.MaterialSet).Options.CellRecipes)
+            options.CellRecipes.Add(recipe.Key,recipe.Value);
+    }
+    internal string TopologyProfileLabel => TerrainTopologyProfile.Create(_project.MaterialSet).Label;
 
     private void SetTopologyControls(TerrainTopologyMaterialOptions options)
     {
@@ -1137,6 +1159,8 @@ public partial class TerrainMaterialMapWindow : Window
         SetCoastComboById(TopologySteepMaterialComboBox, options.SteepSlopeMaterialId);
         SetCoastComboById(TopologyRidgeMaterialComboBox, options.RidgeMaterialId);
         SetCoastComboById(TopologyHollowMaterialComboBox, options.HollowMaterialId);
+        NativeCellsCheckBox.IsChecked=options.UseNativeCells;
+        EmergedOnlyCheckBox.IsChecked=options.OnlyEmergedLand;
         FlatTilingCheckBox.IsChecked = options.FlatTilingEnabled;
         FlatTileSizeTextBox.Text = (options.FlatTileSize / 2).ToString(CultureInfo.InvariantCulture);
         FlatTileContrastTextBox.Text = options.FlatTileContrast.ToString(CultureInfo.InvariantCulture);
@@ -1159,6 +1183,8 @@ public partial class TerrainMaterialMapWindow : Window
     {
         var options = new TerrainTopologyMaterialOptions
         {
+            UseNativeCells=NativeCellsCheckBox.IsChecked==true,
+            OnlyEmergedLand=EmergedOnlyCheckBox.IsChecked==true,
             FlatMaterialId = SelectedCoastMaterialId(TopologyFlatMaterialComboBox, 2),
             FlatTilingEnabled = FlatTilingCheckBox.IsChecked == true,
             FlatTilingMaterialId = SelectedCoastMaterialId(FlatTilingMaterialComboBox, 2),
@@ -1179,9 +1205,6 @@ public partial class TerrainMaterialMapWindow : Window
 
         if (options.PreserveExistingWaterAndBeach)
         {
-            options.PreservedMaterialIds.Add(SelectedCoastMaterialId(DeepWaterMaterialComboBox, 3));
-            options.PreservedMaterialIds.Add(SelectedCoastMaterialId(ShallowWaterMaterialComboBox, 4));
-            options.PreservedMaterialIds.Add(SelectedCoastMaterialId(BeachMaterialComboBox, 1));
             foreach (var row in _paletteRows.Where(row =>
                          row.Label.Contains("water", StringComparison.OrdinalIgnoreCase) ||
                          row.Label.Contains("underwater", StringComparison.OrdinalIgnoreCase) ||
@@ -1193,10 +1216,14 @@ public partial class TerrainMaterialMapWindow : Window
             }
         }
 
+        ConfigureTopologyContext(options);
+        options.OpaqueBaseMaterialId = GetOpaqueBaseMaterialId();
         options.FlatTilingOverlayAboveBase = IsTilingOverlayAbove(options.FlatMaterialId,options.FlatTilingMaterialId);
         options.Normalize();
         return options;
     }
+
+    internal int? GetOpaqueBaseMaterialId() => Anno1800IslandTool.Pipeline.Services.TerrainSurfaceUnderlay.FindBaseId(_project.MaterialSet);
 
     private static int ParseIntTextBox(TextBox textBox, int fallback)
         => int.TryParse(textBox.Text?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : fallback;
@@ -1255,6 +1282,8 @@ public partial class TerrainMaterialMapWindow : Window
     {
         var sb = new StringBuilder();
         sb.AppendLine(UiLocalizationManager.T("Peinture automatique par topologie (sans altitude absolue)"));
+        sb.AppendLine(TopologyProfileLabel + (options.UseNativeCells ? " — cellules multicouches" : " — matériaux simples"));
+        sb.AppendLine("Pentes en unités du monde ; rayon en cases. Les rivières et plages protégées restent intactes.");
         sb.AppendLine(FormatTopologyText("Plat : ID {0} | pente <= {1:0.###}", options.FlatMaterialId, options.FlatSlopeMaximum));
         sb.AppendLine(FormatTopologyText("Pente douce : ID {0}", options.GentleSlopeMaterialId));
         sb.AppendLine(FormatTopologyText("Pente forte : ID {0} | pente >= {1:0.###}", options.SteepSlopeMaterialId, options.SteepSlopeMinimum));
@@ -1365,7 +1394,7 @@ public partial class TerrainMaterialMapWindow : Window
         }
 
         var total = Math.Max(1, map.Width * map.Height);
-        foreach (var pair in map.CountDominantMaterials().OrderByDescending(p => p.Value).ThenBy(p => p.Key))
+        foreach (var pair in map.CountDominantMaterials(drawOrder: GetSurfaceDrawOrder()).OrderByDescending(p => p.Value).ThenBy(p => p.Key))
         {
             var color = GetMaterialColor(pair.Key);
             yield return new DominantMaterialRow
@@ -1472,7 +1501,11 @@ public partial class TerrainMaterialMapWindow : Window
                 ? material.ObjectFileName!
                 : $"Material {material.Id}";
 
-    internal static BitmapSource? BuildDominantMaterialBitmap(TerrainMaterialMap map, Func<int, int, bool>? activeCellPredicate = null)
+    private Dictionary<int, int> GetSurfaceDrawOrder() => (_project.MaterialSet?.Materials ?? new())
+        .Where(m => m.Type == "0").Select((m, i) => (m.Id, Order: i))
+        .GroupBy(m => m.Id).ToDictionary(g => g.Key, g => g.Last().Order);
+
+    internal BitmapSource? BuildDominantMaterialBitmap(TerrainMaterialMap map, Func<int, int, bool>? activeCellPredicate = null)
     {
         if (map.Width <= 0 || map.Height <= 0 || !map.HasAnyData)
         {
@@ -1480,6 +1513,7 @@ public partial class TerrainMaterialMapWindow : Window
         }
 
         var pixels = new byte[map.Width * map.Height * 4];
+        var drawOrder = GetSurfaceDrawOrder();
         TerrainComputeScheduler.For(0, map.Height, 64, y =>
         {
             for (var x = 0; x < map.Width; x++)
@@ -1494,7 +1528,7 @@ public partial class TerrainMaterialMapWindow : Window
                     continue;
                 }
 
-                var id = map.GetDominantMaterialId(x, y);
+                var id = map.GetDominantMaterialId(x, y, drawOrder);
                 var color = GetMaterialColor(id);
                 var idx = (y * map.Width + x) * 4;
                 pixels[idx] = color.B;

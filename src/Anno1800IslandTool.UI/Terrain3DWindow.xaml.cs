@@ -1882,6 +1882,23 @@ public partial class Terrain3DWindow : Window
                 changedRegions.Max(region => region.MaxX),
                 changedRegions.Max(region => region.MaxZ));
         }
+        // A coarse seam sample can erase a narrow bed. Restore its absolute profile
+        // before sampling the authoritative gameplay/height pages and taking snapshots.
+        var synchronizedRegions = changedRegions.ToList();
+        foreach (var bed in GeneratedRiverService.ReadGeneratedBeds(_project))
+        {
+            if (RiverBedSculptor.Apply(_project, bed.Points, bed.Width, bed.Depth) == 0) continue;
+            var scaleX = _project.Rd3d.GridWidth / (double)Math.Max(1, _project.Root.MapSize);
+            var scaleZ = _project.Rd3d.GridHeight / (double)Math.Max(1, _project.Root.MapSize);
+            foreach (var lod in _project.MeshPages.Values.Where(MeshPageClassifier.CanEditGeometry).Select(p => p.Key.Lod).Distinct())
+                synchronizedRegions.Add((lod,
+                    (bed.Points.Min(p => p.X) - bed.Width) * scaleX,
+                    (bed.Points.Min(p => p.Z) - bed.Width) * scaleZ,
+                    (bed.Points.Max(p => p.X) + bed.Width) * scaleX,
+                    (bed.Points.Max(p => p.Z) + bed.Width) * scaleZ));
+        }
+        changedRegions = synchronizedRegions;
+        mergeMultipleLods = changedRegions.Select(r => r.Lod).Distinct().Count() > 1;
         if (mergeMultipleLods && !IsIslandExpansionModeEnabled() && !_activeMapMaskDirty)
         {
             // Keep the imported coarse map outside the edited footprint. Rebuilding a

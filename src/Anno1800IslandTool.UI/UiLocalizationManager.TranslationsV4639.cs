@@ -10,6 +10,10 @@ public static partial class UiLocalizationManager
             German[fr] = de;
         }
 
+        Add("Quitter le programme", "Exit the application", "Programm beenden");
+        Add("Voulez-vous vraiment quitter ? Le travail non exporté sera perdu.", "Do you really want to exit? Work that has not been exported will be lost.", "Möchten Sie das Programm wirklich beenden? Nicht exportierte Arbeit geht verloren.");
+        Add("Oui", "Yes", "Ja");
+        Add("Non", "No", "Nein");
         // v46.39 completes every static label used by the WPF windows.
         Add("≈  Lisser le terrain", "≈  Smooth terrain", "≈  Terrain glätten");
         Add("▬  Aplatir (Flatten)", "▬  Flatten terrain", "▬  Terrain abflachen");
@@ -393,11 +397,11 @@ public static partial class UiLocalizationManager
         Add("Terrain 3D GPU v46.66 - édition terrain multi-LOD sans cassures", "3D GPU Terrain v46.66 - crack-free multi-LOD terrain editing", "3D-GPU-Terrain v46.66 - bruchfreie Multi-LOD-Terrainbearbeitung");
         Add("Terrain 3D v46.66 — édition terrain multi-LOD sans cassures", "3D Terrain v46.66 — crack-free multi-LOD terrain editing", "3D-Terrain v46.66 — bruchfreie Multi-LOD-Terrainbearbeitung");
         Add("v46.66 : les pinceaux modifient tous les LOD ensemble et conservent les raccords du maillage.", "v46.66: brushes edit every LOD together and preserve mesh connectors.", "v46.66: Pinsel bearbeiten alle LODs gemeinsam und erhalten die Mesh-Verbindungen.");
-        Add("Anno1800IslandTool v46.77 — matériaux carrelés et menus organisés", "Anno1800IslandTool v46.77 — aligned height pages and surface preview", "Anno1800IslandTool v46.77 — abgestimmte Höhenseiten und Oberflächenvorschau");
-        Add("Anno1800IslandTool v46.77 - matériaux carrelés et menus organisés", "Anno1800IslandTool v46.77 - aligned height pages and surface preview", "Anno1800IslandTool v46.77 - abgestimmte Höhenseiten und Oberflächenvorschau");
-        Add("Terrain 3D GPU v46.77 - matériaux carrelés et menus organisés", "3D GPU Terrain v46.77 - aligned height pages and surface preview", "3D-GPU-Terrain v46.77 - abgestimmte Höhenseiten und Oberflächenvorschau");
-        Add("Terrain 3D v46.77 — matériaux carrelés et menus organisés", "3D Terrain v46.77 — aligned height pages and surface preview", "3D-Terrain v46.77 — abgestimmte Höhenseiten und Oberflächenvorschau");
-        Add("v46.77 : pages de hauteur alignées, réparation du rendu proche et aperçu GPU sans ombrage des parois de raccord.", "v46.77: aligned height pages, close-view repair and GPU preview without connector-wall shading.", "v46.77: abgestimmte Höhenseiten, Reparatur der Nahansicht und GPU-Vorschau ohne Schatten der Verbindungswände.");
+        Add("Anno1800IslandTool v46.89 — matériaux carrelés et menus organisés", "Anno1800IslandTool v46.89 — aligned height pages and surface preview", "Anno1800IslandTool v46.89 — abgestimmte Höhenseiten und Oberflächenvorschau");
+        Add("Anno1800IslandTool v46.89 - matériaux carrelés et menus organisés", "Anno1800IslandTool v46.89 - aligned height pages and surface preview", "Anno1800IslandTool v46.89 - abgestimmte Höhenseiten und Oberflächenvorschau");
+        Add("Terrain 3D GPU v46.89 - matériaux carrelés et menus organisés", "3D GPU Terrain v46.89 - aligned height pages and surface preview", "3D-GPU-Terrain v46.89 - abgestimmte Höhenseiten und Oberflächenvorschau");
+        Add("Terrain 3D v46.89 — matériaux carrelés et menus organisés", "3D Terrain v46.89 — aligned height pages and surface preview", "3D-Terrain v46.89 — abgestimmte Höhenseiten und Oberflächenvorschau");
+        Add("v46.89 : pages de hauteur alignées, réparation du rendu proche et aperçu GPU sans ombrage des parois de raccord.", "v46.89: aligned height pages, close-view repair and GPU preview without connector-wall shading.", "v46.89: abgestimmte Höhenseiten, Reparatur der Nahansicht und GPU-Vorschau ohne Schatten der Verbindungswände.");
         Add("Réparer les raccords du rendu proche", "Repair close-view height seams", "Höhennähte der Nahansicht reparieren");
         Add("Les points d’accroche sont disponibles dans tous les biomes et ne sont créés qu’aux emplacements choisis.", "Anchor points are available in every biome and are created only at the selected locations.", "Ankerpunkte sind in allen Biomen verfügbar und werden nur an den ausgewählten Stellen erstellt.");
         Add("Rivière créée (ID {0}) : profondeur locale fixe, eau raccordée aux berges, tous les LOD et points d’accroche synchronisés.", "River created (ID {0}): fixed local depth, water fitted to the banks, and all LODs and anchor points synchronized.", "Fluss erstellt (ID {0}): feste lokale Tiefe, an die Ufer angepasstes Wasser sowie alle LODs und Ankerpunkte synchronisiert.");

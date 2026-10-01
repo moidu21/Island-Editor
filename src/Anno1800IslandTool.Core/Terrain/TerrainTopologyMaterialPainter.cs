@@ -19,7 +19,7 @@ public enum TerrainTopologyRole
 /// </summary>
 public static class TerrainTopologyMaterialPainter
 {
-    private readonly record struct TopologyDecision(TerrainTopologyRole Role, int MaterialId);
+    private readonly record struct TopologyDecision(TerrainTopologyRole Role, int MaterialId, float Slope = 0);
 
     public static TerrainMaterialPaintResult Apply(
         TerrainMaterialMap materialMap,
@@ -49,31 +49,73 @@ public static class TerrainTopologyMaterialPainter
             return result;
         }
 
+        // Shared palettes require protecting whole blocks: adding a layer in a neighbouring texel
+        // must not evict river, beach or submerged materials.
+        var originalIds=materialMap.PackedMaterialIds.ToArray();
+        var originalAlphas=materialMap.PackedMaterialAlphas.ToArray();
+        var protectedBlocks = new HashSet<int>();
+        int blockSize=materialMap.MaterialIdBlockSize;
+        // Partial selections cannot replace a shared palette outside their bounds.
+        for(int by=bounds.Top/blockSize;by<(bounds.Bottom+blockSize-1)/blockSize;by++)
+        for(int bx=bounds.Left/blockSize;bx<(bounds.Right+blockSize-1)/blockSize;bx++)
+            if(bx*blockSize<bounds.Left || by*blockSize<bounds.Top || Math.Min((bx+1)*blockSize,materialMap.Width)>bounds.Right || Math.Min((by+1)*blockSize,materialMap.Height)>bounds.Bottom)
+                protectedBlocks.Add(by*materialMap.BlockWidth+bx);
+        for(int y=bounds.Top;y<bounds.Bottom;y++)
+        for(int x=bounds.Left;x<bounds.Right;x++)
+        {
+            bool skip=activeMaterialCellPredicate is not null && !activeMaterialCellPredicate(x,y);
+            if(options.OnlyEmergedLand)
+            {
+                double hx=(x+.5)/materialMap.Width*(heightMap.Width-1),hy=(y+.5)/materialMap.Height*(heightMap.Height-1);
+                skip |= TerrainHeightEncoding.SampleCoarseHeightMapWorld(heightMap,hx,hy)<=0;
+            }
+            if(options.PreserveExistingWaterAndBeach)skip |= HasOnlyProtectedLayers(materialMap.GetCell(x,y),options.PreservedMaterialIds);
+            if(skip)protectedBlocks.Add(materialMap.GetMaterialIdBlockIndex(x,y));
+        }
         var decisions = new TopologyDecision[materialMap.Width * materialMap.Height];
         TerrainComputeScheduler.For(bounds.Top, bounds.Bottom, 64, y =>
         {
             for (var x = bounds.Left; x < bounds.Right; x++)
             {
                 var index = (y * materialMap.Width) + x;
-                if (activeMaterialCellPredicate is not null && !activeMaterialCellPredicate(x, y))
-                {
-                    decisions[index] = new TopologyDecision(TerrainTopologyRole.None, 0);
-                    continue;
-                }
-
-                if (options.PreserveExistingWaterAndBeach &&
-                    options.PreservedMaterialIds.Contains(materialMap.GetDominantMaterialId(x, y)))
+                if (protectedBlocks.Contains(materialMap.GetMaterialIdBlockIndex(x,y)))
                 {
                     decisions[index] = new TopologyDecision(TerrainTopologyRole.None, -1);
                     continue;
                 }
 
-                var metrics = AnalyzeCell(heightMap, materialMap, x, y, options.AnalysisRadius);
-                var role = Classify(metrics.Slope, metrics.Curvature, options);
-                decisions[index] = new TopologyDecision(role, ResolveMaterialId(role, options));
+                var metrics = AnalyzeCell(heightMap, materialMap, x, y, options.AnalysisRadius, options.WorldWidth, options.WorldHeight);
+                var role = ClassifyNormalized(metrics.Slope, metrics.Curvature, options);
+                decisions[index] = new TopologyDecision(role, ResolveMaterialId(role, options),metrics.Slope);
             }
         });
 
+        // Replace each fully writable block as a unit. Reserve opaque base and all
+        // primary materials before optional details; old slots must not starve the base.
+        if(!options.UseBlend)
+        for(int by=bounds.Top/blockSize;by<(bounds.Bottom+blockSize-1)/blockSize;by++)
+        for(int bx=bounds.Left/blockSize;bx<(bounds.Right+blockSize-1)/blockSize;bx++)
+        {
+            int block=by*materialMap.BlockWidth+bx;
+            if(protectedBlocks.Contains(block))continue;
+            var ids=new List<int>(6);
+            void Add(int id){if(ids.Count<6 && !ids.Contains(id))ids.Add(id);}
+            if(options.OpaqueBaseMaterialId is int baseId)Add(baseId);
+            for(int y=by*blockSize;y<Math.Min((by+1)*blockSize,materialMap.Height);y++)
+            for(int x=bx*blockSize;x<Math.Min((bx+1)*blockSize,materialMap.Width);x++)Add(decisions[y*materialMap.Width+x].MaterialId);
+            for(int y=by*blockSize;y<Math.Min((by+1)*blockSize,materialMap.Height);y++)
+            for(int x=bx*blockSize;x<Math.Min((bx+1)*blockSize,materialMap.Width);x++)
+            {
+                var d=decisions[y*materialMap.Width+x];
+                if(options.UseNativeCells && options.CellRecipes.TryGetValue(d.Role,out var recipe) && recipe.PrimaryMaterialId==d.MaterialId)
+                    foreach(var layer in recipe.Layers)Add(layer.MaterialId);
+            }
+            if(options.FlatTilingEnabled)Add(options.FlatTilingMaterialId);
+            while(ids.Count<6)ids.Add(ids[0]);
+            materialMap.PackedMaterialIds[block]=TerrainMaterialPackEncoding.EncodeMaterialIds(ids);
+            for(int y=by*blockSize;y<Math.Min((by+1)*blockSize,materialMap.Height);y++)
+            for(int x=bx*blockSize;x<Math.Min((bx+1)*blockSize,materialMap.Width);x++)materialMap.PackedMaterialAlphas[y*materialMap.Width+x]=0;
+        }
         var changedBlocks = new HashSet<int>();
         var left = int.MaxValue;
         var top = int.MaxValue;
@@ -103,8 +145,8 @@ public static class TerrainTopologyMaterialPainter
                 var materialId = TerrainMaterialPackEncoding.ClampSlot(decision.MaterialId);
                 var blockIndex = materialMap.GetMaterialIdBlockIndex(x, y);
                 var alphaIndex = materialMap.GetAlphaIndex(x, y);
-                var beforeBlock = materialMap.PackedMaterialIds[blockIndex];
-                var beforeAlpha = materialMap.PackedMaterialAlphas[alphaIndex];
+                var beforeBlock = originalIds[blockIndex];
+                var beforeAlpha = originalAlphas[alphaIndex];
 
                 if (options.UseBlend && options.ClampedStrength < TerrainMaterialPackEncoding.MaxPackedSlotValue)
                 {
@@ -115,6 +157,19 @@ public static class TerrainTopologyMaterialPainter
                     materialMap.SetDominantMaterialSafe(x, y, materialId, options.ClampedStrength);
                 }
 
+                if(options.UseNativeCells && options.CellRecipes.TryGetValue(decision.Role,out var recipe)
+                    && recipe.PrimaryMaterialId==materialId && !options.UseBlend)
+                {
+                    double wx=(x+.5)/materialMap.Width*(options.WorldWidth>0?options.WorldWidth:materialMap.Width);
+                    double wy=(y+.5)/materialMap.Height*(options.WorldHeight>0?options.WorldHeight:materialMap.Height);
+                    double variation=SurfaceVariation(wx/8,wy/8);
+                    foreach(var layer in recipe.Layers)
+                    {
+                        double weight=layer.Minimum+(layer.Maximum-layer.Minimum)*variation;
+                        if(layer.FadeOnSlope)weight*=Math.Clamp((options.SteepSlopeMinimum-decision.Slope)/Math.Max(.001f,options.SteepSlopeMinimum-options.FlatSlopeMaximum),0,1);
+                        if(TryAddLayer(materialMap,x,y,layer.MaterialId,(int)Math.Round(weight)))result.AffectedMaterialIds.Add(layer.MaterialId);
+                    }
+                }
                 if (decision.Role == TerrainTopologyRole.Flat && options.FlatTilingEnabled
                     && options.FlatTilingMaterialId != materialId)
                 {
@@ -122,7 +177,7 @@ public static class TerrainTopologyMaterialPainter
                     // Never evict a neighbour's material merely to add a decorative layer.
                     var ids = materialMap.GetMaterialIdBlock(x/materialMap.MaterialIdBlockSize,y/materialMap.MaterialIdBlockSize);
                     int slot = Array.IndexOf(ids, options.FlatTilingMaterialId);
-                    if (slot < 0)
+                    if (slot < 0 && options.UseBlend)
                     {
                         slot = Array.IndexOf(materialMap.GetBlockAlphaUsage(x/materialMap.MaterialIdBlockSize,y/materialMap.MaterialIdBlockSize),0);
                         if (slot >= 0)
@@ -143,6 +198,8 @@ public static class TerrainTopologyMaterialPainter
                         result.AffectedMaterialIds.Add(options.FlatTilingMaterialId);
                     }
                 }
+                if (options.OpaqueBaseMaterialId is int baseId)
+                    TerrainMaterialUnderlay.EnsureCell(materialMap, x, y, baseId);
                 var afterBlock = materialMap.PackedMaterialIds[blockIndex];
                 var afterAlpha = materialMap.PackedMaterialAlphas[alphaIndex];
                 if (beforeBlock == afterBlock && beforeAlpha == afterAlpha)
@@ -178,12 +235,14 @@ public static class TerrainTopologyMaterialPainter
         TerrainMaterialMap materialMap,
         int x,
         int y,
-        int analysisRadius)
+        int analysisRadius, float worldWidth = 0, float worldHeight = 0)
     {
         var hx = ((x + 0.5) / Math.Max(1.0, materialMap.Width)) * (heightMap.Width - 1);
         var hy = ((y + 0.5) / Math.Max(1.0, materialMap.Height)) * (heightMap.Height - 1);
-        var stepX = Math.Max(1.0, (heightMap.Width - 1.0) / Math.Max(1, materialMap.Width)) * Math.Clamp(analysisRadius, 1, 16);
-        var stepY = Math.Max(1.0, (heightMap.Height - 1.0) / Math.Max(1, materialMap.Height)) * Math.Clamp(analysisRadius, 1, 16);
+        var unitX = worldWidth > 0 ? worldWidth/(heightMap.Width-1) : 1f;
+        var unitY = worldHeight > 0 ? worldHeight/(heightMap.Height-1) : 1f;
+        var stepX = worldWidth>0 ? Math.Clamp(analysisRadius,1,16)/unitX : Math.Max(1.0, (heightMap.Width - 1.0) / Math.Max(1, materialMap.Width)) * Math.Clamp(analysisRadius, 1, 16);
+        var stepY = worldHeight>0 ? Math.Clamp(analysisRadius,1,16)/unitY : Math.Max(1.0, (heightMap.Height - 1.0) / Math.Max(1, materialMap.Height)) * Math.Clamp(analysisRadius, 1, 16);
 
         var center = TerrainHeightEncoding.SampleCoarseHeightMapWorld(heightMap, hx, hy);
         var left = TerrainHeightEncoding.SampleCoarseHeightMapWorld(heightMap, hx - stepX, hy);
@@ -191,29 +250,64 @@ public static class TerrainTopologyMaterialPainter
         var top = TerrainHeightEncoding.SampleCoarseHeightMapWorld(heightMap, hx, hy - stepY);
         var bottom = TerrainHeightEncoding.SampleCoarseHeightMapWorld(heightMap, hx, hy + stepY);
 
-        var dx = (right - left) / (2f * (float)stepX);
-        var dy = (bottom - top) / (2f * (float)stepY);
+        var dx = (right - left) / (2f * (float)stepX * unitX);
+        var dy = (bottom - top) / (2f * (float)stepY * unitY);
         var slope = MathF.Sqrt((dx * dx) + (dy * dy));
         var curvature = center - ((left + right + top + bottom) * 0.25f);
+        if(worldWidth>0 && worldHeight>0)curvature /= Math.Clamp(analysisRadius,1,16)*Math.Clamp(analysisRadius,1,16);
         return (slope, curvature);
     }
 
     public static TerrainTopologyRole Classify(float slope, float curvature, TerrainTopologyMaterialOptions options)
     {
         options.Normalize();
-        if (curvature >= options.CurvatureSensitivity)
+        return ClassifyNormalized(slope,curvature,options);
+    }
+    private static TerrainTopologyRole ClassifyNormalized(float slope,float curvature,TerrainTopologyMaterialOptions options)
+    {
+        // A steep concave cliff remains rock instead of becoming a muddy hollow.
+        if (slope >= options.SteepSlopeMinimum - 0.00001f) return TerrainTopologyRole.SteepSlope;
+        if (curvature >= options.CurvatureSensitivity - 0.00001f)
         {
             return TerrainTopologyRole.Ridge;
         }
-        if (curvature <= -options.CurvatureSensitivity)
+        if (curvature <= -options.CurvatureSensitivity + 0.00001f)
         {
             return TerrainTopologyRole.Hollow;
         }
-        if (slope >= options.SteepSlopeMinimum)
+        return slope <= options.FlatSlopeMaximum + 0.00001f ? TerrainTopologyRole.Flat : TerrainTopologyRole.GentleSlope;
+    }
+
+    private static bool TryAddLayer(TerrainMaterialMap map,int x,int y,int id,int weight)
+    {
+        if(weight<=0)return false;
+        int block=map.GetMaterialIdBlockIndex(x,y),slot=-1;
+        uint packed=map.PackedMaterialIds[block];
+        for(int i=0;i<6;i++)if(((packed>>(i*5))&31)==id){slot=i;break;}
+        if(slot<0)return false; // Palette prepared with primary layers first; no eviction.
+        int ai=map.GetAlphaIndex(x,y);
+        map.PackedMaterialAlphas[ai]=(map.PackedMaterialAlphas[ai]&~(31u<<(slot*5)))|((uint)Math.Clamp(weight,0,31)<<(slot*5));
+        return true;
+    }
+    private static double SurfaceVariation(double x,double y)
+    {
+        int ix=(int)Math.Floor(x),iy=(int)Math.Floor(y);
+        double tx=x-ix,ty=y-iy;tx=tx*tx*(3-2*tx);ty=ty*ty*(3-2*ty);
+        static double Hash(int a,int b){uint h=unchecked((uint)a*374761393u+(uint)b*668265263u);h=(h^(h>>13))*1274126177u;return (h^(h>>16))/(double)uint.MaxValue;}
+        return (Hash(ix,iy)*(1-tx)+Hash(ix+1,iy)*tx)*(1-ty)+(Hash(ix,iy+1)*(1-tx)+Hash(ix+1,iy+1)*tx)*ty;
+    }
+
+    private static bool HasOnlyProtectedLayers(TerrainMaterialCell cell, HashSet<int> protectedIds)
+    {
+        var any = false;
+        for (var i = 0; i < cell.MaterialIds.Length; i++)
         {
-            return TerrainTopologyRole.SteepSlope;
+            if (cell.AlphaWeights[i] == 0) continue;
+            any = true;
+            // An opaque sand underlay must not lock a grass/rock surface.
+            if (!protectedIds.Contains(cell.MaterialIds[i])) return false;
         }
-        return slope <= options.FlatSlopeMaximum ? TerrainTopologyRole.Flat : TerrainTopologyRole.GentleSlope;
+        return any;
     }
 
     private static int ResolveMaterialId(TerrainTopologyRole role, TerrainTopologyMaterialOptions options)

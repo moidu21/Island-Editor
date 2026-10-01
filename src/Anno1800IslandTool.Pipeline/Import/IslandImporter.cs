@@ -115,6 +115,9 @@ public sealed class IslandImporter : IIslandReader
         }
 
         project.ValidationReport = _validator.Validate(project);
+        var riverMetadata = entries.FirstOrDefault(e => e.RelativePath.Replace('\\', '/').Equals("_anno1800islandtool/river-beds.json", StringComparison.OrdinalIgnoreCase));
+        if (riverMetadata is not null)
+            project.GeneratedRiverBedDepths = System.Text.Json.JsonSerializer.Deserialize<Dictionary<long, float>>(archive.ReadEntryText(riverMetadata.RelativePath)) ?? new();
         return project;
     }
 

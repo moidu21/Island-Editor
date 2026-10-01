@@ -1,4 +1,4 @@
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering" xmlns:hx="http://helix-toolkit.org/wpf/SharpDX" x:Class="Anno1800IslandTool.UI.TerrainMaterialMapLargeWindow" Title="Anno1800IslandTool v46.77 - matériaux carrelés et menus organisés" Height="1000" Width="1780" WindowStartupLocation="CenterOwner">
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering" xmlns:hx="http://helix-toolkit.org/wpf/SharpDX" x:Class="Anno1800IslandTool.UI.TerrainMaterialMapLargeWindow" Title="Anno1800IslandTool v46.89 - matériaux carrelés et menus organisés" Height="1000" Width="1780" WindowStartupLocation="CenterOwner">
   <Grid Margin="10">
     <Grid.ColumnDefinitions>
       <ColumnDefinition Width="390"/>
@@ -130,10 +130,13 @@
                       <TextBox x:Name="TopologyCurvatureTextBox" Text="0.35" Height="24"/>
                     </DockPanel>
                     <DockPanel Margin="0,0,0,4">
-                      <TextBlock DockPanel.Dock="Left" Width="130" Text="Rayon analyse"/>
-                      <TextBox x:Name="TopologyRadiusTextBox" Text="2" Height="24"/>
+                      <TextBlock DockPanel.Dock="Left" Width="130" Text="Rayon (cases)"/>
+                      <TextBox x:Name="TopologyRadiusTextBox" Text="1" Height="24"/>
                     </DockPanel>
-                    <CheckBox x:Name="TopologyPreserveWaterBeachCheckBox" Content="Préserver l’eau et les plages existantes" IsChecked="True" Margin="0,4,0,0"/>
+                    <TextBlock x:Name="TopologyProfileTextBlock" TextWrapping="Wrap" FontWeight="SemiBold" Margin="0,0,0,5"/>
+          <CheckBox x:Name="NativeCellsCheckBox" Content="Cellules multicouches du biome" IsChecked="True" ToolTip="Mélanges inspirés des îles d’origine. Un choix manuel de matériau remplace la recette de la catégorie concernée."/>
+          <CheckBox x:Name="EmergedOnlyCheckBox" Content="Limiter aux terres émergées" IsChecked="True"/>
+          <CheckBox x:Name="TopologyPreserveWaterBeachCheckBox" Content="Exclure les cellules uniquement eau / plage" ToolTip="Décocher pour repeindre aussi les anciennes plages et les fonds marins aplatis. Une sous-couche de sable sous de l’herbe ne bloque pas la peinture." IsChecked="False" Margin="0,4,0,0"/>
                     <CheckBox x:Name="TopologyBlendCheckBox" Content="Mélanger au lieu de remplacer" Margin="0,4,0,0"/>
                     <DockPanel Margin="0,6,0,0">
                       <TextBlock DockPanel.Dock="Left" Width="55" Text="Force"/>

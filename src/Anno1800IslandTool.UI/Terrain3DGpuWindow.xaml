@@ -1,4 +1,4 @@
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:hx="http://helix-toolkit.org/wpf/SharpDX" x:Class="Anno1800IslandTool.UI.Terrain3DGpuWindow" Title="Terrain 3D GPU v46.77 - matériaux carrelés et menus organisés" Width="1500" Height="920" MinWidth="1050" MinHeight="680" WindowStartupLocation="CenterOwner">
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:hx="http://helix-toolkit.org/wpf/SharpDX" x:Class="Anno1800IslandTool.UI.Terrain3DGpuWindow" Title="Terrain 3D GPU v46.89 - matériaux carrelés et menus organisés" Width="1500" Height="920" MinWidth="1050" MinHeight="680" WindowStartupLocation="CenterOwner">
   <Grid Margin="10">
     <Grid.ColumnDefinitions>
       <ColumnDefinition Width="330"/>
@@ -29,6 +29,8 @@
                 <ComboBoxItem Padding="8" Content="🏖  Créer une plage depuis le maillage"/>
                 <ComboBoxItem Padding="8" Content="🌊  Créer une rivière"/>
                 <ComboBoxItem Padding="8" Content="⛏  Ajouter une mine"/>
+                <ComboBoxItem Padding="8" Content="Ajouter un puits d’argile"/>
+                <ComboBoxItem Padding="8" Content="Ajouter un puits de pétrole"/>
               </ComboBox>
               <Border Margin="0,8,0,0" Padding="7" Background="#FFF4CC" BorderBrush="#D5B95F" BorderThickness="1">
                 <TextBlock x:Name="ActiveToolHelpTextBlock" TextWrapping="Wrap" Text="Navigation : glissez avec le bouton gauche ou droit pour tourner."/>
@@ -101,6 +103,14 @@
           <TabItem Header="Objets">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
               <StackPanel>
+                <Expander x:Name="DepositsExpander" Header="Puits d’argile et de pétrole" Margin="0,0,0,10" IsExpanded="False">
+                  <StackPanel Margin="8">
+                    <TextBlock Text="Choisissez l’outil Argile ou Pétrole, puis cliquez sur un terrain émergé. Chaque clic ajoute un emplacement. Pour le pétrole, placez plusieurs puits voisins pour former un gisement." TextWrapping="Wrap"/>
+                    <TextBlock x:Name="DepositStatusTextBlock" Margin="0,8,0,8" TextWrapping="Wrap"/>
+                    <Button Click="RemoveLastDepositButton_Click" Height="30">Retirer le dernier puits</Button>
+                    <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" Text="Carré : argile. Losange : pétrole. Jaune : en attente ; gris : enregistré. Validez le terrain pour conserver les ajouts. Ctrl+Z / Ctrl+Y : annuler / rétablir. L’activation en jeu dépend des ressources de la session."/>
+                  </StackPanel>
+                </Expander>
                 <Expander Header="Mines — emplacements de ressource" Margin="0,0,0,10" IsExpanded="False">
                   <StackPanel Margin="8">
                     <ComboBox x:Name="MineAssetComboBox" Margin="0,0,0,8"/>

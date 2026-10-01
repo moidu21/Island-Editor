@@ -74,6 +74,14 @@ public partial class Terrain3DGpuWindow
         var positions=new Vector3Collection();var indices=new IntCollection();
         void Segment(Vector3 a,Vector3 b){int start=positions.Count;positions.Add(a);positions.Add(b);indices.Add(start);indices.Add(start+1);}
         void Cross(Float3 p){var c=Scene(p);Segment(c-new Vector3(22,0,0),c+new Vector3(22,0,0));Segment(c-new Vector3(0,0,22),c+new Vector3(0,0,22));}
+        void DepositMarker(Float3 p, bool oil)
+        {
+            var c=Scene(p);
+            var offsets=oil ? new[]{new Vector3(0,0,-30),new Vector3(30,0,0),new Vector3(0,0,30),new Vector3(-30,0,0)}
+                : new[]{new Vector3(-22,0,-22),new Vector3(22,0,-22),new Vector3(22,0,22),new Vector3(-22,0,22)};
+            for(int i=0;i<4;i++)Segment(c+offsets[i],c+offsets[(i+1)%4]);
+        }
+        foreach(var deposit in _pendingDeposits)DepositMarker(deposit.Position,deposit.Kind==DepositKind.Oil);
         foreach(var mine in _pendingMines){Cross(mine.Entrance);Cross(mine.Mountain);Segment(Scene(mine.Entrance),Scene(mine.Mountain));}
         if(_mineEntrance is {} first)Cross(first);
         MinePreviewModel.Geometry=new LineGeometry3D{Positions=positions,Indices=indices};
@@ -81,6 +89,9 @@ public partial class Terrain3DGpuWindow
         positions=new Vector3Collection();indices=new IntCollection();
         var mineGuids=MineSlotService.Catalog.Select(m=>m.Guid).Concat(MineSlotService.Catalog.Select(m=>m.WorkAreaGuid)).ToHashSet();
         foreach(var slot in _project.Root.SlotObjects.Where(s=>mineGuids.Contains(s.ObjectGuid)))Cross(slot.Position);
+        foreach(var slot in _project.Root.SlotObjects.Where(s=>DepositSlotService.IsDepositGuid(s.ObjectGuid)))
+            DepositMarker(slot.Position,slot.ObjectGuid is "100849" or "101062" or "102498");
+        DepositStatusTextBlock.Text=$"En attente : {_pendingDeposits.Count(p=>p.Kind==DepositKind.Clay)} argile, {_pendingDeposits.Count(p=>p.Kind==DepositKind.Oil)} pétrole.";
         ExistingMinePreviewModel.Geometry=new LineGeometry3D{Positions=positions,Indices=indices};
         ExistingMinePreviewModel.IsRendering=positions.Count>0;
         MineStatusTextBlock.Text=$"{_pendingMines.Count} mine(s) en attente. " + (_mineEntrance is null ? "Prochain clic : entrée de la mine." : "Prochain clic : zone de travail dans la montagne.");

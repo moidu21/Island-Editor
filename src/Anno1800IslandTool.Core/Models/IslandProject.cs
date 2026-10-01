@@ -6,6 +6,7 @@ namespace Anno1800IslandTool.Core.Models;
 
 public sealed class IslandProject
 {
+    public Dictionary<long, float> GeneratedRiverBedDepths { get; set; } = new();
     public Anno1800IslandTool.Core.Common.RectI? EmergedMaterialBounds { get; set; }
     public HashSet<TerrainPageKey> EmergedTintPages { get; } = new();
     public IslandMetadata Metadata { get; set; } = new();

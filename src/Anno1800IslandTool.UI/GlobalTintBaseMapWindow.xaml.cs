@@ -1,3 +1,4 @@
+using Anno1800IslandTool.Pipeline.Services;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -17,6 +18,7 @@ public partial class GlobalTintBaseMapWindow : Window
     private const float MaxCrOffset = 0.245f;
 
     private readonly IslandProject _project;
+    private int[] _originalWords = Array.Empty<int>();
     private int _width;
     private int _height;
     private int _channelCount;
@@ -39,6 +41,18 @@ public partial class GlobalTintBaseMapWindow : Window
         };
         UpdateSliderLabels();
         LoadFromProject();
+    }
+
+    private void NeutralGlobalButton_Click(object sender, RoutedEventArgs e)
+    {
+        // Native neutral BC1 endpoint 0x8410: no artificial red/green tint.
+        for (var i = 0; i < _values.Length; i += 4)
+        {
+            _values[i] = unchecked((short)(131 * 257));
+            _values[i+1] = unchecked((short)(129 * 257));
+            _values[i+2] = unchecked((short)(131 * 257));
+        }
+        RenderPreview();
     }
 
     private void ReloadFromProjectButton_Click(object sender, RoutedEventArgs e)
@@ -105,7 +119,7 @@ public partial class GlobalTintBaseMapWindow : Window
             return;
         }
 
-        if (!TryReplaceBaseTextureDataMap(rd3dText!, _width, _height, _values, out var updated, out var error))
+        if (!TryReplaceBaseTextureDataMap(rd3dText!, _width / 4, _height / 4, GlobalTintBlockCodec.Encode(_width, _height, _values, _originalWords), out var updated, out var error))
         {
             MessageBox.Show(this, error, "BaseTextureData", MessageBoxButton.OK, MessageBoxImage.Error);
             return;
@@ -279,7 +293,9 @@ public partial class GlobalTintBaseMapWindow : Window
             return;
         }
 
-        _values = values;
+        _originalWords = values;
+        _values = GlobalTintBlockCodec.Decode(_width, _height, values);
+        _width *= 4; _height *= 4; _channelCount = 4;
         RenderPreview();
         UpdateStatus("BaseTextureData chargée depuis le projet.");
     }
@@ -568,7 +584,7 @@ public partial class GlobalTintBaseMapWindow : Window
             .Select(m => int.Parse(m.Value, CultureInfo.InvariantCulture))
             .ToArray();
         channelCount = values.Length / Math.Max(1, width * height);
-        if (channelCount < 4 || values.Length < width * height * channelCount)
+        if (values.Length != (long)width * height * 4)
         {
             error = $"BaseTextureData/map incohérente : {values.Length:N0} valeurs pour {width}x{height}.";
             return false;

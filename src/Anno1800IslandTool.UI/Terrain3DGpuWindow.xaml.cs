@@ -695,6 +695,13 @@ public partial class Terrain3DGpuWindow : Window
             e.Handled = true;
             return;
         }
+        if (mode is GpuBrushMode.Clay or GpuBrushMode.Oil)
+        {
+            AddDepositPoint(args.HitTestResult.PointHit, mode == GpuBrushMode.Clay ? DepositKind.Clay : DepositKind.Oil);
+            CompleteToolHistoryAction();
+            e.Handled = true;
+            return;
+        }
         if (mode == GpuBrushMode.Mine)
         {
             AddMinePoint(args.HitTestResult.PointHit);
@@ -1259,13 +1266,13 @@ public partial class Terrain3DGpuWindow : Window
         RefreshActiveToolUi();
         if (GpuToolTabs is null) return;
         var mode=GetBrushMode();
-        GpuToolTabs.SelectedIndex=mode is GpuBrushMode.Mine or GpuBrushMode.Trees or GpuBrushMode.River or GpuBrushMode.Beach or GpuBrushMode.MeshBeach ? 1
+        GpuToolTabs.SelectedIndex=mode is GpuBrushMode.Clay or GpuBrushMode.Oil or GpuBrushMode.Mine or GpuBrushMode.Trees or GpuBrushMode.River or GpuBrushMode.Beach or GpuBrushMode.MeshBeach ? 1
             : mode is GpuBrushMode.AddFootprint or GpuBrushMode.RemoveFootprint ? 2 : 0;
         if(GpuToolTabs.SelectedItem is TabItem tab && tab.Content is ScrollViewer viewer && viewer.Content is StackPanel panel)
         foreach(var expander in panel.Children.OfType<Expander>())
         {
             var title=expander.Header?.ToString()??"";
-            if(GpuToolTabs.SelectedIndex==1)expander.IsExpanded=mode==GpuBrushMode.Mine?title.StartsWith("Mines"):
+            if(GpuToolTabs.SelectedIndex==1)expander.IsExpanded=mode is GpuBrushMode.Clay or GpuBrushMode.Oil ? ReferenceEquals(expander,DepositsExpander) : mode==GpuBrushMode.Mine?title.StartsWith("Mines"):
                 mode==GpuBrushMode.Trees?title.Contains("arbres"):mode==GpuBrushMode.River?title.Contains("rivière"):title.Contains("plage");
             if(GpuToolTabs.SelectedIndex==2&&title.Contains("emprise"))expander.IsExpanded=true;
         }
@@ -1318,6 +1325,8 @@ public partial class Terrain3DGpuWindow : Window
             GpuBrushMode.RemoveFootprint => "Retirer une zone : peignez les parties à supprimer. Le mesh, les dérivés et le masque gameplay seront retirés à l’application.",
             GpuBrushMode.Trees => "Arbres : cliquez ou peignez sur la terre. Le rayon, le motif et la densité déterminent la forêt créée.",
             GpuBrushMode.MeshBeach => "Plage sur maillage : choisissez directement une ligne où le relief traverse le niveau de la mer, sans utiliser le contour vert de l'empreinte.",
+            GpuBrushMode.Clay => "Argile : cliquez sur un terrain émergé pour ajouter un puits.",
+            GpuBrushMode.Oil => "Pétrole : cliquez pour ajouter un puits ; répétez pour former un gisement.",
             GpuBrushMode.Mine => "Mine : cliquez l’entrée, puis la montagne. Les deux points définissent l’orientation et la zone de travail.",
             GpuBrushMode.River => "Rivière : cliquez les points dans l’ordre de l’écoulement. L’aperçu arrondit automatiquement les changements de direction.",
             _ => "Déplacer : bouton gauche ou droit pour tourner, molette maintenue pour déplacer, roulette pour zoomer."
@@ -1865,6 +1874,7 @@ public partial class Terrain3DGpuWindow : Window
             _hasDirectProjectCommit = true;
             RebaseTransactionAfterDirectCommit();
             CommitPendingMines();
+            CommitPendingDeposits();
             RebaseTransactionAfterDirectCommit();
             InitializeFootprintMask();
             if (!closeAfterValidation) await ReloadGpuGeometryAsync();
@@ -1919,6 +1929,8 @@ public partial class Terrain3DGpuWindow : Window
         10 => GpuBrushMode.MeshBeach,
         11 => GpuBrushMode.River,
         12 => GpuBrushMode.Mine,
+        13 => GpuBrushMode.Clay,
+        14 => GpuBrushMode.Oil,
         _ => GpuBrushMode.Navigation
     };
 
@@ -2212,7 +2224,9 @@ public partial class Terrain3DGpuWindow : Window
         Trees,
         MeshBeach,
         River,
-        Mine
+        Mine,
+        Clay,
+        Oil
     }
 
     private enum GpuBrushPattern

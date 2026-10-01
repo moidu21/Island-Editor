@@ -678,6 +678,8 @@ public static partial class UiLocalizationManager
 
         // Global tint base editor
         Add("Anno1800IslandTool v44.8 - Éditeur teinte végétation / BaseTextureData", "Anno1800IslandTool v44.8 - Vegetation tint / BaseTextureData editor", "Anno1800IslandTool v44.8 - Editor für Vegetationstönung / BaseTextureData");
+        Add("Neutraliser les teintes globales", "Neutralize global tints", "Globale Farbtönungen neutralisieren");
+        Add("World Machine : axe vertical Z converti vers Y. ", "World Machine: vertical Z axis converted to Y. ", "World Machine: vertikale Z-Achse in Y umgewandelt. ");
         Add("TintMapLevels/BaseTextureData", "TintMapLevels/BaseTextureData", "TintMapLevels/BaseTextureData");
         Add("Cette map globale est échantillonnée par les props/végétation via cTerrainTintTex. Elle influence la luminosité/couleur de la végétation.", "This global map is sampled by props/vegetation through cTerrainTintTex. It affects vegetation brightness/color.", "Diese globale Map wird von Props/Vegetation über cTerrainTintTex abgetastet. Sie beeinflusst Helligkeit/Farbe der Vegetation.");
         Add("Outil pinceau", "Brush tool", "Pinselwerkzeug");
