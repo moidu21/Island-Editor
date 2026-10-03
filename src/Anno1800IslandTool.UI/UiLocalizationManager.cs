@@ -115,7 +115,8 @@ public static partial class UiLocalizationManager
     {
         ApplyToObject(root);
         TraverseLogicalChildren(root);
-        TraverseVisualChildren(root);
+        // Localize authored controls only. Template visuals belong to WPF and must
+        // keep their selection/content bindings (including TemplateBinding).
     }
 
     public static void FillLanguageCombo(ComboBox comboBox)
@@ -225,6 +226,7 @@ public static partial class UiLocalizationManager
 
     private static void ApplyContent(ContentControl control)
     {
+        if (DependencyPropertyHelper.GetValueSource(control, ContentControl.ContentProperty).IsExpression) return;
         if (control.Content is not string text || string.IsNullOrEmpty(text))
         {
             return;
@@ -236,6 +238,7 @@ public static partial class UiLocalizationManager
 
     private static void ApplyHeader(HeaderedContentControl control)
     {
+        if (BindingOperations.IsDataBound(control, HeaderedContentControl.HeaderProperty)) return;
         if (control.Header is not string text || string.IsNullOrEmpty(text))
         {
             return;
@@ -247,6 +250,7 @@ public static partial class UiLocalizationManager
 
     private static void ApplyHeader(HeaderedItemsControl control)
     {
+        if (BindingOperations.IsDataBound(control, HeaderedItemsControl.HeaderProperty)) return;
         if (control.Header is not string text || string.IsNullOrEmpty(text))
         {
             return;
@@ -258,7 +262,7 @@ public static partial class UiLocalizationManager
 
     private static void ApplyTextBlock(TextBlock textBlock)
     {
-        if (BindingOperations.GetBindingExpression(textBlock, TextBlock.TextProperty) is not null)
+        if (DependencyPropertyHelper.GetValueSource(textBlock, TextBlock.TextProperty).IsExpression)
         {
             return;
         }
@@ -298,7 +302,11 @@ public static partial class UiLocalizationManager
     {
         if (obj.GetValue(property) is string original && !string.IsNullOrEmpty(original))
         {
-            return original;
+            // A status label or recycled item may now represent different content.
+            // Only retain the source while the current text is one of its translations.
+            if (currentValue == original ||
+                (English.TryGetValue(original, out var en) && currentValue == en) ||
+                (German.TryGetValue(original, out var de) && currentValue == de)) return original;
         }
 
         obj.SetValue(property, currentValue);
@@ -311,26 +319,6 @@ public static partial class UiLocalizationManager
         {
             ApplyToObject(child);
             TraverseLogicalChildren(child);
-        }
-    }
-
-    private static void TraverseVisualChildren(DependencyObject root)
-    {
-        var count = 0;
-        try
-        {
-            count = VisualTreeHelper.GetChildrenCount(root);
-        }
-        catch
-        {
-            return;
-        }
-
-        for (var i = 0; i < count; i++)
-        {
-            var child = VisualTreeHelper.GetChild(root, i);
-            ApplyToObject(child);
-            TraverseVisualChildren(child);
         }
     }
 

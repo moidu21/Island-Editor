@@ -35,7 +35,7 @@ public class TopologyBiomeTests
         Assert.Equal(1024,stats.FlatCells);
         for(int y=0;y<32;y++)for(int x=0;x<32;x++)
         {
-            Assert.Equal(31,Weight(m,x,y,sand));Assert.Equal(31,Weight(m,x,y,grass));Assert.True(Weight(m,x,y,rock)>0);
+            Assert.Equal(31,Weight(m,x,y,sand));Assert.InRange(Weight(m,x,y,grass),o.CellRecipes[TerrainTopologyRole.Flat].PrimaryMinimum,o.CellRecipes[TerrainTopologyRole.Flat].PrimaryMaximum);Assert.True(Weight(m,x,y,rock)>0);
             Assert.All(m.GetCell(x,y).MaterialIds,id=>Assert.Contains(materialSet.Materials,v=>v.Id==id&&v.Type=="0"));
         }
         var before=m.Clone();TerrainTopologyMaterialPainter.Apply(m,Heights(33),o,out _);
@@ -63,7 +63,7 @@ public class TopologyBiomeTests
         Assert.Equal(before.PackedMaterialIds,m.PackedMaterialIds);Assert.Equal(before.PackedMaterialAlphas,m.PackedMaterialAlphas);
         TerrainTopologyMaterialPainter.Apply(m,Heights(33),o,out _,activeMaterialCellPredicate:(x,y)=>x!=0||y!=0);
         Assert.Equal(before.PackedMaterialIds[0],m.PackedMaterialIds[0]);Assert.Equal(before.PackedMaterialAlphas[33],m.PackedMaterialAlphas[33]);
-        Assert.Equal(31,Weight(m,4,4,10));Assert.Equal(0,Weight(m,4,4,3));
+        Assert.InRange(Weight(m,4,4,10),26,31);Assert.Equal(0,Weight(m,4,4,3));
     }
     [Theory]
     [InlineData("terra_01.xml")]
@@ -92,5 +92,28 @@ public class TopologyBiomeTests
         Assert.Equal(21,TerrainTopologyProfile.Create(set).Options.FlatMaterialId);
         var custom=new MaterialSetDefinition{Materials=new(){new(){Id=0,Type="0",FileName="custom/snow.xml"},new(){Id=5,Type="0",FileName="custom/mountain.xml"}}};
         var p=TerrainTopologyProfile.Create(custom);Assert.False(p.HasNativeReference);Assert.Empty(p.Options.CellRecipes);Assert.Equal(0,p.Options.FlatMaterialId);Assert.Equal(5,p.Options.SteepSlopeMaterialId);
+    }
+
+    [Theory]
+    [InlineData("terra_01.xml")][InlineData("south_america_01.xml")][InlineData("colony02_01.xml")]
+    public void NativeTransitionsAreContinuousAcrossSlopeBoundaries(string name)
+    {
+        var o=TerrainTopologyProfile.Create(Set(name)).Options;o.WorldWidth=o.WorldHeight=16;
+        foreach(float edge in new[]{o.FlatSlopeMaximum,o.SteepSlopeMinimum})
+        {
+            var a=Map();var b=Map();
+            TerrainTopologyMaterialPainter.Apply(a,Heights(33,edge-.001f),o,out _);
+            TerrainTopologyMaterialPainter.Apply(b,Heights(33,edge+.001f),o,out _);
+            for(int id=0;id<32;id++)Assert.InRange(Math.Abs(Weight(a,16,16,id)-Weight(b,16,16,id)),0,1);
+        }
+    }
+    [Fact] public void NativePlainContainsBroadVariationAndKeepsCoverage()
+    {
+        var o=TerrainTopologyProfile.Create(Set("terra_01.xml")).Options;o.WorldWidth=o.WorldHeight=128;
+        var m=Map();TerrainTopologyMaterialPainter.Apply(m,Heights(33),o,out _);
+        var grass=new HashSet<int>();var accent=new HashSet<int>();
+        for(int y=0;y<32;y++)for(int x=0;x<32;x++)
+        { grass.Add(Weight(m,x,y,10));accent.Add(Weight(m,x,y,16));Assert.Equal(31,Weight(m,x,y,1)); }
+        Assert.True(grass.Count>=3);Assert.True(accent.Count>=6);
     }
 }

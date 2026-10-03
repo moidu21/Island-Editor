@@ -589,7 +589,7 @@ public sealed class IslandExporter : IIslandWriter
         // Un materialset peut être chargé depuis un fichier libre à côté de l'archive.
         // Dans ce cas, le chemin est absolu et ne doit jamais devenir une entrée ZIP brute.
         // IslandExporter.EmbedLooseMaterialSetWhenMissing l'ajoute ensuite dans un chemin interne sûr.
-        if (Path.IsPathRooted(path))
+        if (Path.IsPathRooted(path) || path.Contains(":", StringComparison.Ordinal))
         {
             return;
         }
@@ -1046,6 +1046,8 @@ public sealed class IslandExporter : IIslandWriter
         }
 
         var normalized = sourcePath.Replace('\\', '/');
+        if (normalized.StartsWith(oldName + "/", StringComparison.OrdinalIgnoreCase))
+            normalized = newName + normalized[oldName.Length..];
         normalized = normalized.Replace($"/{oldName}/", $"/{newName}/", StringComparison.OrdinalIgnoreCase);
 
         var fileName = Path.GetFileNameWithoutExtension(normalized);
@@ -1108,6 +1110,6 @@ public sealed class IslandExporter : IIslandWriter
             ? project.Metadata.ProjectName
             : Path.GetDirectoryName(root)?.Replace('\\', '/') ?? project.Metadata.ProjectName;
 
-        return $"{baseDirectory}/{project.EffectiveMaterialSetName}";
+        return string.IsNullOrWhiteSpace(baseDirectory) ? project.EffectiveMaterialSetName : $"{baseDirectory}/{project.EffectiveMaterialSetName}";
     }
 }

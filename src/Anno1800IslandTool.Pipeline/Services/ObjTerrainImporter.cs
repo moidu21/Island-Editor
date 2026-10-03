@@ -114,12 +114,14 @@ public static class ObjTerrainImporter
         // Chaque nouvel import repart de pages vierges et invalide les anciennes
         // écritures générées. Un second OBJ remplace donc réellement le précédent.
         project.LocalRegeneration?.GeneratedMeshPageWrites.Clear();
+        var minPageX = pages.Min(p => p.Key.X); var maxPageX = pages.Max(p => p.Key.X);
+        var minPageY = pages.Min(p => p.Key.Y); var maxPageY = pages.Max(p => p.Key.Y);
         foreach (var triangle in terrainTriangles)
         {
             var centroid = (terrainPositions[triangle.A] + terrainPositions[triangle.B] + terrainPositions[triangle.C]) / 3f;
             var key = new TerrainPageKey(options.Lod,
-                Math.Clamp((int)Math.Floor(centroid.X / pageSize), pages.Min(p => p.Key.X), pages.Max(p => p.Key.X)),
-                Math.Clamp((int)Math.Floor(centroid.Z / pageSize), pages.Min(p => p.Key.Y), pages.Max(p => p.Key.Y)));
+                Math.Clamp((int)Math.Floor(centroid.X / pageSize), minPageX, maxPageX),
+                Math.Clamp((int)Math.Floor(centroid.Z / pageSize), minPageY, maxPageY));
             if (!pageByKey.TryGetValue(key, out var page))
                 page = pages.MinBy(candidate => Math.Abs(candidate.Key.X * pageSize + pageSize * .5 - centroid.X) + Math.Abs(candidate.Key.Y * pageSize + pageSize * .5 - centroid.Z))!;
             var state = pageStates[page.Key];
@@ -216,11 +218,13 @@ public static class ObjTerrainImporter
             static bool InRect(Vector2 p, float left, float top, float right, float bottom)
                 => p.X >= left && p.X <= right && p.Y >= top && p.Y <= bottom;
             if (InRect(a, x0, z0, x1, z1) || InRect(b, x0, z0, x1, z1) || InRect(c, x0, z0, x1, z1)) return true;
-            var corners = new[] { new Vector2(x0, z0), new Vector2(x1, z0), new Vector2(x1, z1), new Vector2(x0, z1) };
-            if (corners.Any(p => Inside(p, a, b, c, out _))) return true;
-            var triangleEdges = new[] { (a, b), (b, c), (c, a) };
-            for (var i = 0; i < 4; i++)
-                if (triangleEdges.Any(edge => SegmentsIntersect(edge.Item1, edge.Item2, corners[i], corners[(i + 1) % 4]))) return true;
+            Span<Vector2> corners = stackalloc Vector2[] { new(x0,z0),new(x1,z0),new(x1,z1),new(x0,z1) };
+            for (var i=0;i<4;i++) if(Inside(corners[i],a,b,c,out _)) return true;
+            for (var i=0;i<4;i++)
+            {
+                var p=corners[i]; var q=corners[(i+1)%4];
+                if(SegmentsIntersect(a,b,p,q)||SegmentsIntersect(b,c,p,q)||SegmentsIntersect(c,a,p,q)) return true;
+            }
             return false;
         }
 
@@ -240,8 +244,9 @@ public static class ObjTerrainImporter
                 var x0 = (float)(originX + col * step); var z0 = (float)(originZ + row * step);
                 if (!IntersectsCell(a, b, c, x0, z0, x0 + step, z0 + step)) continue;
                 coveredCells[row * (columns - 1) + col] = true;
-                foreach (var (gx, gz) in new[] { (col, row), (col + 1, row), (col, row + 1), (col + 1, row + 1) })
+                for (var corner = 0; corner < 4; corner++)
                 {
+                    var gx = col + (corner & 1); var gz = row + (corner >> 1);
                     var point = new Vector2((float)(originX + gx * step), (float)(originZ + gz * step));
                     if (!Inside(point, a, b, c, out var weights)) continue;
                     var y = va.Y * weights.X + vb.Y * weights.Y + vc.Y * weights.Z;
@@ -296,9 +301,11 @@ public static class ObjTerrainImporter
         while (queue.Count > 0)
         {
             var index = queue.Dequeue(); var x = index % columns; var z = index / columns;
-            foreach (var next in new[] { x > 0 ? index - 1 : -1, x + 1 < columns ? index + 1 : -1, z > 0 ? index - columns : -1, z + 1 < rows ? index + columns : -1 })
+            Visit(x > 0 ? index - 1 : -1); Visit(x + 1 < columns ? index + 1 : -1);
+            Visit(z > 0 ? index - columns : -1); Visit(z + 1 < rows ? index + columns : -1);
+            void Visit(int next)
             {
-                if (next < 0 || distance[next] <= distance[index] + 1) continue;
+                if (next < 0 || distance[next] <= distance[index] + 1) return;
                 distance[next] = distance[index] + 1; heights[next] = heights[index]; queue.Enqueue(next);
             }
         }
@@ -321,8 +328,10 @@ public static class ObjTerrainImporter
         {
             if (!Used(x, z)) continue;
             var sum = source[z * columns + x] * 4f; var weight = 4f;
-            foreach (var (dx, dz) in new[] { (-1, 0), (1, 0), (0, -1), (0, 1) })
+            for(var direction=0;direction<4;direction++)
             {
+                var dx=direction==0?-1:direction==1?1:0;
+                var dz=direction==2?-1:direction==3?1:0;
                 var nx = x + dx; var nz = z + dz;
                 if (nx < 0 || nz < 0 || nx >= columns || nz >= rows || !Used(nx, nz)) continue;
                 sum += source[nz * columns + nx]; weight++;
@@ -363,10 +372,11 @@ public static class ObjTerrainImporter
             var index = queue.Dequeue();
             if (distance[index] >= transitionCells) continue;
             var col = index % columns; var row = index / columns;
-            foreach (var next in new[] { col > 0 ? index - 1 : -1, col + 1 < columns ? index + 1 : -1,
-                         row > 0 ? index - columns : -1, row + 1 < rows ? index + columns : -1 })
+            Visit(col > 0 ? index - 1 : -1); Visit(col + 1 < columns ? index + 1 : -1);
+            Visit(row > 0 ? index - columns : -1); Visit(row + 1 < rows ? index + columns : -1);
+            void Visit(int next)
             {
-                if (next < 0 || !used[next] || distance[next] <= distance[index] + 1) continue;
+                if (next < 0 || !used[next] || distance[next] <= distance[index] + 1) return;
                 distance[next] = distance[index] + 1;
                 queue.Enqueue(next);
             }

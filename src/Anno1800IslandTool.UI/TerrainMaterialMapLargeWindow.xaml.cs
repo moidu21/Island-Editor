@@ -1,3 +1,4 @@
+using Anno1800IslandTool.Pipeline.Services;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -131,7 +132,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
     {
         if (EmbeddedMaterialSetComboBox.SelectedItem is string fileName)
         {
-            EmbeddedMaterialSetComboBox.Text = fileName;
+
         }
     }
 
@@ -538,6 +539,8 @@ public partial class TerrainMaterialMapLargeWindow : Window
         try
         {
             var status = _ownerWindow.UseEmbeddedMaterialSet(fileName);
+            _gameDataRoot = null; _materialTextureCache.Clear();
+            if (RdaGameResources.SavedGameFolder() is not null) _ = PrepareArchiveMaterialsAsync(false);
             UpdateRd3dMaterialSetCheckBox.IsChecked = true;
             RefreshFromParentData(refreshPalette: true);
             PaintStatusTextBlock.Text = status;

@@ -11,6 +11,10 @@ public partial class App : Application
 {
     protected override void OnStartup(StartupEventArgs e)
     {
+        if(e.Args.Length>=2 && e.Args[0]=="--filedb-host")
+        {
+            Environment.Exit(FileDbHost.Run(e.Args)); return;
+        }
         // v40 : garder le rendu WPF/Direct3D en mode matériel quand Windows le permet.
         // Les calculs terrain restent sur le backend CPU parallèle tant qu'un backend compute GPU
         // explicite n'est pas chargé, mais le Viewport3D ne doit pas être forcé en software.

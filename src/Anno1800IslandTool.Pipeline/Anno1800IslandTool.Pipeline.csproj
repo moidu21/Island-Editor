@@ -12,7 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Resources\MaterialSets\*.xml" />
+    <EmbeddedResource Include="Resources\MaterialSets\*.xml" /><EmbeddedResource Include="Resources\IslandFormats\*.xml" />
     <EmbeddedResource Include="Resources\EnvironmentAssets.txt" />
     <EmbeddedResource Include="Resources\Mines\*" />
     <EmbeddedResource Include="Resources\VanillaEnvironmentProfiles.txt" />

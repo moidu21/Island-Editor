@@ -2,7 +2,7 @@ using Anno1800IslandTool.Core.Models;
 namespace Anno1800IslandTool.Core.Terrain;
 
 public sealed record TopologyCellLayer(int MaterialId, int Minimum, int Maximum, bool FadeOnSlope = false);
-public sealed record TopologyCellRecipe(int PrimaryMaterialId, TopologyCellLayer[] Layers);
+public sealed record TopologyCellRecipe(int PrimaryMaterialId, TopologyCellLayer[] Layers, int PrimaryMinimum = 31, int PrimaryMaximum = 31);
 
 /// <summary>Native surface combinations audited on moderate_l_10, colony01_l_03 and colony02_l_05.
 /// Resolve by texture name, not numerical ID: custom material sets can reorder their IDs.</summary>
@@ -35,15 +35,18 @@ public sealed class TerrainTopologyProfile
         int Rank(int id)=>Array.FindIndex(materials,m=>m.Id==id);
         if(Rank(beach)>Rank(mountain)||Rank(mountain)>Rank(soil)||Rank(soil)>Rank(grass)||Rank(grass)>Rank(accent))return Fallback();
         options.FlatMaterialId=grass;options.GentleSlopeMaterialId=mountain;options.SteepSlopeMaterialId=mountain;options.RidgeMaterialId=mountain;options.HollowMaterialId=soil;
+        options.SteepSlopeMinimum=foundation==20 ? .45f : label.StartsWith("Nouveau") ? .42f : .65f;
         options.FlatTilingMaterialId=accent;options.FlatTileContrast=12;options.OpaqueBaseMaterialId=beach;
+        bool tropical=label.StartsWith("Nouveau");
+        // Layer ranges calibrated against emerged native cells in three original islands.
         options.CellRecipes[TerrainTopologyRole.Flat]=new(grass,foundation==20
-            ?new[]{new TopologyCellLayer(mountain,20,20),new(accent,0,14)}
-            :new[]{new TopologyCellLayer(mountain,31,31),new(soil,31,31),new(accent,0,21)});
-        options.CellRecipes[TerrainTopologyRole.GentleSlope]=new(mountain,new[]{new TopologyCellLayer(soil,6,14),new(grass,31,31,true)});
+            ?new[]{new TopologyCellLayer(mountain,16,20),new(accent,0,13)}
+            :new[]{new TopologyCellLayer(mountain,26,31),new(soil,tropical?22:24,31),new(accent,0,tropical?10:15)},tropical?18:26,tropical?30:31);
+        options.CellRecipes[TerrainTopologyRole.GentleSlope]=new(mountain,new[]{new TopologyCellLayer(soil,foundation==20?10:0,foundation==20?18:4),new(grass,tropical?18:foundation==20?20:31,tropical?18:foundation==20?20:31,true),new(detail,0,foundation==20?6:0)});
         options.CellRecipes[TerrainTopologyRole.SteepSlope]=new(mountain,foundation==20
-            ?new[]{new TopologyCellLayer(soil,6,15)}:new[]{new TopologyCellLayer(detail,0,12)});
-        options.CellRecipes[TerrainTopologyRole.Ridge]=new(mountain,new[]{new TopologyCellLayer(detail,0,8)});
-        options.CellRecipes[TerrainTopologyRole.Hollow]=new(soil,new[]{new TopologyCellLayer(mountain,31,31)});
+            ?new[]{new TopologyCellLayer(soil,12,22),new(detail,0,5)}:new[]{new TopologyCellLayer(detail,0,tropical?14:18)});
+        options.CellRecipes[TerrainTopologyRole.Ridge]=new(mountain,new[]{new TopologyCellLayer(detail,0,foundation==20?6:16),new(grass,6,18,true)});
+        options.CellRecipes[TerrainTopologyRole.Hollow]=new(soil,new[]{new TopologyCellLayer(mountain,31,31),new(grass,12,24,true)});
         return new(){Label=label,HasNativeReference=true,Options=options};
     }
 }

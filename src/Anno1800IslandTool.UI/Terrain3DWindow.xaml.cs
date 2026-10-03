@@ -218,6 +218,7 @@ public partial class Terrain3DWindow : Window
 
     private void PopulateLods()
     {
+        var previousLod = (LodComboBox.SelectedItem as ComboBoxItem)?.Tag as int?;
         LodComboBox.Items.Clear();
         var lods = _project.MeshPages.Keys.Select(k => k.Lod).Distinct().OrderBy(v => v).ToList();
         foreach (var lod in lods)
@@ -227,7 +228,7 @@ public partial class Terrain3DWindow : Window
 
         if (LodComboBox.Items.Count > 0)
         {
-            var preferredLod = FindMostDetailedEditableLod();
+            var preferredLod = previousLod.HasValue && lods.Contains(previousLod.Value) ? previousLod.Value : FindMostDetailedEditableLod();
             var preferredItem = LodComboBox.Items
                 .OfType<ComboBoxItem>()
                 .FirstOrDefault(item => item.Tag is int lod && lod == preferredLod);

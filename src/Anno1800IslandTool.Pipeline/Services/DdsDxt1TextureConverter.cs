@@ -136,19 +136,18 @@ public static class DdsDxt1TextureConverter
 
         var blocksWide = Math.Max(1, (width + 3) / 4);
         var blocksHigh = Math.Max(1, (height + 3) / 4);
-        var dxtBytes = new byte[blocksWide * blocksHigh * 8];
+        var dxtBytes = new byte[128 + blocksWide * blocksHigh * 8];
 
         Parallel.For(0, blocksHigh, CpuParallelOptions, by =>
         {
-            var block = new byte[8];
             for (var bx = 0; bx < blocksWide; bx++)
             {
-                EncodeDxt1Block(pixelsBgra32, width, height, bx * 4, by * 4, block);
-                Buffer.BlockCopy(block, 0, dxtBytes, ((by * blocksWide) + bx) * 8, 8);
+                EncodeDxt1Block(pixelsBgra32, width, height, bx * 4, by * 4,
+                    dxtBytes.AsSpan(128 + ((by * blocksWide) + bx) * 8, 8));
             }
         });
 
-        using var stream = new MemoryStream(128 + dxtBytes.Length);
+        using var stream = new MemoryStream(dxtBytes, writable: true);
         using var writer = new BinaryWriter(stream, Encoding.ASCII, leaveOpen: true);
         writer.Write(new[] { (byte)'D', (byte)'D', (byte)'S', (byte)' ' });
         writer.Write(124);
@@ -177,12 +176,11 @@ public static class DdsDxt1TextureConverter
         writer.Write(0);
         writer.Write(0);
         writer.Write(0);
-        writer.Write(dxtBytes);
         writer.Flush();
-        return stream.ToArray();
+        return dxtBytes;
     }
 
-    private static void EncodeDxt1Block(byte[] pixelsBgra32, int width, int height, int startX, int startY, byte[] destination)
+    internal static void EncodeDxt1Block(ReadOnlySpan<byte> pixelsBgra32, int width, int height, int startX, int startY, Span<byte> destination)
     {
         Span<byte> colors = stackalloc byte[16 * 3];
         var count = 0;

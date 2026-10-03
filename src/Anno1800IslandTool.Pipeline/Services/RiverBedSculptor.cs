@@ -11,7 +11,7 @@ public static class RiverBedSculptor
         if(points.Count<2||!float.IsFinite(depth)||depth<=0||!float.IsFinite(width)||width<=0)return 0;
         double sx=Math.Max(1,project.Rd3d.GridWidth)/(double)Math.Max(1,project.Root.MapSize);
         double sz=Math.Max(1,project.Rd3d.GridHeight)/(double)Math.Max(1,project.Root.MapSize);
-        float radius=width*.48f, core=width*.31f;int total=0;
+        float radius=RiverChannelProfile.Radius(width);int total=0;
         var min=new Vector2(points.Min(p=>p.X)-radius,points.Min(p=>p.Z)-radius);
         var max=new Vector2(points.Max(p=>p.X)+radius,points.Max(p=>p.Z)+radius);
         foreach(var page in project.MeshPages.Values.Where(MeshPageClassifier.CanEditGeometry))
@@ -32,9 +32,9 @@ public static class RiverBedSculptor
                     best=distance;water=points[i-1].Height+(points[i].Height-points[i-1].Height)*t;
                 }
                 if(best>radius)continue;
-                float blend=1-Math.Clamp((best-core)/Math.Max(.0001f,radius-core),0,1);blend=blend*blend*(3-2*blend);
                 float current=TerrainStructuralHeightEditor.GetSurfaceDecodedHeight(column);
-                float target=Math.Min(current,TerrainHeightEncoding.WorldHeightToLegacyFineHeight(water-.08f-depth*blend));
+                float target=TerrainHeightEncoding.WorldHeightToLegacyFineHeight(RiverChannelProfile.Height(
+                    TerrainHeightEncoding.LegacyFineHeightToWorldHeight(current),water,best,width,depth));
                 foreach(var v in column)
                 {
                     int next=TerrainStructuralHeightEditor.MoveRawByDecodedDelta(v.Raw1,target-current);

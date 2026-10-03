@@ -36,7 +36,7 @@ public static class GeneratedRiverService
     /// extrémités restent fixes, tandis que les angles intermédiaires deviennent une
     /// suite dense et régulière utilisable à la fois par le lit et la courbe d'eau.
     /// </summary>
-    public static GeneratedRiverPoint[] SmoothPath(IReadOnlyList<GeneratedRiverPoint> source, int passes = 2)
+    public static GeneratedRiverPoint[] SmoothPath(IReadOnlyList<GeneratedRiverPoint> source, int passes = 4)
     {
         ArgumentNullException.ThrowIfNull(source);
         if (source.Count < 2) return source.ToArray();
@@ -72,7 +72,7 @@ public static class GeneratedRiverService
     /// alors toute la rivière en canyon. Les hauteurs locales fournies par le terrain sont
     /// donc conservées pendant le lissage.
     /// </summary>
-    public static GeneratedRiverPoint[] PrepareFlowPath(IReadOnlyList<GeneratedRiverPoint> source, int smoothingPasses = 2)
+    public static GeneratedRiverPoint[] PrepareFlowPath(IReadOnlyList<GeneratedRiverPoint> source, int smoothingPasses = 4)
         => SmoothPath(source, smoothingPasses);
 
     public static (string GameDataText, string Rd3dText, long ObjectId) Add(

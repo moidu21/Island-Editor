@@ -19,7 +19,7 @@ public enum TerrainTopologyRole
 /// </summary>
 public static class TerrainTopologyMaterialPainter
 {
-    private readonly record struct TopologyDecision(TerrainTopologyRole Role, int MaterialId, float Slope = 0);
+    private readonly record struct TopologyDecision(TerrainTopologyRole Role, int MaterialId, float Slope = 0, float Curvature = 0);
 
     public static TerrainMaterialPaintResult Apply(
         TerrainMaterialMap materialMap,
@@ -72,6 +72,11 @@ public static class TerrainTopologyMaterialPainter
             if(options.PreserveExistingWaterAndBeach)skip |= HasOnlyProtectedLayers(materialMap.GetCell(x,y),options.PreservedMaterialIds);
             if(skip)protectedBlocks.Add(materialMap.GetMaterialIdBlockIndex(x,y));
         }
+        // Continuous mixing is valid only while the complete native profile is selected.
+        // A user-assigned role retains the manual, single-material behaviour.
+        bool continuous = options.UseNativeCells && !options.UseBlend &&
+            new[]{TerrainTopologyRole.Flat,TerrainTopologyRole.GentleSlope,TerrainTopologyRole.SteepSlope,TerrainTopologyRole.Ridge,TerrainTopologyRole.Hollow}
+                .All(r => options.CellRecipes.TryGetValue(r,out var recipe) && recipe.PrimaryMaterialId==ResolveMaterialId(r,options));
         var decisions = new TopologyDecision[materialMap.Width * materialMap.Height];
         TerrainComputeScheduler.For(bounds.Top, bounds.Bottom, 64, y =>
         {
@@ -86,7 +91,7 @@ public static class TerrainTopologyMaterialPainter
 
                 var metrics = AnalyzeCell(heightMap, materialMap, x, y, options.AnalysisRadius, options.WorldWidth, options.WorldHeight);
                 var role = ClassifyNormalized(metrics.Slope, metrics.Curvature, options);
-                decisions[index] = new TopologyDecision(role, ResolveMaterialId(role, options),metrics.Slope);
+                decisions[index] = new TopologyDecision(role, ResolveMaterialId(role, options),metrics.Slope,metrics.Curvature);
             }
         });
 
@@ -110,6 +115,9 @@ public static class TerrainTopologyMaterialPainter
                 if(options.UseNativeCells && options.CellRecipes.TryGetValue(d.Role,out var recipe) && recipe.PrimaryMaterialId==d.MaterialId)
                     foreach(var layer in recipe.Layers)Add(layer.MaterialId);
             }
+            if(continuous)
+                foreach(var recipe in options.CellRecipes.OrderBy(p=>p.Key).Select(p=>p.Value))
+                { Add(recipe.PrimaryMaterialId); foreach(var layer in recipe.Layers)Add(layer.MaterialId); }
             if(options.FlatTilingEnabled)Add(options.FlatTilingMaterialId);
             while(ids.Count<6)ids.Add(ids[0]);
             materialMap.PackedMaterialIds[block]=TerrainMaterialPackEncoding.EncodeMaterialIds(ids);
@@ -157,7 +165,11 @@ public static class TerrainTopologyMaterialPainter
                     materialMap.SetDominantMaterialSafe(x, y, materialId, options.ClampedStrength);
                 }
 
-                if(options.UseNativeCells && options.CellRecipes.TryGetValue(decision.Role,out var recipe)
+                if(continuous)
+                {
+                    ApplyNaturalCell(materialMap,x,y,decision,options);
+                }
+                else if(options.UseNativeCells && options.CellRecipes.TryGetValue(decision.Role,out var recipe)
                     && recipe.PrimaryMaterialId==materialId && !options.UseBlend)
                 {
                     double wx=(x+.5)/materialMap.Width*(options.WorldWidth>0?options.WorldWidth:materialMap.Width);
@@ -276,6 +288,52 @@ public static class TerrainTopologyMaterialPainter
             return TerrainTopologyRole.Hollow;
         }
         return slope <= options.FlatSlopeMaximum + 0.00001f ? TerrainTopologyRole.Flat : TerrainTopologyRole.GentleSlope;
+    }
+
+    private static float Smooth(float low,float high,float value)
+    {
+        float t=Math.Clamp((value-low)/Math.Max(.0001f,high-low),0,1);
+        return t*t*(3-2*t);
+    }
+    private static void ApplyNaturalCell(TerrainMaterialMap map,int x,int y,TopologyDecision d,TerrainTopologyMaterialOptions options)
+    {
+        double wx=(x+.5)/map.Width*(options.WorldWidth>0?options.WorldWidth:map.Width);
+        double wy=(y+.5)/map.Height*(options.WorldHeight>0?options.WorldHeight:map.Height);
+        // Same world-space pattern at every map resolution, without a repeated grid.
+        double Variation(int id) => .7*SurfaceVariation(wx/24+id*7.31,wy/24-id*3.17)
+            +.3*SurfaceVariation(wx/6-id*2.13,wy/6+id*5.71);
+        float flatEdge=Smooth(options.FlatSlopeMaximum*.65f,options.FlatSlopeMaximum*1.5f,d.Slope);
+        float steep=Smooth(options.FlatSlopeMaximum,options.SteepSlopeMinimum,d.Slope);
+        float shape=Smooth(options.CurvatureSensitivity*.35f,options.CurvatureSensitivity*1.8f,Math.Abs(d.Curvature))*(1-steep)*.85f;
+        Span<float> roleWeights=stackalloc float[6];roleWeights.Clear();
+        roleWeights[(int)TerrainTopologyRole.Flat]=(1-flatEdge)*(1-shape);
+        roleWeights[(int)TerrainTopologyRole.GentleSlope]=flatEdge*(1-steep)*(1-shape);
+        roleWeights[(int)TerrainTopologyRole.SteepSlope]=flatEdge*steep*(1-shape);
+        roleWeights[(int)(d.Curvature>=0?TerrainTopologyRole.Ridge:TerrainTopologyRole.Hollow)]=shape;
+        Span<float> weights=stackalloc float[32];weights.Clear();
+        foreach(var pair in options.CellRecipes)
+        {
+            float mix=roleWeights[(int)pair.Key];if(mix<=0)continue;
+            var recipe=pair.Value;
+            int primary=TerrainMaterialPackEncoding.ClampSlot(recipe.PrimaryMaterialId);
+            weights[primary]+=mix*(options.ClampedStrength/31f)*(float)(recipe.PrimaryMinimum+(recipe.PrimaryMaximum-recipe.PrimaryMinimum)*Variation(primary));
+            foreach(var layer in recipe.Layers)
+            {
+                int id=TerrainMaterialPackEncoding.ClampSlot(layer.MaterialId);
+                float weight=(float)(layer.Minimum+(layer.Maximum-layer.Minimum)*Variation(id));
+                if(layer.FadeOnSlope)weight*=1-steep;
+                weights[id]+=mix*weight;
+            }
+        }
+        // All native recipes share at most six IDs (including the opaque underlay).
+        // Update existing slots only: never evict a protected neighbour's palette.
+        uint packed=map.PackedMaterialIds[map.GetMaterialIdBlockIndex(x,y)],alphas=0;
+        for(int slot=0;slot<6;slot++)
+        {
+            int id=(int)((packed>>(slot*5))&31);
+            alphas|=(uint)Math.Clamp((int)Math.Round(weights[id]),0,31)<<(slot*5);
+        }
+        map.PackedMaterialAlphas[map.GetAlphaIndex(x,y)]=alphas;
     }
 
     private static bool TryAddLayer(TerrainMaterialMap map,int x,int y,int id,int weight)

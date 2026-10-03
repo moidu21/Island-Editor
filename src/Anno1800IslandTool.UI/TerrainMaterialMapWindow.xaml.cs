@@ -30,6 +30,7 @@ public partial class TerrainMaterialMapWindow : Window
     private TerrainMaterialMap? _topologyPaintBaseMap;
     private TerrainMaterialMapLargeWindow? _largeWindow;
     private bool _isPainting;
+    private readonly CancellationTokenSource _resourceLifetime = new();
     private bool _isShowingCoastPreview;
     private bool _isApplyingEmbeddedMaterialSet;
     private const int MaterialUndoHistoryLimit = 20;
@@ -44,7 +45,25 @@ public partial class TerrainMaterialMapWindow : Window
     public TerrainMaterialMapWindow(IslandProject project, IslandProjectEditor editor)
     {
         InitializeComponent();
-        Loaded += (_, _) => UiLocalizationManager.ApplyTo(this);
+        Loaded += async (_, _) =>
+        {
+            UiLocalizationManager.ApplyTo(this);
+            if (RdaGameResources.SavedGameFolder() is null) return;
+            IsEnabled = false;
+            try
+            {
+                var name = GetEffectiveMaterialSetName();
+                await GameResourcesUi.PrepareAsync(this, new Progress<string>(p => PaintStatusTextBlock.Text = p), _resourceLifetime.Token);
+                if (_embeddedMaterialSets.TryReadGameDefault(name, _project.RawContent.MaterialSetText, out var gameText)
+                    && gameText != _project.RawContent.MaterialSetText) UseEmbeddedMaterialSet(name);
+                var guard = _isApplyingEmbeddedMaterialSet; _isApplyingEmbeddedMaterialSet = true;
+                try { PopulateEmbeddedMaterialSets(); }
+                finally { _isApplyingEmbeddedMaterialSet = guard; }
+                PaintStatusTextBlock.Text = UiLocalizationManager.T("Matériaux du jeu disponibles depuis les archives RDA.");
+            }
+            catch (Exception ex) { PaintStatusTextBlock.Text = ex.Message; }
+            finally { IsEnabled = true; }
+        };
         _project = project ?? throw new ArgumentNullException(nameof(project));
         BeachProtectionCheckBox.DataContext = this;
         _editor = editor ?? throw new ArgumentNullException(nameof(editor));
@@ -65,6 +84,7 @@ public partial class TerrainMaterialMapWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _resourceLifetime.Cancel();
         MaterialSetSelectionCoordinator.SelectionChanged -= MaterialSetSelectionCoordinator_SelectionChanged;
         base.OnClosed(e);
     }
@@ -125,7 +145,7 @@ public partial class TerrainMaterialMapWindow : Window
     {
         if (EmbeddedMaterialSetComboBox.SelectedItem is string fileName)
         {
-            EmbeddedMaterialSetComboBox.Text = fileName;
+
         }
     }
 
@@ -153,6 +173,13 @@ public partial class TerrainMaterialMapWindow : Window
         }
     }
 
+    internal void RefreshGameMaterialCatalog()
+    {
+        var previous = _isApplyingEmbeddedMaterialSet; _isApplyingEmbeddedMaterialSet = true;
+        try { PopulateEmbeddedMaterialSets(); }
+        finally { _isApplyingEmbeddedMaterialSet = previous; }
+    }
+
     internal IReadOnlyList<string> GetEmbeddedMaterialSetNames()
         => _embeddedMaterialSets.GetAvailableFileNames();
 
@@ -176,7 +203,7 @@ public partial class TerrainMaterialMapWindow : Window
             try
             {
                 EmbeddedMaterialSetComboBox.SelectedItem = matchingName;
-                EmbeddedMaterialSetComboBox.Text = matchingName;
+
             }
             finally
             {

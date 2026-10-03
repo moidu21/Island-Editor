@@ -27,6 +27,8 @@ public partial class TerrainMaterialMapLargeWindow
     private bool _material3DInitialized;
     private bool _showMaterial3D;
     private string? _gameDataRoot;
+    private readonly CancellationTokenSource _resourceLifetime = new();
+    private bool _preparingArchiveMaterials;
     private int _lastMaterial3DCellX = -1;
     private int _lastMaterial3DCellY = -1;
     private DispatcherTimer? _material3DRefreshTimer;
@@ -41,16 +43,14 @@ public partial class TerrainMaterialMapLargeWindow
     private Vector3 _materialSceneMax = Vector3.One;
     private const int Material3DMaximumSegments = 384;
 
-    private static string GameDataPathSettingsFile => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "Anno1800IslandTool", "game-data-root.txt");
-
     private void InitializeMaterial3D()
     {
         _materialEffectsManager = new DefaultEffectsManager();
         MaterialGpuViewport.EffectsManager = _materialEffectsManager;
         MaterialGpuViewport.Camera = new HxPerspectiveCamera
         {
+            // Anno coordinates are kept intact; handedness is corrected only in the camera.
+            CreateLeftHandSystem = true,
             Position = new Point3D(0, 600, 700),
             LookDirection = new Vector3D(0, -450, -550),
             UpDirection = new Vector3D(0, 1, 0),
@@ -78,6 +78,7 @@ public partial class TerrainMaterialMapLargeWindow
 
     private void DisposeMaterial3D()
     {
+        _resourceLifetime.Cancel();
         MaterialTerrainGroup.Children.Clear();
         _material3DRefreshTimer?.Stop();
         _materialTextureCache.Clear();
@@ -87,35 +88,40 @@ public partial class TerrainMaterialMapLargeWindow
         _materialEffectsManager = null;
     }
 
-    private void LoadSavedGameDataPath()
+    private async void LoadSavedGameDataPath()
     {
+        if (RdaGameResources.SavedGameFolder() is not null) await PrepareArchiveMaterialsAsync(false);
+    }
+    private async void SelectGameDataPathButton_Click(object sender, RoutedEventArgs e)
+        => await PrepareArchiveMaterialsAsync(true);
+    private async Task PrepareArchiveMaterialsAsync(bool choose)
+    {
+        if (_preparingArchiveMaterials) return;
+        _preparingArchiveMaterials = true;
         try
         {
-            if (File.Exists(GameDataPathSettingsFile))
-                SetGameDataRoot(File.ReadAllText(GameDataPathSettingsFile), save: false);
+            var progress = new Progress<string>(p => GameDataStatusTextBlock.Text = p);
+            var prepared = await GameResourcesUi.PrepareAsync(this, progress, _resourceLifetime.Token, choose);
+            _ownerWindow.RefreshGameMaterialCatalog();
+            var guard = _isApplyingEmbeddedMaterialSet; _isApplyingEmbeddedMaterialSet = true;
+            try
+            {
+                var selected = EmbeddedMaterialSetComboBox.SelectedItem as string ?? _ownerWindow.GetEffectiveMaterialSetName();
+                var names = _ownerWindow.GetEmbeddedMaterialSetNames();
+                EmbeddedMaterialSetComboBox.ItemsSource = names;
+                EmbeddedMaterialSetComboBox.SelectedItem = names.FirstOrDefault(n => string.Equals(n, selected, StringComparison.OrdinalIgnoreCase));
+            }
+            finally { _isApplyingEmbeddedMaterialSet = guard; }
+            var definitions = _ownerWindow.GetProjectForLargeWindow().MaterialSet?.Materials;
+            await prepared.Cache.EnsureAsync(prepared.Folder, prepared.Root, definitions?.Select(d => d.FileName ?? "") ?? [], progress, _resourceLifetime.Token);
+            SetGameDataRoot(prepared.Root);
+            GameDataPathTextBox.Text = prepared.Folder;
+            _materialTextureCache.Clear();
+            RefreshMaterial3DFromCurrentBitmap();
         }
-        catch (IOException) { }
-    }
-
-    private void SelectGameDataPathButton_Click(object sender, RoutedEventArgs e)
-    {
-        var dialog = new OpenFolderDialog
-        {
-            Title = UiLocalizationManager.T("Sélectionner le dossier data extrait d’Anno 1800"),
-            InitialDirectory = _gameDataRoot ?? string.Empty,
-            Multiselect = false
-        };
-        if (dialog.ShowDialog(this) != true) return;
-        var normalized = GameDataTextureResolver.NormalizeDataRoot(dialog.FolderName);
-        if (normalized is null)
-        {
-            MessageBox.Show(this,
-                UiLocalizationManager.T("Ce dossier ne contient pas config/engine/material_sets. Sélectionnez le dossier data ou son dossier parent."),
-                UiLocalizationManager.T("Données du jeu"), MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-        SetGameDataRoot(normalized, save: true);
-        RefreshMaterial3DFromCurrentBitmap();
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { GameDataStatusTextBlock.Text = ex.Message; }
+        finally { _preparingArchiveMaterials = false; }
     }
 
     private void ClearGameDataPathButton_Click(object sender, RoutedEventArgs e)
@@ -123,24 +129,17 @@ public partial class TerrainMaterialMapLargeWindow
         _gameDataRoot = null;
         GameDataPathTextBox.Text = string.Empty;
         GameDataStatusTextBlock.Text = UiLocalizationManager.T("Aucun dossier de données sélectionné : couleurs techniques utilisées.");
-        try { if (File.Exists(GameDataPathSettingsFile)) File.Delete(GameDataPathSettingsFile); } catch (IOException) { }
+        UseGameTexturesCheckBox.IsChecked = false;
         RefreshMaterial3DFromCurrentBitmap();
     }
 
-    private void SetGameDataRoot(string? path, bool save)
+    private void SetGameDataRoot(string? path)
     {
         _gameDataRoot = GameDataTextureResolver.NormalizeDataRoot(path);
         GameDataPathTextBox.Text = _gameDataRoot ?? string.Empty;
         GameDataStatusTextBlock.Text = _gameDataRoot is null
             ? UiLocalizationManager.T("Aucun dossier de données sélectionné : couleurs techniques utilisées.")
             : UiLocalizationManager.T("Dossier de données valide. Les textures du materialset actif seront recherchées automatiquement.");
-        if (!save || _gameDataRoot is null) return;
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(GameDataPathSettingsFile)!);
-            File.WriteAllText(GameDataPathSettingsFile, _gameDataRoot);
-        }
-        catch (IOException) { }
     }
 
     private void UseGameTexturesCheckBox_Changed(object sender, RoutedEventArgs e)
@@ -165,6 +164,8 @@ public partial class TerrainMaterialMapLargeWindow
     private void RefreshMaterial3DFromCurrentBitmap()
     {
         if (!_material3DInitialized || !_showMaterial3D || MaterialMapImage.Source is not BitmapSource bitmap) return;
+        if (UseGameTexturesCheckBox.IsChecked == true && _gameDataRoot is null && RdaGameResources.SavedGameFolder() is not null && !_resourceLifetime.IsCancellationRequested)
+        { _ = PrepareArchiveMaterialsAsync(false); return; }
         try
         {
             _material3DRefreshTimer?.Stop();
@@ -238,6 +239,7 @@ public partial class TerrainMaterialMapLargeWindow
             {
                 Geometry = geometry,
                 Material = material,
+                FrontCounterClockwise = true, // Preserve front faces after the camera handedness correction.
                 CullMode = SharpDX.Direct3D11.CullMode.None,
                 IsHitTestVisible = true
             });

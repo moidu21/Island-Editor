@@ -69,7 +69,7 @@ public partial class GlobalTintBaseMapWindow : Window
         }
 
         var displayName = item.Content?.ToString() ?? string.Empty;
-        ToolComboBox.Text = displayName;
+
         ActiveToolTextBlock.Text = $"Outil actif : {displayName}";
         ToolComboBox.InvalidateVisual();
     }

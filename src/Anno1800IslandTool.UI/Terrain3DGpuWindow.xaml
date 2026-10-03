@@ -1,4 +1,4 @@
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:hx="http://helix-toolkit.org/wpf/SharpDX" x:Class="Anno1800IslandTool.UI.Terrain3DGpuWindow" Title="Terrain 3D GPU v46.89 - matériaux carrelés et menus organisés" Width="1500" Height="920" MinWidth="1050" MinHeight="680" WindowStartupLocation="CenterOwner">
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:hx="http://helix-toolkit.org/wpf/SharpDX" x:Class="Anno1800IslandTool.UI.Terrain3DGpuWindow" Title="Terrain 3D GPU v46.104 - aperçu jeu et éclairage" Width="1500" Height="920" MinWidth="1050" MinHeight="680" WindowStartupLocation="CenterOwner">
   <Grid Margin="10">
     <Grid.ColumnDefinitions>
       <ColumnDefinition Width="330"/>
@@ -31,6 +31,7 @@
                 <ComboBoxItem Padding="8" Content="⛏  Ajouter une mine"/>
                 <ComboBoxItem Padding="8" Content="Ajouter un puits d’argile"/>
                 <ComboBoxItem Padding="8" Content="Ajouter un puits de pétrole"/>
+                <ComboBoxItem Padding="8" Content="Poser des décors"/>
               </ComboBox>
               <Border Margin="0,8,0,0" Padding="7" Background="#FFF4CC" BorderBrush="#D5B95F" BorderThickness="1">
                 <TextBlock x:Name="ActiveToolHelpTextBlock" TextWrapping="Wrap" Text="Navigation : glissez avec le bouton gauche ou droit pour tourner."/>
@@ -49,6 +50,7 @@
           </GroupBox>
         </StackPanel>
         <TabControl x:Name="GpuToolTabs">
+
           <TabItem Header="Relief">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
               <StackPanel>
@@ -103,6 +105,19 @@
           <TabItem Header="Objets">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
               <StackPanel>
+                <Expander x:Name="SceneryExpander" Header="Décors à poser" IsExpanded="False" Margin="0,0,0,10">
+                  <StackPanel Margin="6">
+                    <TextBlock Text="Catégorie"/>
+                    <ComboBox x:Name="SceneryCategory" SelectedIndex="0" SelectionChanged="SceneryCategory_Changed"><ComboBoxItem Content="Rochers"/><ComboBoxItem Content="Végétation"/><ComboBoxItem Content="Autres décors"/></ComboBox>
+                    <TextBlock Text="Modèle" Margin="0,6,0,0"/>
+                    <ComboBox x:Name="SceneryModel" DisplayMemberPath="Label" SelectedValuePath="File" IsTextSearchEnabled="True" MaxDropDownHeight="350" SelectionChanged="SceneryModel_Changed"/>
+                    <Button Content="Actualiser la liste des décors" Click="RefreshSceneryCatalog_Click" Margin="0,6,0,6"/>
+                    <TextBlock Text="Rotation (degrés)"/><TextBox x:Name="SceneryRotation" Text="0"/>
+                    <TextBlock Text="Échelle"/><TextBox x:Name="SceneryScale" Text="1"/>
+                    <TextBlock Text="Un clic pose un décor. Valider le terrain enregistre les placements. Ctrl+Z annule le dernier placement." TextWrapping="Wrap" Margin="0,6,0,6"/>
+                    <TextBlock x:Name="SceneryPlacementStatus" TextWrapping="Wrap"/>
+                  </StackPanel>
+                </Expander>
                 <Expander x:Name="DepositsExpander" Header="Puits d’argile et de pétrole" Margin="0,0,0,10" IsExpanded="False">
                   <StackPanel Margin="8">
                     <TextBlock Text="Choisissez l’outil Argile ou Pétrole, puis cliquez sur un terrain émergé. Chaque clic ajoute un emplacement. Pour le pétrole, placez plusieurs puits voisins pour former un gisement." TextWrapping="Wrap"/>
@@ -219,7 +234,7 @@
                 <Expander Header="Jeu de matériaux / biome" Margin="0,0,0,10" IsExpanded="False">
                   <StackPanel Margin="8">
                     <TextBlock Text="material_sets" FontWeight="SemiBold"/>
-                    <ComboBox x:Name="GpuMaterialSetComboBox" Height="28" Margin="0,5,0,0" IsTextSearchEnabled="True" IsEditable="True" IsReadOnly="True" SelectionChanged="GpuMaterialSetComboBox_SelectionChanged" ToolTip="Jeux de matériaux inclus dans le programme"/>
+                    <ComboBox x:Name="GpuMaterialSetComboBox" Height="28" Margin="0,5,0,0" IsTextSearchEnabled="True" IsEditable="False" SelectionChanged="GpuMaterialSetComboBox_SelectionChanged" ToolTip="Jeux de matériaux inclus dans le programme"/>
                     <TextBlock x:Name="GpuMaterialSetStatusTextBlock" Margin="0,5,0,0" Foreground="#315D31" TextWrapping="Wrap" Text="Le choix est partagé avec l’éditeur de matériaux et inscrit dans le RD3D."/>
                   </StackPanel>
                 </Expander>
@@ -285,6 +300,35 @@
               </StackPanel>
             </ScrollViewer>
           </TabItem>
+          <TabItem Header="Aperçu jeu">
+            <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="8">
+              <CheckBox x:Name="GamePreviewCheck" Content="Activer l’aperçu jeu" Checked="GamePreview_Changed" Unchecked="GamePreview_Changed" Margin="0,0,0,10"/>
+              <Button Content="Choisir le dossier du jeu" Click="GamePreviewFolder_Click" Height="32"/>
+              <TextBlock x:Name="GamePreviewPath" TextWrapping="Wrap" Margin="0,6,0,10"/>
+              <TextBlock Text="Qualité des textures"/>
+              <ComboBox x:Name="GamePreviewQuality" SelectedIndex="1" SelectionChanged="GamePreview_Changed" Margin="0,4,0,8">
+                <ComboBoxItem Content="Économique (1024)"/><ComboBoxItem Content="Équilibrée (2048)"/><ComboBoxItem Content="Détaillée (4096)"/>
+              </ComboBox>
+              <Button x:Name="GamePreviewRefresh" Content="Actualiser les textures" Click="GamePreview_Changed" Height="32"/>
+              <TextBlock x:Name="GamePreviewStatus" TextWrapping="Wrap" Margin="0,8,0,10"/>
+              <CheckBox x:Name="GamePreviewWater" Content="Afficher l’océan" IsChecked="True" Checked="GamePreviewLighting_Changed" Unchecked="GamePreviewLighting_Changed"/>
+              <CheckBox x:Name="PreviewEconomyCheck" Content="Réduire la charge graphique" IsChecked="True" Checked="GamePreviewPerformance_Changed" Unchecked="GamePreviewPerformance_Changed" Margin="0,4,0,4"/>
+                <CheckBox x:Name="PreviewWaterAnimationCheck" Content="Animer l’eau" IsChecked="True" Checked="GamePreviewPerformance_Changed" Unchecked="GamePreviewPerformance_Changed" Margin="0,0,0,4"/>
+                <TextBlock Text="Mode économique : rendu allégé, ombres réduites et eau à 10 images/s. Désactiver l’animation permet à la vue immobile de se mettre au repos." TextWrapping="Wrap" Margin="0,0,0,8"/>
+                <CheckBox x:Name="PreviewSceneryCheck" Content="Afficher les décors" IsChecked="True" Checked="GamePreviewLighting_Changed" Unchecked="GamePreviewLighting_Changed" Margin="0,8,0,0"/>
+              <CheckBox x:Name="PreviewRiversCheck" Content="Afficher les rivières" IsChecked="True" Checked="GamePreviewLighting_Changed" Unchecked="GamePreviewLighting_Changed" Margin="0,8,0,0"/>
+              <TextBlock x:Name="PreviewSceneryStatus" TextWrapping="Wrap" Margin="0,8,0,0"/>
+              <CheckBox x:Name="PreviewGuidesCheck" Content="Afficher les repères techniques" IsChecked="False" Checked="GamePreviewLighting_Changed" Unchecked="GamePreviewLighting_Changed" Margin="0,8,0,0"/>
+              <GroupBox Header="Éclairage" Margin="0,12,0,0"><StackPanel Margin="8">
+                <TextBlock Text="Direction du soleil"/><Slider x:Name="GameSunAzimuth" Minimum="0" Maximum="360" Value="225" ValueChanged="GamePreviewLighting_Changed"/>
+                <TextBlock Text="Hauteur du soleil"/><Slider x:Name="GameSunElevation" Minimum="5" Maximum="85" Value="45" ValueChanged="GamePreviewLighting_Changed"/>
+                <TextBlock Text="Intensité du soleil"/><Slider x:Name="GameSunIntensity" Minimum="0" Maximum="1" Value="0.8" ValueChanged="GamePreviewLighting_Changed"/>
+                <TextBlock Text="Lumière ambiante"/><Slider x:Name="GameAmbientIntensity" Minimum="0.05" Maximum="0.8" Value="0.3" ValueChanged="GamePreviewLighting_Changed"/>
+                <CheckBox x:Name="GamePreviewShadows" Content="Ombres du relief" IsChecked="True" Checked="GamePreviewLighting_Changed" Unchecked="GamePreviewLighting_Changed"/>
+              </StackPanel></GroupBox>
+              <TextBlock Text="Eau animée et décors chargés depuis les fichiers du jeu. Les slots aléatoires utilisent un modèle représentatif. Les réglages d’affichage ne modifient pas l’export." TextWrapping="Wrap" Margin="0,12,0,0"/>
+            </StackPanel></ScrollViewer>
+          </TabItem>
         </TabControl>
       </DockPanel>
     </Border>
@@ -294,17 +338,22 @@
         <RowDefinition Height="Auto"/>
       </Grid.RowDefinitions>
       <Border BorderBrush="#555" BorderThickness="1" Background="#101217">
-        <hx:Viewport3DX x:Name="GpuViewport" BackgroundColor="#101217" ShowCoordinateSystem="True" ShowViewCube="True" EnableDpiScale="True" EnableSwapChainRendering="False" UseDefaultGestures="False" FXAALevel="Low" PreviewMouseMove="GpuViewport_MouseMove" PreviewMouseLeftButtonDown="GpuViewport_PreviewMouseLeftButtonDown" MouseLeave="GpuViewport_MouseLeave" PreviewMouseRightButtonUp="GpuViewport_PreviewMouseRightButtonUp" PreviewMouseWheel="GpuViewport_PreviewMouseWheel" PreviewMouseLeftButtonUp="GpuViewport_PreviewMouseLeftButtonUp">
+        <hx:Viewport3DX x:Name="GpuViewport" BackgroundColor="#101217" ShowCoordinateSystem="True" ShowViewCube="True" EnableDpiScale="True" EnableSwapChainRendering="False" UseDefaultGestures="False" MinimumUpdateCount="2" OITRenderMode="SinglePassWeighted" FXAALevel="Low" PreviewMouseMove="GpuViewport_MouseMove" PreviewMouseLeftButtonDown="GpuViewport_PreviewMouseLeftButtonDown" MouseLeave="GpuViewport_MouseLeave" PreviewMouseRightButtonUp="GpuViewport_PreviewMouseRightButtonUp" PreviewMouseWheel="GpuViewport_PreviewMouseWheel" PreviewMouseLeftButtonUp="GpuViewport_PreviewMouseLeftButtonUp">
           <hx:Viewport3DX.InputBindings>
             <MouseBinding Command="hx:ViewportCommands.Rotate" Gesture="RightClick"/>
             <MouseBinding Command="hx:ViewportCommands.Pan" Gesture="MiddleClick"/>
           </hx:Viewport3DX.InputBindings>
-          <hx:AmbientLight3D Color="#686868"/>
-          <hx:DirectionalLight3D Color="White" Direction="-0.35,-0.75,-0.4"/>
-          <hx:DirectionalLight3D Color="#8090A8" Direction="0.45,-0.2,0.25"/>
-          <hx:MeshGeometryModel3D x:Name="TerrainModel" CullMode="None" IsHitTestVisible="True" MouseDown3D="TerrainModel_MouseDown3D"/>
-          <hx:MeshGeometryModel3D x:Name="FootprintHitPlaneModel" CullMode="None" IsHitTestVisible="False" IsTransparent="True" MouseDown3D="TerrainModel_MouseDown3D"/>
-          <hx:MeshGeometryModel3D x:Name="BeachPreviewFillModel" CullMode="None" DepthBias="-146" IsHitTestVisible="False" IsTransparent="True" IsRendering="False"/>
+          <hx:AmbientLight3D x:Name="PreviewAmbientLight" Color="#686868"/>
+          <hx:DirectionalLight3D x:Name="PreviewSunLight" Color="White" Direction="-0.35,-0.75,-0.4"/>
+          <hx:DirectionalLight3D x:Name="PreviewFillLight" Color="#8090A8" Direction="0.45,-0.2,0.25"/>
+          <hx:ShadowMap3D x:Name="PreviewShadowMap" AutoCoverCompleteScene="True" IsSceneDynamic="True" Resolution="2048,2048" Bias="0.002" Intensity="0.45" IsRendering="False"/>
+          <hx:MeshGeometryModel3D FrontCounterClockwise="True" x:Name="PreviewOceanModel" IsRendering="False" IsTransparent="True" IsHitTestVisible="False" CullMode="None"/>
+          <hx:GroupModel3D x:Name="PendingSceneryGroup" IsHitTestVisible="False"/>
+          <hx:GroupModel3D x:Name="PreviewSceneryGroup" IsHitTestVisible="False"/>
+          <hx:MeshGeometryModel3D x:Name="PreviewRiverWaterModel" IsTransparent="True" IsHitTestVisible="False" CullMode="None" FrontCounterClockwise="True"/>
+          <hx:MeshGeometryModel3D FrontCounterClockwise="True" x:Name="TerrainModel" IsThrowingShadow="True" CullMode="None" IsHitTestVisible="True" MouseDown3D="TerrainModel_MouseDown3D"/>
+          <hx:MeshGeometryModel3D FrontCounterClockwise="True" x:Name="FootprintHitPlaneModel" CullMode="None" IsHitTestVisible="False" IsTransparent="True" MouseDown3D="TerrainModel_MouseDown3D"/>
+          <hx:MeshGeometryModel3D FrontCounterClockwise="True" x:Name="BeachPreviewFillModel" CullMode="None" DepthBias="-146" IsHitTestVisible="False" IsTransparent="True" IsRendering="False"/>
           <hx:LineGeometryModel3D x:Name="BeachPreviewHaloModel" Color="#E8000000" Thickness="18" DepthBias="-148" IsHitTestVisible="False" IsRendering="False"/>
           <hx:LineGeometryModel3D x:Name="BeachPreviewModel" Color="#FFFF7A00" Thickness="11" DepthBias="-152" IsHitTestVisible="False" IsRendering="False"/>
           <hx:LineGeometryModel3D x:Name="BeachStartHandleModel" Color="#FF40FF68" Thickness="14" DepthBias="-158" IsHitTestVisible="False" IsRendering="False"/>
@@ -326,7 +375,7 @@
       <Canvas x:Name="BrushOverlayCanvas" Grid.Row="0" Margin="1" Panel.ZIndex="20" ClipToBounds="True" IsHitTestVisible="False">
         <Polyline x:Name="BrushOverlayPolyline" Stroke="#FFFFD400" StrokeThickness="4" StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Visibility="Collapsed"/>
       </Canvas>
-      <Border Grid.Row="0" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="12" Padding="8" Background="#CC101217" BorderBrush="#66707C" BorderThickness="1" IsHitTestVisible="False">
+      <Border x:Name="HeightLegend" Grid.Row="0" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="12" Padding="8" Background="#CC101217" BorderBrush="#66707C" BorderThickness="1" IsHitTestVisible="False">
         <StackPanel>
           <TextBlock Text="Couleurs de hauteur" Foreground="White" FontWeight="SemiBold"/>
           <TextBlock Text="bleu : eau  •  sable : rivage  •  vert : terres  •  brun/blanc : relief" Foreground="#E5E8EC" Margin="0,3,0,0"/>

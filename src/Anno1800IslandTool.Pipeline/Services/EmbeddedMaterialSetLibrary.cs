@@ -27,9 +27,38 @@ public sealed class EmbeddedMaterialSetLibrary
         => _assembly.GetManifestResourceNames()
             .Where(name => name.Contains(ResourceFolderMarker, StringComparison.OrdinalIgnoreCase) && name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
             .Select(GetFileNameFromResourceName)
+            .Concat(GameMaterialNames())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+    private static IEnumerable<string> GameMaterialNames()
+    {
+        var root = RdaGameResources.ActiveDataRoot;
+        if (root is null) return [];
+        var directory = Path.Combine(root, "config", "engine", "material_sets");
+        return Directory.Exists(directory) ? Directory.GetFiles(directory, "*.xml").Select(Path.GetFileName).OfType<string>() : [];
+    }
+
+    public bool TryReadGameDefault(string fileName, string? currentText, out string materialText)
+    {
+        materialText = string.Empty;
+        if (RdaGameResources.ActiveDataRoot is not string root) return false;
+        var path = Path.Combine(root, "config", "engine", "material_sets", NormalizeFileName(fileName));
+        if (!File.Exists(path)) return false;
+        if (!string.IsNullOrWhiteSpace(currentText))
+        {
+            if (!TryReadBundled(fileName, out var bundled)) return false;
+            try
+            {
+                if (PreviewSceneReader.ParseConfig(currentText).ToString(System.Xml.Linq.SaveOptions.DisableFormatting)
+                    != PreviewSceneReader.ParseConfig(bundled).ToString(System.Xml.Linq.SaveOptions.DisableFormatting)) return false;
+            }
+            catch (System.Xml.XmlException) { return false; }
+        }
+        materialText = File.ReadAllText(path);
+        return true;
+    }
 
     public bool TryRead(string fileName, out string materialText)
     {
@@ -40,6 +69,18 @@ public sealed class EmbeddedMaterialSetLibrary
             return false;
         }
 
+        if (RdaGameResources.ActiveDataRoot is string root)
+        {
+            var path = Path.Combine(root, "config", "engine", "material_sets", normalizedFileName);
+            if (File.Exists(path)) { materialText = File.ReadAllText(path); return true; }
+        }
+
+        return TryReadBundled(fileName, out materialText);
+    }
+    public bool TryReadBundled(string fileName, out string materialText)
+    {
+        materialText = string.Empty;
+        var normalizedFileName = NormalizeFileName(fileName);
         var resourceName = _assembly.GetManifestResourceNames()
             .FirstOrDefault(name =>
                 name.Contains(ResourceFolderMarker, StringComparison.OrdinalIgnoreCase) &&

@@ -10,7 +10,7 @@ namespace Anno1800IslandTool.UI;
 
 public partial class Terrain3DGpuWindow
 {
-    private const double RiverWaterBankOverlapWorld = .08d;
+    private const double RiverWaterBankOverlapWorld = -RiverChannelProfile.BankClearance;
 
     private void InitializeRiverSlotUi()
     {
@@ -222,8 +222,7 @@ public partial class Terrain3DGpuWindow
                 localHeight = (float)sampledHeight;
             }
 
-            // Un très léger dépassement évite le jour et le z-fighting au contact des
-            // berges. Le fond reste, lui, à profondeur constante sous le relief local.
+            // Keep water below the level bridge shoulders, not above the road surface.
             result[index] = new GpuRiverPoint(point.X, point.Z, localHeight + RiverWaterBankOverlapWorld);
         }
         return result;
@@ -321,7 +320,7 @@ public partial class Terrain3DGpuWindow
         var bedCoreRadius = waterHalfWidth * .62d;
         // La transition reste sous le ruban d'eau : celui-ci dépasse légèrement la
         // berge et ne laisse plus voir de fente entre l'eau et le lit.
-        var bankRadius = waterHalfWidth * .96d;
+        var bankRadius = waterHalfWidth + 64d;
         var changedByPage = new Dictionary<TerrainPageKey, int>();
         foreach (var page in _project.MeshPages.Values
                      .Where(MeshPageClassifier.CanEditGeometry)
@@ -338,14 +337,10 @@ public partial class Terrain3DGpuWindow
                     continue;
                 }
 
-                var blend = distance <= bedCoreRadius
-                    ? 1d
-                    : 1d - Math.Clamp((distance - bedCoreRadius) / Math.Max(1d, bankRadius - bedCoreRadius), 0d, 1d);
-                blend = blend * blend * (3d - 2d * blend);
                 var currentDecoded = TerrainStructuralHeightEditor.GetSurfaceDecodedHeight(column);
-                var localSurfaceHeight = waterHeight - RiverWaterBankOverlapWorld;
-                var bedDecoded = TerrainHeightEncoding.WorldHeightToLegacyFineHeight((float)(localSurfaceHeight - depthWorld));
-                var targetDecoded = Math.Min(currentDecoded, TerrainHeightEncoding.WorldHeightToLegacyFineHeight((float)(localSurfaceHeight - depthWorld * blend)));
+                var targetDecoded=TerrainHeightEncoding.WorldHeightToLegacyFineHeight(RiverChannelProfile.Height(
+                    TerrainHeightEncoding.LegacyFineHeightToWorldHeight(currentDecoded),(float)waterHeight,(float)(distance/32),
+                    (float)(widthWorld/32),(float)depthWorld));
                 // Move vertical connector copies with their surface, retaining their
                 // depth. Assigning an absolute river height collapses the connectors.
                 foreach (var vertex in column)

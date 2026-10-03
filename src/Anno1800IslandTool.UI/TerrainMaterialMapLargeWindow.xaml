@@ -1,4 +1,4 @@
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering" xmlns:hx="http://helix-toolkit.org/wpf/SharpDX" x:Class="Anno1800IslandTool.UI.TerrainMaterialMapLargeWindow" Title="Anno1800IslandTool v46.89 - matériaux carrelés et menus organisés" Height="1000" Width="1780" WindowStartupLocation="CenterOwner">
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering" xmlns:hx="http://helix-toolkit.org/wpf/SharpDX" x:Class="Anno1800IslandTool.UI.TerrainMaterialMapLargeWindow" Title="Anno1800IslandTool v46.104 - matériaux carrelés et menus organisés" Height="1000" Width="1780" WindowStartupLocation="CenterOwner">
   <Grid Margin="10">
     <Grid.ColumnDefinitions>
       <ColumnDefinition Width="390"/>
@@ -29,7 +29,7 @@
                 <TextBlock Margin="0,6,0,2" Text="Jeu de matériaux (material_sets)" FontWeight="SemiBold"/>
                 <DockPanel>
                   <Button DockPanel.Dock="Right" Width="92" Height="28" Margin="6,0,0,0" Click="UseEmbeddedMaterialSetButton_Click">Utiliser</Button>
-                  <ComboBox x:Name="EmbeddedMaterialSetComboBox" Height="28" IsTextSearchEnabled="True" IsEditable="True" IsReadOnly="True" SelectionChanged="EmbeddedMaterialSetComboBox_SelectionChanged" ToolTip="Jeux de matériaux inclus dans le programme"/>
+                  <ComboBox x:Name="EmbeddedMaterialSetComboBox" Height="28" IsTextSearchEnabled="True" IsEditable="False" SelectionChanged="EmbeddedMaterialSetComboBox_SelectionChanged" ToolTip="Jeux de matériaux inclus dans le programme"/>
                 </DockPanel>
                 <TextBlock Text="Bibliothèque incluse dans le programme" Foreground="#315D31" Margin="0,3,0,0"/>
                 <CheckBox x:Name="UpdateRd3dMaterialSetCheckBox" Content="Inscrire ce materialset dans rd3d.xml / export" IsChecked="True" Margin="0,4,0,0"/>
@@ -134,7 +134,7 @@
                       <TextBox x:Name="TopologyRadiusTextBox" Text="1" Height="24"/>
                     </DockPanel>
                     <TextBlock x:Name="TopologyProfileTextBlock" TextWrapping="Wrap" FontWeight="SemiBold" Margin="0,0,0,5"/>
-          <CheckBox x:Name="NativeCellsCheckBox" Content="Cellules multicouches du biome" IsChecked="True" ToolTip="Mélanges inspirés des îles d’origine. Un choix manuel de matériau remplace la recette de la catégorie concernée."/>
+          <CheckBox x:Name="NativeCellsCheckBox" Content="Cellules multicouches du biome" IsChecked="True" ToolTip="Mélanges calibrés sur les îles d’origine : transitions progressives et variations naturelles. Les choix manuels restent prioritaires."/>
           <CheckBox x:Name="EmergedOnlyCheckBox" Content="Limiter aux terres émergées" IsChecked="True"/>
           <CheckBox x:Name="TopologyPreserveWaterBeachCheckBox" Content="Exclure les cellules uniquement eau / plage" ToolTip="Décocher pour repeindre aussi les anciennes plages et les fonds marins aplatis. Une sous-couche de sable sous de l’herbe ne bloque pas la peinture." IsChecked="False" Margin="0,4,0,0"/>
                     <CheckBox x:Name="TopologyBlendCheckBox" Content="Mélanger au lieu de remplacer" Margin="0,4,0,0"/>
@@ -155,11 +155,11 @@
               <StackPanel>
                 <Expander Header="Rendu avec les données du jeu" IsExpanded="False" Margin="0,10,0,0">
                   <StackPanel Margin="0,6,0,0">
-                    <TextBlock Text="Sélectionne le dossier data extrait du jeu. Les textures DDS du materialset actif seront chargées directement." TextWrapping="Wrap" Foreground="#315D31"/>
+                    <TextBlock Text="Les matériaux et textures sont chargés depuis les archives RDA du jeu. Les archives au numéro supérieur sont prioritaires." TextWrapping="Wrap" Foreground="#315D31"/>
                     <TextBox x:Name="GameDataPathTextBox" Height="27" Margin="0,6,0,0" IsReadOnly="True" TextWrapping="NoWrap"/>
                     <UniformGrid Columns="2" Margin="0,5,0,0">
-                      <Button Height="28" Margin="0,0,3,0" Click="SelectGameDataPathButton_Click">Choisir data...</Button>
-                      <Button Height="28" Margin="3,0,0,0" Click="ClearGameDataPathButton_Click">Effacer le chemin</Button>
+                      <Button Height="28" Margin="0,0,3,0" Click="SelectGameDataPathButton_Click">Choisir le jeu...</Button>
+                      <Button Height="28" Margin="3,0,0,0" Click="ClearGameDataPathButton_Click">Couleurs techniques</Button>
                     </UniformGrid>
                     <CheckBox x:Name="UseGameTexturesCheckBox" Content="Utiliser les textures du jeu dans la vue 3D" IsChecked="True" Margin="0,6,0,0" Checked="UseGameTexturesCheckBox_Changed" Unchecked="UseGameTexturesCheckBox_Changed"/>
                     <CheckBox x:Name="UseIslandTintMapsCheckBox" Content="Appliquer aussi les tintmaps DDS de l’île" IsChecked="True" Margin="0,4,0,0" Checked="UseGameTexturesCheckBox_Changed" Unchecked="UseGameTexturesCheckBox_Changed"/>

@@ -977,10 +977,12 @@ public partial class MainWindow : Window
             .Select(f => f.RelativePath)
             .ToList();
 
+        var previousPreview = PreviewSelectorComboBox.SelectedItem as string;
         PreviewSelectorComboBox.ItemsSource = previewCandidates;
         if (previewCandidates.Count > 0)
         {
-            var preferred = ResolvePreferredPreviewPath(_currentProject, previewCandidates) ?? previewCandidates[0];
+            var preferred = previewCandidates.FirstOrDefault(path => string.Equals(path, previousPreview, StringComparison.OrdinalIgnoreCase))
+                ?? ResolvePreferredPreviewPath(_currentProject, previewCandidates) ?? previewCandidates[0];
             PreviewSelectorComboBox.SelectedItem = preferred;
         }
         else

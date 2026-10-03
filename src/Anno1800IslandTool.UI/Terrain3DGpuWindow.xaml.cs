@@ -143,6 +143,8 @@ public partial class Terrain3DGpuWindow : Window
         GpuViewport.EffectsManager = _effectsManager;
         GpuViewport.Camera = new HxPerspectiveCamera
         {
+            // Anno coordinates are kept intact; handedness is corrected only in the camera.
+            CreateLeftHandSystem = true,
             Position = new Point3D(0, 2500, 2500),
             LookDirection = new Vector3D(0, -2500, -2500),
             UpDirection = new Vector3D(0, 1, 0),
@@ -158,6 +160,8 @@ public partial class Terrain3DGpuWindow : Window
             SpecularShininess = 18f,
             VertexColorBlendingFactor = 0.88f
         };
+        _technicalPreviewMaterial = TerrainModel.Material;
+        InitializeGamePreview();
         FootprintHitPlaneModel.Material = new PhongMaterial
         {
             DiffuseColor = new Color4(0.1f, 0.8f, 0.3f, 0.002f),
@@ -208,6 +212,7 @@ public partial class Terrain3DGpuWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        CloseGamePreview();
         MaterialSetSelectionCoordinator.SelectionChanged -= MaterialSetSelectionCoordinator_SelectionChanged;
         _brushPointerTrackingTimer.Stop();
         _loadCancellation?.Cancel();
@@ -244,7 +249,7 @@ public partial class Terrain3DGpuWindow : Window
     {
         if (GpuMaterialSetComboBox.SelectedItem is string fileName)
         {
-            GpuMaterialSetComboBox.Text = fileName;
+
             GpuMaterialSetStatusTextBlock.Text = $"Actif : {fileName}. Synchronisé avec l’éditeur de matériaux et le RD3D.";
         }
     }
@@ -275,6 +280,7 @@ public partial class Terrain3DGpuWindow : Window
             GpuMaterialSetStatusTextBlock.Text = $"Actif : {fileName}. {report}";
             InitializeTreeBiomeDisplay();
             MaterialSetSelectionCoordinator.Publish(_project, this);
+            if (GamePreviewCheck.IsChecked == true) _ = BuildGamePreviewAsync();
         }
         catch (Exception ex)
         {
@@ -406,6 +412,8 @@ public partial class Terrain3DGpuWindow : Window
             }
 
             TerrainModel.Geometry = _geometry;
+            RefreshGamePreviewGeometry();
+            if (GamePreviewCheck.IsChecked == true) _ = BuildGamePreviewAsync();
             UpdateFootprintHitPlane();
             UpdateFootprintPreview();
             stopwatch.Stop();
@@ -694,6 +702,10 @@ public partial class Terrain3DGpuWindow : Window
             ApplyFootprintBrush(args.HitTestResult.PointHit, mode == GpuBrushMode.AddFootprint);
             e.Handled = true;
             return;
+        }
+        if(mode==GpuBrushMode.Scenery)
+        {
+            AddSceneryPoint(args.HitTestResult.PointHit);CompleteToolHistoryAction();e.Handled=true;return;
         }
         if (mode is GpuBrushMode.Clay or GpuBrushMode.Oil)
         {
@@ -1266,13 +1278,14 @@ public partial class Terrain3DGpuWindow : Window
         RefreshActiveToolUi();
         if (GpuToolTabs is null) return;
         var mode=GetBrushMode();
-        GpuToolTabs.SelectedIndex=mode is GpuBrushMode.Clay or GpuBrushMode.Oil or GpuBrushMode.Mine or GpuBrushMode.Trees or GpuBrushMode.River or GpuBrushMode.Beach or GpuBrushMode.MeshBeach ? 1
+        if(mode==GpuBrushMode.Scenery && _sceneryCatalog.Count==0)_ = RefreshSceneryCatalogAsync();
+        GpuToolTabs.SelectedIndex=mode is GpuBrushMode.Scenery or GpuBrushMode.Clay or GpuBrushMode.Oil or GpuBrushMode.Mine or GpuBrushMode.Trees or GpuBrushMode.River or GpuBrushMode.Beach or GpuBrushMode.MeshBeach ? 1
             : mode is GpuBrushMode.AddFootprint or GpuBrushMode.RemoveFootprint ? 2 : 0;
         if(GpuToolTabs.SelectedItem is TabItem tab && tab.Content is ScrollViewer viewer && viewer.Content is StackPanel panel)
         foreach(var expander in panel.Children.OfType<Expander>())
         {
             var title=expander.Header?.ToString()??"";
-            if(GpuToolTabs.SelectedIndex==1)expander.IsExpanded=mode is GpuBrushMode.Clay or GpuBrushMode.Oil ? ReferenceEquals(expander,DepositsExpander) : mode==GpuBrushMode.Mine?title.StartsWith("Mines"):
+            if(GpuToolTabs.SelectedIndex==1)expander.IsExpanded=mode==GpuBrushMode.Scenery?ReferenceEquals(expander,SceneryExpander):mode is GpuBrushMode.Clay or GpuBrushMode.Oil ? ReferenceEquals(expander,DepositsExpander) : mode==GpuBrushMode.Mine?title.StartsWith("Mines"):
                 mode==GpuBrushMode.Trees?title.Contains("arbres"):mode==GpuBrushMode.River?title.Contains("rivière"):title.Contains("plage");
             if(GpuToolTabs.SelectedIndex==2&&title.Contains("emprise"))expander.IsExpanded=true;
         }
@@ -1327,6 +1340,7 @@ public partial class Terrain3DGpuWindow : Window
             GpuBrushMode.MeshBeach => "Plage sur maillage : choisissez directement une ligne où le relief traverse le niveau de la mer, sans utiliser le contour vert de l'empreinte.",
             GpuBrushMode.Clay => "Argile : cliquez sur un terrain émergé pour ajouter un puits.",
             GpuBrushMode.Oil => "Pétrole : cliquez pour ajouter un puits ; répétez pour former un gisement.",
+            GpuBrushMode.Scenery => "Décors : choisissez un modèle puis cliquez sur le terrain pour le poser.",
             GpuBrushMode.Mine => "Mine : cliquez l’entrée, puis la montagne. Les deux points définissent l’orientation et la zone de travail.",
             GpuBrushMode.River => "Rivière : cliquez les points dans l’ordre de l’écoulement. L’aperçu arrondit automatiquement les changements de direction.",
             _ => "Déplacer : bouton gauche ou droit pour tourner, molette maintenue pour déplacer, roulette pour zoomer."
@@ -1875,6 +1889,7 @@ public partial class Terrain3DGpuWindow : Window
             RebaseTransactionAfterDirectCommit();
             CommitPendingMines();
             CommitPendingDeposits();
+            CommitPendingScenery();
             RebaseTransactionAfterDirectCommit();
             InitializeFootprintMask();
             if (!closeAfterValidation) await ReloadGpuGeometryAsync();
@@ -1931,6 +1946,7 @@ public partial class Terrain3DGpuWindow : Window
         12 => GpuBrushMode.Mine,
         13 => GpuBrushMode.Clay,
         14 => GpuBrushMode.Oil,
+        15 => GpuBrushMode.Scenery,
         _ => GpuBrushMode.Navigation
     };
 
@@ -2224,6 +2240,7 @@ public partial class Terrain3DGpuWindow : Window
         Trees,
         MeshBeach,
         River,
+        Scenery,
         Mine,
         Clay,
         Oil
