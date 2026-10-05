@@ -1,4 +1,4 @@
-using Anno1800IslandTool.Core.Models;
+﻿using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Validation;
 using Anno1800IslandTool.Pipeline.Abstractions;
 

@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Numerics;
 using System.Text.RegularExpressions;
 using Anno1800IslandTool.Core.Common;
@@ -98,58 +98,16 @@ public partial class Terrain3DWindow
     {
         if (beach.Contour is not { Count: > 0 } spans)
             throw new InvalidOperationException("Aucune ligne de rivage n'a été trouvée dans le maillage.");
-        var map = _project.GameData.TerrainHeightMap;
-        if (map.Width < 2 || map.Height < 2 || !_project.Rd3d.MaterialMap.HasAnyData)
-            throw new InvalidOperationException("La heightmap et les matériaux sont nécessaires pour créer une plage.");
+        if (pendingChangedRegions.Count > 0)
+            throw new InvalidOperationException("Validez les retouches de terrain avant de définir une côte constructible.");
         if (GameDataAreaObjectsXmlEditor.Extract(_project.RawContent.GameDataText, "EditorObject").Containers.Count == 0)
             throw new InvalidOperationException("Le groupe EditorObject nécessaire aux côtes de comptoir est absent.");
-
-        var width = (float)(_project.Rd3d.GridWidth > 0 ? _project.Rd3d.GridWidth : _project.Root.MapSize * 32);
-        var height = (float)(_project.Rd3d.GridHeight > 0 ? _project.Rd3d.GridHeight : _project.Root.MapSize * 32);
-        var profile = new OutwardBeachProfile(beach.LandWidth, beach.WaterWidth,
-            TerrainHeightEncoding.LegacyFineHeightToWorldHeight(beach.BeachDecodedHeight),
-            TerrainHeightEncoding.LegacyFineHeightToWorldHeight(beach.WaterDecodedHeight), beach.InnerWidth);
-
-        foreach (var region in pendingChangedRegions)
-            UpdateCoarseFromEditedMeshRegion(region.Lod, region.MinX, region.MinZ, region.MaxX, region.MaxZ);
-
-        var changed = 0;
-        for (var z = 0; z < map.Height; z++)
-        for (var x = 0; x < map.Width; x++)
-        {
-            var point = new Vector2(x * width / (map.Width - 1), z * height / (map.Height - 1));
-            if (!profile.TryGetDistance(spans, point, out var distance)) continue;
-            var index = z * map.Width + x;
-            var oldHeight = TerrainHeightEncoding.SampleToWorldHeight(_editedCoarseSamples[index], map.SampleEncoding);
-            _editedCoarseSamples[index] = TerrainHeightEncoding.WorldHeightToGameDataRaw(profile.Height(distance, oldHeight));
-            changed++;
-        }
-        if (changed == 0) throw new InvalidOperationException("La ligne choisie ne recoupe aucun échantillon du terrain.");
-
-        var working = BuildWorkingMap();
-        var full = new RectI(0, 0, working.Width - 1, working.Height - 1);
-        MergeDirtyRegionFromWorldBounds(0, 0, width, height);
-        _lastTerrainDependencySyncReport = _editor.ReplaceCoarseHeightMapAndSyncTerrainDependencies(_project, working, full);
-        PaintMeshBeachMaterials(spans, profile, width, height);
-        var state = _localRegenerator.RegenerateAroundBounds(_project, working, "Mesh", ResolveAnchorPageKeyForCurrentLod(), full, full, 0);
-        state.AnchorMeshLod = beach.Lod;
-        state.UseCoarseHeightMap = true;
-        var writes = _localRegenerator.GenerateMeshPageWrites(_project, working, state, true, 99, BuildMeshRegenerationOptions());
-        ApplyGeneratedMeshWrites(writes);
-        var normals = _localRegenerator.GenerateAllInterpretedNormalMapWrites(_project, working, state);
-        var tints = _localRegenerator.GenerateAllTintMapWritesVanillaLike(_project, working, state);
-        CommitTerrainValidationToProject(state, writes, tints);
-        var anchors = AddContourCoastObjects(beach, spans);
-        _editor.RegenerateAllTexts(_project);
-        _project.ModifiedSections.Add("MeshContourBeach");
+        // Only gameplay CoastLine objects are added. No height, material, mesh or texture write.
+        var anchors = AddContourCoastObjects(beach with { LandWidth = 0 }, spans);
+        _project.ModifiedSections.Add("GameData");
+        _project.ModifiedSections.Add("PlayableCoastLine");
         _project.IsModified = true;
-        InvalidateBrushSpatialIndex();
-        PopulatePageRows(GetSelectedPageRow()?.Page.Key);
-        RequestSceneRebuild(immediate: true);
-        RefreshPropagationInfo();
-        UpdateNormalPreview();
-        return $"Plage créée directement sur {spans.Sum(span => span.Length) / 32:0.#} cases de maillage, sans modifier l'empreinte. " +
-               $"{anchors} ligne de côte continue pour les comptoirs ; {writes.Count} pages mesh, {normals.Count} normalmaps et {tints.Count} tintmaps recalculées.";
+        return $"Côte constructible ajoutée sur {spans.Sum(span => span.Length) / 32:0.#} cases : {anchors} ligne de côte. Relief et matériaux conservés.";
     }
 
     private void PaintMeshBeachMaterials(IReadOnlyList<CoastSpan> spans, OutwardBeachProfile profile, float width, float height)

@@ -1,4 +1,4 @@
-namespace Anno1800IslandTool.Formats.Readers;
+﻿namespace Anno1800IslandTool.Formats.Readers;
 
 public sealed class DdsInfoReader
 {

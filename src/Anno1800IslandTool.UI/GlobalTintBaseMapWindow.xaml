@@ -1,8 +1,8 @@
-<Window x:Class="Anno1800IslandTool.UI.GlobalTintBaseMapWindow"
+﻿<Window x:Class="Anno1800IslandTool.UI.GlobalTintBaseMapWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering"
-        Title="Anno1800IslandTool v46.104 - matériaux carrelés et menus organisés"
+        Title="Anno1800IslandTool v46.120 - matériaux carrelés et menus organisés"
         Height="940"
         Width="1450"
         WindowStartupLocation="CenterOwner">

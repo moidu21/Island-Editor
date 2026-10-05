@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -907,101 +907,7 @@ public partial class Terrain3DWindow : Window
     }
 
     private string RegenerateFootprintPreviewImages(IReadOnlyList<bool> activeMask, Int2 grid, CoarseHeightMap heightMap)
-    {
-        if (grid.X <= 0 || grid.Y <= 0 || activeMask.Count < grid.X * grid.Y || heightMap.Width <= 0 || heightMap.Height <= 0)
-        {
-            return "Aperçus 2D : données insuffisantes.";
-        }
-
-        const int size = 1024;
-        var activePixels = new byte[size * size * 4];
-        var mapPixels = new byte[size * size * 4];
-        var gamePixels = new byte[size * size * 4];
-        for (var y = 0; y < size; y++)
-        {
-            var cellY = Math.Clamp((int)Math.Floor((y + 0.5) / size * grid.Y), 0, grid.Y - 1);
-            var sampleY = Math.Clamp((int)Math.Round(y / (double)(size - 1) * Math.Max(0, heightMap.Height - 1)), 0, Math.Max(0, heightMap.Height - 1));
-            for (var x = 0; x < size; x++)
-            {
-                var cellX = Math.Clamp((int)Math.Floor((x + 0.5) / size * grid.X), 0, grid.X - 1);
-                var active = ActiveMapGridMaskCodec.IsCellActive(activeMask, grid, cellX, cellY);
-                var sampleX = Math.Clamp((int)Math.Round(x / (double)(size - 1) * Math.Max(0, heightMap.Width - 1)), 0, Math.Max(0, heightMap.Width - 1));
-                var sample = heightMap.Samples[(sampleY * heightMap.Width) + sampleX];
-                var worldHeight = TerrainHeightEncoding.CoarseSampleToWorldHeight(heightMap, sample);
-                var pixel = ((y * size) + x) * 4;
-
-                SetPreviewPixel(activePixels, pixel, active ? (byte)245 : (byte)20, active ? (byte)245 : (byte)42, active ? (byte)245 : (byte)66, 255);
-                if (!active)
-                {
-                    SetPreviewPixel(mapPixels, pixel, 78, 48, 22, 255);
-                    SetPreviewPixel(gamePixels, pixel, 92, 58, 28, 255);
-                    continue;
-                }
-
-                var land = Math.Clamp((worldHeight + 1f) / 34f, 0f, 1f);
-                var shore = Math.Clamp((worldHeight + 0.25f) / 2.5f, 0f, 1f);
-                var mapR = (byte)Math.Clamp((int)Math.Round(72 + (land * 92)), 0, 255);
-                var mapG = (byte)Math.Clamp((int)Math.Round(98 + (land * 92)), 0, 255);
-                var mapB = (byte)Math.Clamp((int)Math.Round(52 + (shore * 48)), 0, 255);
-                SetPreviewPixel(mapPixels, pixel, mapB, mapG, mapR, 255);
-                SetPreviewPixel(gamePixels, pixel, (byte)Math.Min(255, mapB + 15), (byte)Math.Min(255, mapG + 18), (byte)Math.Min(255, mapR + 12), 255);
-            }
-        }
-
-        var baseDirectory = ResolvePreviewBaseDirectory();
-        var replacements = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase)
-        {
-            [$"{baseDirectory}/activemapimage.png"] = EncodePng(size, size, activePixels),
-            [$"{baseDirectory}/activemapimage_0.dds"] = DdsDxt1TextureConverter.EncodeBgra32ToClassicDxt1(size, size, activePixels),
-            [$"{baseDirectory}/mapimage.png"] = EncodePng(size, size, mapPixels),
-            [$"{baseDirectory}/mapimage_0.dds"] = DdsDxt1TextureConverter.EncodeBgra32ToClassicDxt1(size, size, mapPixels),
-            [$"{baseDirectory}/gamemapimage.png"] = EncodePng(size, size, gamePixels),
-            [$"{baseDirectory}/gamemapimage_0.dds"] = DdsDxt1TextureConverter.EncodeBgra32ToClassicDxt1(size, size, gamePixels)
-        };
-
-        foreach (var pair in replacements)
-        {
-            _project.GeneratedBinaryFileReplacements[pair.Key.Replace('\\', '/')] = pair.Value;
-        }
-
-        _project.ModifiedSections.Add("PreviewImages2D");
-        return "Aperçus 2D : activemapimage, mapimage et gamemapimage recalculés en PNG/DDS.";
-    }
-
-    private string ResolvePreviewBaseDirectory()
-    {
-        var existing = _project.SourceFiles
-            .Select(file => file.RelativePath.Replace('\\', '/'))
-            .FirstOrDefault(path => path.EndsWith("/activemapimage.png", StringComparison.OrdinalIgnoreCase) ||
-                                    path.EndsWith("/mapimage.png", StringComparison.OrdinalIgnoreCase) ||
-                                    path.EndsWith("/gamemapimage.png", StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrWhiteSpace(existing))
-        {
-            var slash = existing.LastIndexOf('/');
-            return slash > 0 ? existing[..slash] : "_gamedata";
-        }
-
-        var islandName = System.IO.Path.GetFileNameWithoutExtension(_project.RootFilePath ?? "island");
-        return $"_gamedata/{islandName}";
-    }
-
-    private static byte[] EncodePng(int width, int height, byte[] pixels)
-    {
-        var bitmap = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, pixels, width * 4);
-        var encoder = new PngBitmapEncoder();
-        encoder.Frames.Add(BitmapFrame.Create(bitmap));
-        using var stream = new MemoryStream();
-        encoder.Save(stream);
-        return stream.ToArray();
-    }
-
-    private static void SetPreviewPixel(byte[] pixels, int index, byte b, byte g, byte r, byte a)
-    {
-        pixels[index] = b;
-        pixels[index + 1] = g;
-        pixels[index + 2] = r;
-        pixels[index + 3] = a;
-    }
+        => IslandPreviewImages.Refresh(_project, activeMask, grid, heightMap);
 
     private string SynchronizePlacementPointsToFootprint(IReadOnlyList<bool> activeMask, Int2 grid)
     {
@@ -2224,6 +2130,7 @@ public partial class Terrain3DWindow : Window
         {
             _editor.ApplyGeneratedTintMapWrites(_project, state);
         }
+        IslandPreviewImages.Refresh(_project);
         _previewLocalRegeneration = state;
         ApplyGeneratedMeshWrites(meshWrites);
         if (tintWrites.Count > 0)

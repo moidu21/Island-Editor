@@ -1,4 +1,4 @@
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Text.Json;
 
@@ -29,6 +29,12 @@ public sealed class NativeIslandConverter(IslandTools tools, IslandToolProcess p
         for (int i=0; i<all.Length; i+=24)
         {
             token.ThrowIfCancellationRequested(); var batch = all.Skip(i).Take(24).ToArray();
+            if(extension is not null) foreach(var path in batch)
+            {
+                var xml=File.ReadAllText(path);
+                var prepared=PrepareFileDbXml(xml);
+                if(prepared!=xml)File.WriteAllText(path,prepared);
+            }
             progress?.Report($"{(extension is null ? "Interprétation" : "Encodage")} {format} : {Math.Min(i+24,all.Length)}/{all.Length}");
             var args = new List<string> { extension is null ? "decompress" : "compress", "-f" }; args.AddRange(batch);
             args.AddRange(["-i", Format(format), "-y"]);
@@ -40,6 +46,17 @@ public sealed class NativeIslandConverter(IslandTools tools, IslandToolProcess p
                 if(!File.Exists(expected)||new FileInfo(expected).Length==0)throw new InvalidDataException("Fichier non produit : "+expected);
             }
         }
+    }
+    // FileDBReader 3.0.3 reads XmlDocument.FirstChild instead of DocumentElement.
+    // A declaration/leading comment otherwise produces a 40-byte empty binary
+    // without reporting any error. Only staged copies pass through this method.
+    public static string PrepareFileDbXml(string xml)
+    {
+        if(!xml.Contains("<?")&&!xml.Contains("<!--")&&!xml.Contains("<!DOCTYPE"))return xml;
+        var doc=System.Xml.Linq.XDocument.Parse(xml,System.Xml.Linq.LoadOptions.PreserveWhitespace);
+        foreach(var node in doc.DescendantNodes().Where(n=>n is System.Xml.Linq.XComment or System.Xml.Linq.XProcessingInstruction).ToArray())node.Remove();
+        return doc.Root?.ToString(System.Xml.Linq.SaveOptions.DisableFormatting)
+            ?? throw new InvalidDataException("Document XML sans racine.");
     }
     public async Task<string> DecodeAsync(string infoPath, string sourceMap, string work, IProgress<string>? progress, CancellationToken token)
     {
@@ -86,6 +103,9 @@ public sealed class NativeIslandConverter(IslandTools tools, IslandToolProcess p
         await ConvertAsync([info],"a7minfo","a7minfo",progress,token);
         File.Copy(Path.ChangeExtension(info,"a7minfo"),Path.Combine(output,name+".a7minfo"));
         await ConvertAsync([rd3ds[0]],"Island_RD3D","data",progress,token);
+        // Normalize legacy hex only in the staged export, never in the user's source.
+        var gameDocument = System.Xml.Linq.XDocument.Load(game, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+        if (IrrigationGridValues.Normalize(gameDocument)) File.WriteAllText(game,gameDocument.Root!.ToString());
         await ConvertAsync([game],"Island_Gamedata_v3","data",progress,token);
         var pack=Path.Combine(work,"pack");Directory.CreateDirectory(pack);
         var native=Path.Combine(root,"_anno1800islandtool","native-a7m");if(Directory.Exists(native))CopyTree(native,pack);
@@ -108,6 +128,9 @@ public sealed class NativeIslandConverter(IslandTools tools, IslandToolProcess p
         }
         foreach(var nameHelper in new[]{"addtoasset.xml","formaptemplate.xml","formaptemplate_filedb.xml"})
         { var helper=Directory.GetFiles(input,nameHelper,SearchOption.AllDirectories).FirstOrDefault();if(helper is not null)File.Copy(helper,Path.Combine(work,"compiled",nameHelper)); }
+        var integrationNotes=Directory.GetFiles(input,"integration.txt",SearchOption.AllDirectories)
+            .FirstOrDefault(p=>p.Replace('\\','/').EndsWith("/_anno1800islandtool/integration.txt",StringComparison.OrdinalIgnoreCase));
+        if(integrationNotes is not null)File.Copy(integrationNotes,Path.Combine(work,"compiled","integration.txt"));
         token.ThrowIfCancellationRequested();var zip=Path.Combine(work,name+"__compiled.zip");ZipFile.CreateFromDirectory(Path.Combine(work,"compiled"),zip,CompressionLevel.Fastest,false);return zip;
     }
     private static void CopyTree(string source,string destination)

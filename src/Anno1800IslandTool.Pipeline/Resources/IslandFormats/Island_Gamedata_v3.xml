@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8" ?>
+<?xml version="1.0" encoding="utf-8" ?>
 <Converts>
   <Default Type ="Int32" />
   <InternalCompression>
@@ -80,6 +80,7 @@
     <Convert Path ="//IrrigationManager/m_StaticTileGrid/block/x" Type="Int16"/>
     <Convert Path ="//IrrigationManager/m_StaticTileGrid/block/y" Type="Int16"/>
     <Convert Path ="//IrrigationManager/m_StaticTileGrid/block/default" Type="Byte" Structure="List"/>
+    <Convert Path ="//IrrigationManager/m_StaticTileGrid/block/values" Type="Byte" Structure="List"/>
     <Convert Path ="//IrrigationManager/IsInitialized" Type="Boolean"/>
 
     <Convert Path ="//SeasonManager/SeasonStartTime" Type="Int64"/>

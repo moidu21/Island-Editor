@@ -1,4 +1,4 @@
-using Anno1800IslandTool.Core.Terrain;
+﻿using Anno1800IslandTool.Core.Terrain;
 namespace Anno1800IslandTool.Pipeline.Services;
 
 /// <summary>Conservative local palette lookup without allocating a cell per sample.</summary>

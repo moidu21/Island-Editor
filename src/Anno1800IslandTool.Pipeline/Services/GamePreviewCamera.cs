@@ -1,4 +1,4 @@
-namespace Anno1800IslandTool.Pipeline.Services;
+﻿namespace Anno1800IslandTool.Pipeline.Services;
 public static class GamePreviewCamera
 {
     public static (double Near,double Far) Clipping(double distance,double span)

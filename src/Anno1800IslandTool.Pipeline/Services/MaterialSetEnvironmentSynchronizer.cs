@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Text.RegularExpressions;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;
@@ -292,6 +292,18 @@ public sealed class MaterialSetEnvironmentSynchronizer
         }
 
         return result;
+    }
+
+    public static string ResolveCurrentBiome(IslandProject project)
+    {
+        var selected = project.MaterialSet is null ? EnvironmentBiome.Unknown : DetectBiome(project.MaterialSet);
+        if (selected != EnvironmentBiome.Unknown) return selected.ToString();
+        foreach (var path in new[] { project.EffectiveMaterialSetName, project.Rd3d.MaterialSetFileName, project.MaterialSetFilePath })
+        {
+            var biome = DetectBiomeFromName(path);
+            if (biome != EnvironmentBiome.Unknown) return biome.ToString();
+        }
+        return EnvironmentBiome.Unknown.ToString();
     }
 
     private static EnvironmentBiome DetectBiome(MaterialSetDefinition materialSet)

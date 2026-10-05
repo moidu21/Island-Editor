@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.Text.RegularExpressions;
@@ -50,6 +50,7 @@ public partial class Map2DEditorWindow : Window
         GameDataObjectsDataGrid.ItemsSource = _gameDataObjects;
         LoadFromProject();
         UpdateModeText();
+        Activated += (_, _) => { if (_isUiReady) RefreshView(); };
     }
 
     private void LoadFromProject()
@@ -77,6 +78,9 @@ public partial class Map2DEditorWindow : Window
             .Where(f => f.Kind == FileKind.PreviewImage)
             .OrderBy(f => f.RelativePath)
             .Select(f => f.RelativePath)
+            .Concat(_project.GeneratedBinaryFileReplacements.Keys.Where(path => path.EndsWith("mapimage.png", StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path.EndsWith("/gamemapimage.png", StringComparison.OrdinalIgnoreCase) ? 0 : path.EndsWith("/mapimage.png", StringComparison.OrdinalIgnoreCase) ? 1 : 2)
             .ToList();
 
         PreviewSelectorComboBox.ItemsSource = previewCandidates;
@@ -93,7 +97,7 @@ public partial class Map2DEditorWindow : Window
     {
         _heightBitmap = UiProjectHelpers.BuildHeightMapBitmap(_project.GameData.TerrainHeightMap);
         var selectedPreview = PreviewSelectorComboBox.SelectedItem as string;
-        var candidates = PreviewSelectorComboBox.Items.Cast<object>().Select(i => i?.ToString() ?? string.Empty).Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
+        var candidates = PreviewSelectorComboBox.Items.Cast<object>().Select(i => i?.ToString() ?? string.Empty).Where(s => !string.IsNullOrWhiteSpace(s)).Concat(_project.GeneratedBinaryFileReplacements.Keys.Where(p => p.EndsWith("mapimage.png", StringComparison.OrdinalIgnoreCase))).ToList();
         _effectivePreviewPath = UiProjectHelpers.ResolvePreferredPreviewPath(_project, selectedPreview is null ? candidates : new[] { selectedPreview }.Concat(candidates));
         _previewBitmap = UiProjectHelpers.LoadPreviewBitmap(_project, _effectivePreviewPath);
         RebuildCanvas();

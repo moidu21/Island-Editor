@@ -1,4 +1,4 @@
-namespace Anno1800IslandTool.Core.Enums;
+﻿namespace Anno1800IslandTool.Core.Enums;
 
 public enum FileKind
 {

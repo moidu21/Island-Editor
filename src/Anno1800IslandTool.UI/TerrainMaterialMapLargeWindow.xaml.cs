@@ -1,4 +1,4 @@
-using Anno1800IslandTool.Pipeline.Services;
+﻿using Anno1800IslandTool.Pipeline.Services;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -193,12 +193,20 @@ public partial class TerrainMaterialMapLargeWindow : Window
     private static string FormatFloat(float value)
         => value.ToString("0.###", CultureInfo.InvariantCulture);
 
+    private void ResetTopologyProfileButton_Click(object sender, RoutedEventArgs e)
+        => _ownerWindow.ResetTopologyProfile();
+
+    internal void RefreshTopologyProfile()
+    {
+        RefreshTopologyControlsFromParent();
+        RefreshMapImage();
+    }
+
     private void RefreshTopologyControlsFromParent()
     {
         var rows = _ownerWindow.GetTerrainMaterialPaletteRows().ToList();
         var options = _ownerWindow.GetTopologyOptionsForLargeWindow();
         SetCoastComboItems(TopologyFlatMaterialComboBox, rows, options.FlatMaterialId);
-        SetCoastComboItems(FlatTilingMaterialComboBox, rows, options.FlatTilingMaterialId);
         SetCoastComboItems(TopologyGentleMaterialComboBox, rows, options.GentleSlopeMaterialId);
         SetCoastComboItems(TopologySteepMaterialComboBox, rows, options.SteepSlopeMaterialId);
         SetCoastComboItems(TopologyRidgeMaterialComboBox, rows, options.RidgeMaterialId);
@@ -206,15 +214,10 @@ public partial class TerrainMaterialMapLargeWindow : Window
         NativeCellsCheckBox.IsChecked=options.UseNativeCells;
         EmergedOnlyCheckBox.IsChecked=options.OnlyEmergedLand;
         TopologyProfileTextBlock.Text=_ownerWindow.TopologyProfileLabel;
-        FlatTilingCheckBox.IsChecked = options.FlatTilingEnabled;
-        FlatTileSizeTextBox.Text = (options.FlatTileSize / 2).ToString(CultureInfo.InvariantCulture);
-        FlatTileContrastTextBox.Text = options.FlatTileContrast.ToString(CultureInfo.InvariantCulture);
         TopologyFlatSlopeTextBox.Text = FormatFloat(options.FlatSlopeMaximum);
         TopologySteepSlopeTextBox.Text = FormatFloat(options.SteepSlopeMinimum);
         TopologyCurvatureTextBox.Text = FormatFloat(options.CurvatureSensitivity);
         TopologyRadiusTextBox.Text = options.AnalysisRadius.ToString(CultureInfo.InvariantCulture);
-        TopologyStrengthSlider.Value = Math.Clamp(options.Strength, (int)TopologyStrengthSlider.Minimum, (int)TopologyStrengthSlider.Maximum);
-        TopologyBlendCheckBox.IsChecked = options.UseBlend;
         TopologyPreserveWaterBeachCheckBox.IsChecked = options.PreserveExistingWaterAndBeach;
     }
 
@@ -953,13 +956,10 @@ public partial class TerrainMaterialMapLargeWindow : Window
     {
         var options = new TerrainTopologyMaterialOptions
         {
+            FlatTilingEnabled=false, UseBlend=false, Strength=31,
             UseNativeCells=NativeCellsCheckBox.IsChecked==true,
             OnlyEmergedLand=EmergedOnlyCheckBox.IsChecked==true,
             FlatMaterialId = SelectedCoastMaterialId(TopologyFlatMaterialComboBox, 2),
-            FlatTilingEnabled = FlatTilingCheckBox.IsChecked == true,
-            FlatTilingMaterialId = SelectedCoastMaterialId(FlatTilingMaterialComboBox, 2),
-            FlatTileSize = ParseIntTextBox(FlatTileSizeTextBox, 4) * 2,
-            FlatTileContrast = ParseIntTextBox(FlatTileContrastTextBox, 12),
             GentleSlopeMaterialId = SelectedCoastMaterialId(TopologyGentleMaterialComboBox, 2),
             SteepSlopeMaterialId = SelectedCoastMaterialId(TopologySteepMaterialComboBox, 16),
             RidgeMaterialId = SelectedCoastMaterialId(TopologyRidgeMaterialComboBox, 16),
@@ -968,8 +968,6 @@ public partial class TerrainMaterialMapLargeWindow : Window
             SteepSlopeMinimum = ParseFloatTextBox(TopologySteepSlopeTextBox, 1.15f),
             CurvatureSensitivity = ParseFloatTextBox(TopologyCurvatureTextBox, 0.35f),
             AnalysisRadius = ParseIntTextBox(TopologyRadiusTextBox, 2),
-            Strength = (int)Math.Round(TopologyStrengthSlider.Value),
-            UseBlend = TopologyBlendCheckBox.IsChecked == true,
             PreserveExistingWaterAndBeach = TopologyPreserveWaterBeachCheckBox.IsChecked == true
         };
 

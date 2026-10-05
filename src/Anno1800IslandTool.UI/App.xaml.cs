@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Windows;
 using System.Windows.Media;
@@ -50,7 +50,7 @@ public partial class App : Application
                 UiLocalizationManager.SetStartupPreference(UiLocalizationManager.StartupPreference, save: false);
             }
 
-            var mainWindow = new MainWindow();
+            var mainWindow = new MainWindow(Array.Exists(e.Args, arg => string.Equals(arg, "-debug", StringComparison.OrdinalIgnoreCase)));
             MainWindow = mainWindow;
             ShutdownMode = ShutdownMode.OnMainWindowClose;
             mainWindow.Show();

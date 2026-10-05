@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Numerics;
 using Anno1800IslandTool.Core.Common;
 using Anno1800IslandTool.Core.Models;
@@ -10,7 +10,8 @@ public sealed record ObjTerrainImportOptions(
     int Lod,
     bool FitToActiveFootprint = true,
     int GridStepRaw = 32,
-    int SmoothingPasses = 2);
+    int SmoothingPasses = 2,
+    float? SourceSeaLevel = null);
 
 public sealed record ObjTerrainImportResult(
     int SourceVertices,
@@ -43,6 +44,9 @@ public static class ObjTerrainImporter
             throw new FileNotFoundException("Le fichier OBJ est introuvable.", path);
 
         var parsed = ParseDetailed(File.ReadLines(path));
+        var sourceSeaLevel = options.SourceSeaLevel ?? parsed.SourceSeaLevel;
+        if (sourceSeaLevel.HasValue && !float.IsFinite(sourceSeaLevel.Value))
+            throw new InvalidDataException("Le niveau marin source doit être un nombre fini.");
         if (parsed.Vertices.Count < 3 || parsed.Triangles.Count == 0)
             throw new InvalidDataException("Le fichier OBJ ne contient aucun triangle exploitable.");
         var selected = SelectUsableTerrainTriangles(parsed.Triangles);
@@ -84,7 +88,7 @@ public static class ObjTerrainImporter
         var offsetX = target.MinX + ((target.MaxX - target.MinX - usedWidth) * .5);
         var offsetZ = target.MinZ + ((target.MaxZ - target.MinZ - usedHeight) * .5);
         var (sourceLow, sourceHigh, minHeight, maxHeight) = ResolveAutomaticHeightRange(surfaceSource, fitScale,
-            Math.Max(usedWidth, usedHeight));
+            Math.Max(usedWidth, usedHeight), sourceSeaLevel);
         var sourceY = sourceHigh - sourceLow;
 
         var transformed = parsed.Vertices.Select(v => new Vector3(
@@ -163,10 +167,22 @@ public static class ObjTerrainImporter
     }
 
     private static (float SourceLow, float SourceHigh, float MinimumHeight, float MaximumHeight) ResolveAutomaticHeightRange(
-        IReadOnlyList<Vector3> surface, double fitScale, double fittedHorizontalSpan)
+        IReadOnlyList<Vector3> surface, double fitScale, double fittedHorizontalSpan, float? sourceSeaLevel)
     {
         var ordered = surface.Select(point => point.Y).OrderBy(value => value).ToArray();
         if (ordered.Length == 0) return (0, 0, 0, 0);
+        if (sourceSeaLevel is float sea)
+        {
+            // A known water datum must remain zero in Anno. Do not pin the
+            // bottom to -8 or use vertex percentiles: optimized meshes do not
+            // sample flat areas and mountains with the same density.
+            var sourceMin = ordered[0];
+            var sourceMax = ordered[^1];
+            var span = sourceMax - sourceMin;
+            var usefulRelief = Math.Clamp(fittedHorizontalSpan / 32d * .20d, 16d, 72d);
+            var scale = span > 0 ? Math.Min(fitScale / 32d, usefulRelief / span) : fitScale / 32d;
+            return (sourceMin, sourceMax, (float)((sourceMin - sea) * scale), (float)((sourceMax - sea) * scale));
+        }
         var low = ordered[Math.Clamp((int)Math.Floor((ordered.Length - 1) * .02), 0, ordered.Length - 1)];
         var high = ordered[Math.Clamp((int)Math.Ceiling((ordered.Length - 1) * .98), 0, ordered.Length - 1)];
         if (high - low < .000001f) return (low, high, 0, 0);
@@ -403,9 +419,17 @@ public static class ObjTerrainImporter
         var triangles = new List<ObjSourceTriangle>();
         var objectName = string.Empty;
         var worldMachineZUp = false;
+        float? sourceSeaLevel = null;
         foreach (var source in lines)
         {
             var line = source.Trim();
+            const string seaLevelPrefix = "# AnnoTerrain SeaLevel ";
+            if (line.StartsWith(seaLevelPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryFloat(line[seaLevelPrefix.Length..].Trim(), out var sea))
+                    throw new InvalidDataException("Niveau marin OBJ invalide.");
+                sourceSeaLevel = sea;
+            }
             if (line.StartsWith("# Mesh Output from World Machine", StringComparison.OrdinalIgnoreCase))
                 worldMachineZUp = true;
             if (line.Length == 0 || line[0] == '#') continue;
@@ -428,7 +452,10 @@ public static class ObjTerrainImporter
                         triangles.Add(new ObjSourceTriangle(face[0], face[i], face[i + 1], objectName));
             }
         }
-        // World Machine Mesh Output uses XY for the ground plane and Z for elevation.
+        // World Machine supports both Y-up and Z-up exports with the same header.
+        // Determine the ground plane from the oriented area of terrain faces;
+        // local mountain slopes cancel, leaving the orientation of the boundary.
+        worldMachineZUp = worldMachineZUp && HasZUpTerrain(vertices, SelectUsableTerrainTriangles(triangles));
         // Rotate -90 degrees around X before terrain projection/filtering and fitting.
         // This preserves handedness and distances. Generic OBJ files retain their Y-up convention.
         if (worldMachineZUp)
@@ -437,7 +464,29 @@ public static class ObjTerrainImporter
                 var v = vertices[i];
                 vertices[i] = new Vector3(v.X, v.Z, -v.Y);
             }
-        return new ParsedObj(vertices, triangles, worldMachineZUp);
+        return new ParsedObj(vertices, triangles, worldMachineZUp, sourceSeaLevel);
+    }
+
+    private static bool HasZUpTerrain(IReadOnlyList<Vector3> vertices, IReadOnlyList<ObjSourceTriangle> triangles)
+    {
+        double y = 0, z = 0, absoluteY = 0, absoluteZ = 0;
+        foreach (var triangle in triangles)
+        {
+            var a = vertices[triangle.A];
+            var b = vertices[triangle.B];
+            var c = vertices[triangle.C];
+            double bx = (double)b.X - a.X, by = (double)b.Y - a.Y, bz = (double)b.Z - a.Z;
+            double cx = (double)c.X - a.X, cy = (double)c.Y - a.Y, cz = (double)c.Z - a.Z;
+            var ny = bz * cx - bx * cz;
+            var nz = bx * cy - by * cx;
+            y += ny; z += nz;
+            absoluteY += Math.Abs(ny); absoluteZ += Math.Abs(nz);
+        }
+        // Inconsistently wound faces can cancel even on flat ground.
+        if (Math.Abs(y) + Math.Abs(z) < (absoluteY + absoluteZ) * 1e-6)
+            return absoluteZ > absoluteY * 1.05;
+        // An ambiguous or empty mesh retains the editor's Y-up convention.
+        return Math.Abs(z) > Math.Abs(y) * 1.05;
     }
 
     private static List<ObjSourceTriangle> SelectUsableTerrainTriangles(IReadOnlyList<ObjSourceTriangle> triangles)
@@ -588,7 +637,7 @@ public static class ObjTerrainImporter
 
     private sealed record PageState(ClusterBucket[] Buckets);
     private sealed record HeightFieldMesh(Vector3[] Positions, List<(int A, int B, int C)> Triangles, int IgnoredVerticalTriangles);
-    private sealed record ParsedObj(List<Vector3> Vertices, List<ObjSourceTriangle> Triangles, bool WorldMachineZUp);
+    private sealed record ParsedObj(List<Vector3> Vertices, List<ObjSourceTriangle> Triangles, bool WorldMachineZUp, float? SourceSeaLevel);
     private sealed record ObjSourceTriangle(int A, int B, int C, string ObjectName);
     private sealed class ClusterBucket
     {

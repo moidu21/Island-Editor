@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Performance;
 

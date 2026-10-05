@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -698,6 +698,15 @@ public static partial class UiLocalizationManager
         Add("Vue terrain 3D", "3D terrain view", "3D-Terrainansicht");
         Add("Aucun gamedata.xml chargé.", "No gamedata.xml loaded.", "Keine gamedata.xml geladen.");
         Add("Erreur lecture GameData objects.", "Error reading GameData objects.", "Fehler beim Lesen der GameData-Objekte.");
+        Add("Définir une côte constructible", "Define a buildable coast", "Bebaubare Küste festlegen");
+        Add("Ajouter la côte constructible", "Add buildable coast", "Bebaubare Küste hinzufügen");
+        Add("Longueur de côte (cases)", "Coast length (tiles)", "Küstenlänge (Felder)");
+        Add("Validez les retouches de terrain avant de définir une côte constructible.", "Validate terrain edits before defining a buildable coast.", "Geländeänderungen vor dem Festlegen einer bebaubaren Küste bestätigen.");
+        Add("Côte constructible : sélectionnez le rivage existant. Le relief et les matériaux ne sont pas modifiés.", "Buildable coast: select the existing shoreline. Terrain and materials are unchanged.", "Bebaubare Küste: Vorhandene Uferlinie auswählen. Gelände und Materialien bleiben unverändert.");
+        Add("Cliquez près du rivage. Étirez les carrés pour choisir la longueur, ou déplacez le losange cyan. Seules les données autorisant les bâtiments côtiers sont ajoutées. Le terrain doit déjà convenir à leur placement.", "Click near the shore. Drag the squares to adjust the length or move the cyan diamond. Only coastal building data is added. The terrain must already be suitable for placement.", "Nahe der Küste klicken. Quadrate zum Ändern der Länge oder die türkise Raute zum Verschieben ziehen. Nur Küstenbaudaten werden ergänzt. Das Gelände muss bereits zum Bauen geeignet sein.");
+        Add("Sélectionner une archive d'île", "Select an island archive", "Inselarchiv auswählen");
+        Add("Cette archive ne contient aucune paire A7M / A7MINFO.", "This archive contains no A7M / A7MINFO pair.", "Dieses Archiv enthält kein A7M-/A7MINFO-Paar.");
+        Add("Créer une plage depuis le maillage", "Create a beach from the mesh", "Strand aus dem Gelände erstellen");
         Add("Sélectionner une archive d'île interprétée", "Select an interpreted island archive", "Interpretiertes Inselarchiv auswählen");
         Add("Exporter l'archive modifiée", "Export modified archive", "Geändertes Archiv exportieren");
         Add("Archives ZIP (*.zip)|*.zip|Tous les fichiers (*.*)|*.*", "ZIP archives (*.zip)|*.zip|All files (*.*)|*.*", "ZIP-Archive (*.zip)|*.zip|Alle Dateien (*.*)|*.*");

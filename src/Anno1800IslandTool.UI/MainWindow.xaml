@@ -1,8 +1,8 @@
-<Window x:Class="Anno1800IslandTool.UI.MainWindow"
+﻿<Window x:Class="Anno1800IslandTool.UI.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering"
-        Title="Anno1800IslandTool v46.104 — matériaux carrelés et menus organisés"
+        Title="Anno1800IslandTool v46.120 — matériaux carrelés et menus organisés"
         Height="980"
         Width="1760"
         WindowStartupLocation="CenterScreen">
@@ -20,12 +20,12 @@
             <Button Width="180" Height="34" Click="OpenArchiveButton_Click">Ouvrir une archive ZIP</Button>
             <Button Width="120" Height="34" Margin="8,0,0,0" Click="ValidateButton_Click">Revalider</Button>
             <Button Width="120" Height="34" Margin="8,0,0,0" Click="ExportArchiveButton_Click">Exporter ZIP</Button>
-            <Button Width="120" Height="34" Margin="8,0,0,0" Click="SaveLogButton_Click">Sauver rapport</Button>
+            <Button Width="120" Height="34" Margin="8,0,0,0" x:Name="SaveReportButton" Visibility="Collapsed" Click="SaveLogButton_Click">Sauver rapport</Button>
             <Button Width="150" Height="34" Margin="8,0,0,0" Click="RegenerateTextsButton_Click">Régénérer textes</Button>
             <Button Width="160" Height="34" Margin="8,0,0,0" Click="OpenMap2DWindowButton_Click">Fenêtre vue 2D</Button>
             <Button Width="170" Height="34" Margin="8,0,0,0" Click="OpenTerrain3DWindowButton_Click">Éditeur terrain GPU 3D</Button>
             <Button Width="175" Height="34" Margin="8,0,0,0" Click="OpenMaterialMapWindowButton_Click">Éditeur matériaux</Button>
-            <Button Width="195" Height="34" Margin="8,0,0,0" Click="OpenGlobalTintBaseWindowButton_Click">Teinte végétation</Button>
+            <Button Width="195" Height="34" Margin="8,0,0,0" x:Name="VegetationTintButton" Visibility="Collapsed" Click="OpenGlobalTintBaseWindowButton_Click">Teinte végétation</Button>
             <CheckBox x:Name="ReadPayloadsCheckBox"
                       Margin="16,8,0,0"
                       Content="Lire le détail des pages (plus lent)"
@@ -39,12 +39,12 @@
                       ToolTip="v46.5 : décode directement les valeurs, limite les lots et évite les copies texte/binaires inutiles des pages. Décoche pour un compromis vitesse/RAM."
                       VerticalAlignment="Center"/>
             <TextBlock Margin="16,8,0,0"
-                       Text="v46.104 : bords libres et redimensionnement des cartes avec conservation du relief."
+                       Text="v46.120 : bords libres et redimensionnement des cartes avec conservation du relief."
                        FontWeight="SemiBold"/>
             <TextBlock Margin="16,8,0,0"
-                       Text="Langue"
+                       x:Name="LanguageSelectorLabel" Visibility="Collapsed" Text="Langue"
                        VerticalAlignment="Center"/>
-            <ComboBox x:Name="LanguageSelectorComboBox"
+            <ComboBox x:Name="LanguageSelectorComboBox" Visibility="Collapsed"
                       Width="125"
                       Height="26"
                       Margin="6,4,0,0"
@@ -86,8 +86,8 @@
                 <ColumnDefinition Width="3.3*"/>
             </Grid.ColumnDefinitions>
 
-            <TabControl Margin="0,0,12,0">
-                <TabItem Header="Fichiers">
+            <TabControl x:Name="ProjectTabs" Margin="0,0,12,0">
+                <TabItem x:Name="FilesTab" Visibility="Collapsed" Header="Fichiers">
                     <DataGrid x:Name="FilesDataGrid"
                               AutoGenerateColumns="False"
                               IsReadOnly="True"
@@ -101,7 +101,7 @@
                     </DataGrid>
                 </TabItem>
 
-                <TabItem Header="Pages terrain">
+                <TabItem x:Name="TerrainPagesTab" Visibility="Collapsed" Header="Pages terrain">
                     <DataGrid x:Name="PagesDataGrid"
                               AutoGenerateColumns="False"
                               IsReadOnly="True"
@@ -118,7 +118,7 @@
                     </DataGrid>
                 </TabItem>
 
-                <TabItem Header="Matériaux">
+                <TabItem x:Name="MaterialsTab" Visibility="Collapsed" Header="Matériaux">
                     <Grid Margin="6">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
@@ -431,7 +431,7 @@
                     </ScrollViewer>
                 </TabItem>
 
-                <TabItem Header="Vue 2D (édition)">
+                <TabItem x:Name="Map2DEditTab" Header="Vue 2D (édition)">
                     <Grid Margin="8">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
@@ -492,7 +492,7 @@
                     </Grid>
                 </TabItem>
 
-                <TabItem Header="Validation">
+                <TabItem x:Name="ValidationTab" Visibility="Collapsed" Header="Validation">
                     <DataGrid x:Name="ValidationDataGrid" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Sévérité" Binding="{Binding Severity}" Width="110"/>
@@ -519,15 +519,15 @@
                 </TabItem>
 
 
-                <TabItem Header="Gameplay/rendu avancé">
+                <TabItem x:Name="AdvancedGameplayTab" Visibility="Collapsed" Header="Gameplay/rendu avancé">
                     <TextBox x:Name="AdvancedGameplayRenderTextBox" Margin="8" FontFamily="Consolas" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" IsReadOnly="True"/>
                 </TabItem>
 
-                <TabItem Header="Sélection">
+                <TabItem x:Name="SelectionTab" Visibility="Collapsed" Header="Sélection">
                     <TextBox x:Name="SelectionDetailsTextBox" Margin="8" FontFamily="Consolas" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" IsReadOnly="True"/>
                 </TabItem>
 
-                <TabItem Header="Rapport texte">
+                <TabItem x:Name="TextReportTab" Visibility="Collapsed" Header="Rapport texte">
                     <TextBox x:Name="ValidationTextBox" Margin="8" FontFamily="Consolas" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" IsReadOnly="True"/>
                 </TabItem>
             </TabControl>

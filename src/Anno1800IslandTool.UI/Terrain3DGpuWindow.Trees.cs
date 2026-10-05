@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using System.Windows;
 using Anno1800IslandTool.Core.Terrain;
 using HelixToolkit;
@@ -27,7 +27,8 @@ public partial class Terrain3DGpuWindow
 
         _lastTreeStampCenter = center;
         _hasLastTreeStampCenter = true;
-        var density = Math.Clamp(TreeDensitySlider.Value / 100d, .05d, 1d);
+        // The new maximum corresponds to the previous 5% density.
+        var density = Math.Clamp(TreeDensitySlider.Value, 1d, 100d) / 2000d;
         var areaFactor = GetBrushPattern() switch
         {
             GpuBrushPattern.Square => 4d,

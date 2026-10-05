@@ -1,4 +1,5 @@
-using System.IO;
+﻿using System.IO;
+using System.IO.Compression;
 using System.Windows;
 using System.Windows.Controls;
 using Anno1800IslandTool.Core.Models;
@@ -10,18 +11,30 @@ namespace Anno1800IslandTool.UI;
 public partial class NativeIslandWindow : Window
 {
     private readonly IslandProject? _project;
+    private readonly bool _debugMode;
+    private readonly string? _zipArchive;
     private readonly string _cache=Path.Combine(RdaGameResources.WorkspaceFolder,"native-islands");
     private GameIslandChoice[] _choices=[];
     private CancellationTokenSource? _operation;
     public string? InterpretedArchive {get;private set;}
-    public NativeIslandWindow(IslandProject? project=null)
+    public NativeIslandWindow(IslandProject? project=null, bool debugMode=false)
     {
-        InitializeComponent();_project=project;
+        InitializeComponent();_project=project;_debugMode=debugMode;
         Directory.CreateDirectory(_cache);
         GameFolder.Text=RdaGameResources.SavedGameFolder() ?? "";
         if(project is not null){BrowserHeader.Visibility=Visibility.Collapsed;Islands.Visibility=Visibility.Collapsed;ActionButton.Content="Exporter l’île compilée";Log.Text="Le projet chargé sera exporté puis réencodé en A7M, TMC et CTT dans un nouveau ZIP.";}
         Closing+=(_,e)=>{if(_operation is not null){e.Cancel=true;_operation.Cancel();}};
         Loaded+=(_,_)=>UiLocalizationManager.ApplyTo(this);
+    }
+    public NativeIslandWindow(string zipArchive) : this()
+    {
+        _zipArchive = zipArchive;
+        _choices = IslandZipArchive.CompiledChoices(zipArchive);
+        if (_choices.Length == 0) throw new InvalidDataException(UiLocalizationManager.T("Cette archive ne contient aucune paire A7M / A7MINFO."));
+        BrowserHeader.Visibility = Visibility.Collapsed;
+        Islands.ItemsSource = _choices;
+        Islands.SelectedIndex = 0;
+        if (_choices.Length == 1) Loaded += async (_, _) => await ConvertSelectionAsync(null);
     }
     private void ChooseGame_Click(object sender,RoutedEventArgs e)
     {var dialog=new OpenFolderDialog{Title=UiLocalizationManager.T("Dossier du jeu ou maindata")};if(dialog.ShowDialog(this)==true)GameFolder.Text=dialog.FolderName;}
@@ -53,6 +66,9 @@ public partial class NativeIslandWindow : Window
         var folder=GameFolder.Text;
         await RunAsync(async(_,process,progress,token)=>{
             _choices=await new GameIslandCatalog(process).ScanAsync(folder,Path.Combine(_cache,"catalog"),progress,token);
+            // Filter the displayed game catalog only; keep archive caches complete for debug mode.
+            if (!_debugMode)
+                _choices = _choices.Where(choice => !choice.InternalPath.Contains("benchmark", StringComparison.OrdinalIgnoreCase)).ToArray();
             RdaGameResources.SaveGameFolder(folder);Search_Changed(this,null!);
             progress.Report(string.Format(UiLocalizationManager.T("{0} variantes d’îles trouvées."),_choices.Length));
         });
@@ -90,7 +106,15 @@ public partial class NativeIslandWindow : Window
                 var converter=new NativeIslandConverter(tools,process);string zip;
                 if(_project is null)
                 {
-                    var info=localInfo??await new GameIslandCatalog(process).ExtractAsync(folder,choice!,Path.Combine(work,"raw"),progress,token);
+                    string info;
+                    if (_zipArchive is not null)
+                    {
+                        var raw = Path.Combine(work, "raw");
+                        Directory.CreateDirectory(raw);
+                        await Task.Run(() => IslandZipArchive.Extract(_zipArchive, raw, token), token);
+                        info = GameIslandCatalog.SafePath(raw, choice!.InternalPath);
+                    }
+                    else info=localInfo??await new GameIslandCatalog(process).ExtractAsync(folder,choice!,Path.Combine(work,"raw"),progress,token);
                     if(!File.Exists(info)||!File.Exists(Path.ChangeExtension(info,"a7m")))throw new InvalidDataException("A7M ou A7MINFO absent du dossier sélectionné.");
                     var sourceMap=localInfo is null?Path.ChangeExtension(choice!.InternalPath,"a7m"):Path.GetFileName(Path.ChangeExtension(info,"a7m"));
                     zip=await Task.Run(()=>converter.DecodeAsync(info,sourceMap,work,progress,token),token);

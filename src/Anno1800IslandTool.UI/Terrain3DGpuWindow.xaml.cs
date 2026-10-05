@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
 using System.Runtime.InteropServices;
@@ -311,6 +311,7 @@ public partial class Terrain3DGpuWindow : Window
             {
                 _initializing = wasInitializing;
             }
+            if (GamePreviewCheck.IsChecked == true) _ = BuildGamePreviewAsync();
         });
     }
 
@@ -1286,7 +1287,7 @@ public partial class Terrain3DGpuWindow : Window
         {
             var title=expander.Header?.ToString()??"";
             if(GpuToolTabs.SelectedIndex==1)expander.IsExpanded=mode==GpuBrushMode.Scenery?ReferenceEquals(expander,SceneryExpander):mode is GpuBrushMode.Clay or GpuBrushMode.Oil ? ReferenceEquals(expander,DepositsExpander) : mode==GpuBrushMode.Mine?title.StartsWith("Mines"):
-                mode==GpuBrushMode.Trees?title.Contains("arbres"):mode==GpuBrushMode.River?title.Contains("rivière"):title.Contains("plage");
+                mode==GpuBrushMode.Trees?title.Contains("arbres"):mode==GpuBrushMode.River?title.Contains("rivière"):ReferenceEquals(expander,BeachExpander);
             if(GpuToolTabs.SelectedIndex==2&&title.Contains("emprise"))expander.IsExpanded=true;
         }
     }
@@ -1337,7 +1338,7 @@ public partial class Terrain3DGpuWindow : Window
                 : "Ajouter une zone : peignez l’emprise autorisée, puis cliquez sur Appliquer l’emprise. Le nouveau terrain démarre sous l’eau.",
             GpuBrushMode.RemoveFootprint => "Retirer une zone : peignez les parties à supprimer. Le mesh, les dérivés et le masque gameplay seront retirés à l’application.",
             GpuBrushMode.Trees => "Arbres : cliquez ou peignez sur la terre. Le rayon, le motif et la densité déterminent la forêt créée.",
-            GpuBrushMode.MeshBeach => "Plage sur maillage : choisissez directement une ligne où le relief traverse le niveau de la mer, sans utiliser le contour vert de l'empreinte.",
+            GpuBrushMode.MeshBeach => "Côte constructible : sélectionnez le rivage existant. Le relief et les matériaux ne sont pas modifiés.",
             GpuBrushMode.Clay => "Argile : cliquez sur un terrain émergé pour ajouter un puits.",
             GpuBrushMode.Oil => "Pétrole : cliquez pour ajouter un puits ; répétez pour former un gisement.",
             GpuBrushMode.Scenery => "Décors : choisissez un modèle puis cliquez sur le terrain pour le poser.",
@@ -1437,12 +1438,14 @@ public partial class Terrain3DGpuWindow : Window
             if (ReferenceEquals(sender, BeachLengthTextBox) && _selectedCoast is not null && TryReadBeachLength(out var length))
             {
                 var center = _coastStart + _coastLength * .5;
-                _coastLength = Math.Clamp(length, 16, _selectedCoast.Length - 1);
+                _coastLength = Math.Clamp(length, 16, Math.Max(16, _selectedCoast.Length - (_selectedCoast.IsClosed ? 1 : 0)));
                 _coastStart = center - _coastLength * .5;
             }
             UpdateBeachPreview();
         }
     }
+
+    private void BeachLength_LostFocus(object sender, RoutedEventArgs e) => BeachSettingsTextBox_TextChanged(sender, null!);
 
     private static LineGeometry3D BuildBeachHandleGeometry(Vector3 center, float size, bool diamond)
     {
@@ -1500,8 +1503,8 @@ public partial class Terrain3DGpuWindow : Window
     private bool TryReadBeachLength(out double length)
     {
         var valid = TryParseFlexibleNumber(BeachLengthTextBox?.Text, out var parsedLength);
-        length = Math.Clamp(parsedLength, 16d, 16384d);
-        return valid && parsedLength >= 16d;
+        length = Math.Clamp(parsedLength * 32, 16d, 16384d);
+        return valid && parsedLength >= .5d;
     }
 
     private bool TryReadBeachSettings(out float beachHeight, out float waterDepth, out double landWidth, out double innerWidth, out double waterWidth)
@@ -1884,7 +1887,7 @@ public partial class Terrain3DGpuWindow : Window
                 RebaseTransactionAfterDirectCommit();
                 InitializeFootprintMask();
             }
-            var summary = _validateEntireTerrain(GetSelectedLod(), GetChangedWorldRegions());
+            _validateEntireTerrain(GetSelectedLod(), GetChangedWorldRegions());
             _hasDirectProjectCommit = true;
             RebaseTransactionAfterDirectCommit();
             CommitPendingMines();
@@ -1893,7 +1896,7 @@ public partial class Terrain3DGpuWindow : Window
             RebaseTransactionAfterDirectCommit();
             InitializeFootprintMask();
             if (!closeAfterValidation) await ReloadGpuGeometryAsync();
-            StatusTextBlock.Text = "Terrain validé — prêt pour l’export ZIP depuis la fenêtre principale.\n" + summary;
+            StatusTextBlock.Text = UiLocalizationManager.T("Terrain validé — prêt pour l’export ZIP depuis la fenêtre principale.");
             validated = true;
         }
         catch (Exception ex)
@@ -1937,16 +1940,15 @@ public partial class Terrain3DGpuWindow : Window
         3 => GpuBrushMode.Smooth,
         4 => GpuBrushMode.Flatten,
         5 => GpuBrushMode.PickHeight,
-        6 => GpuBrushMode.Beach,
-        7 => GpuBrushMode.AddFootprint,
-        8 => GpuBrushMode.RemoveFootprint,
-        9 => GpuBrushMode.Trees,
-        10 => GpuBrushMode.MeshBeach,
-        11 => GpuBrushMode.River,
-        12 => GpuBrushMode.Mine,
-        13 => GpuBrushMode.Clay,
-        14 => GpuBrushMode.Oil,
-        15 => GpuBrushMode.Scenery,
+        6 => GpuBrushMode.AddFootprint,
+        7 => GpuBrushMode.RemoveFootprint,
+        8 => GpuBrushMode.Trees,
+        9 => GpuBrushMode.MeshBeach,
+        10 => GpuBrushMode.River,
+        11 => GpuBrushMode.Mine,
+        12 => GpuBrushMode.Clay,
+        13 => GpuBrushMode.Oil,
+        14 => GpuBrushMode.Scenery,
         _ => GpuBrushMode.Navigation
     };
 
@@ -2391,4 +2393,5 @@ public sealed record GpuObjTerrainImportDefinition(
     int Lod,
     bool FitToActiveFootprint,
     int GridStepRaw,
-    int SmoothingPasses);
+    int SmoothingPasses,
+    float? SourceSeaLevel = null);

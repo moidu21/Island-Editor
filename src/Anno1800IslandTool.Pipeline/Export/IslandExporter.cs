@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Text;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;

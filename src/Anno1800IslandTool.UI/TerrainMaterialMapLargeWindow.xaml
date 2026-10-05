@@ -1,4 +1,4 @@
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering" xmlns:hx="http://helix-toolkit.org/wpf/SharpDX" x:Class="Anno1800IslandTool.UI.TerrainMaterialMapLargeWindow" Title="Anno1800IslandTool v46.104 - matériaux carrelés et menus organisés" Height="1000" Width="1780" WindowStartupLocation="CenterOwner">
+﻿<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering" xmlns:hx="http://helix-toolkit.org/wpf/SharpDX" x:Class="Anno1800IslandTool.UI.TerrainMaterialMapLargeWindow" Title="Anno1800IslandTool v46.120 - matériaux carrelés et menus organisés" Height="1000" Width="1780" WindowStartupLocation="CenterOwner">
   <Grid Margin="10">
     <Grid.ColumnDefinitions>
       <ColumnDefinition Width="390"/>
@@ -87,19 +87,7 @@
                       <TextBlock DockPanel.Dock="Left" Width="105" Text="Surface plate"/>
                       <ComboBox x:Name="TopologyFlatMaterialComboBox" Height="26" DisplayMemberPath="ComboLabel"/>
                     </DockPanel>
-                    <StackPanel Margin="0,8,0,8">
-                      <CheckBox x:Name="FlatTilingCheckBox" Content="Motif carrelé sur les terrains plats"/>
-                      <TextBlock Text="Deux matériaux du biome, sans modification du relief." TextWrapping="Wrap" Margin="0,4,0,4"/>
-                      <ComboBox x:Name="FlatTilingMaterialComboBox" DisplayMemberPath="ComboLabel" Height="26"/>
-                      <DockPanel Margin="0,4,0,0">
-                        <TextBlock Text="Taille des carreaux (cases)" Width="190" DockPanel.Dock="Left"/>
-                        <TextBox x:Name="FlatTileSizeTextBox" Text="4" Height="24"/>
-                      </DockPanel>
-                      <DockPanel Margin="0,4,0,0">
-                        <TextBlock Text="Contraste (0–31)" Width="190" DockPanel.Dock="Left"/>
-                        <TextBox x:Name="FlatTileContrastTextBox" Text="12" Height="24"/>
-                      </DockPanel>
-                    </StackPanel>
+                    
                     <DockPanel Margin="0,0,0,4">
                       <TextBlock DockPanel.Dock="Left" Width="105" Text="Pente douce"/>
                       <ComboBox x:Name="TopologyGentleMaterialComboBox" Height="26" DisplayMemberPath="ComboLabel"/>
@@ -137,11 +125,8 @@
           <CheckBox x:Name="NativeCellsCheckBox" Content="Cellules multicouches du biome" IsChecked="True" ToolTip="Mélanges calibrés sur les îles d’origine : transitions progressives et variations naturelles. Les choix manuels restent prioritaires."/>
           <CheckBox x:Name="EmergedOnlyCheckBox" Content="Limiter aux terres émergées" IsChecked="True"/>
           <CheckBox x:Name="TopologyPreserveWaterBeachCheckBox" Content="Exclure les cellules uniquement eau / plage" ToolTip="Décocher pour repeindre aussi les anciennes plages et les fonds marins aplatis. Une sous-couche de sable sous de l’herbe ne bloque pas la peinture." IsChecked="False" Margin="0,4,0,0"/>
-                    <CheckBox x:Name="TopologyBlendCheckBox" Content="Mélanger au lieu de remplacer" Margin="0,4,0,0"/>
-                    <DockPanel Margin="0,6,0,0">
-                      <TextBlock DockPanel.Dock="Left" Width="55" Text="Force"/>
-                      <Slider x:Name="TopologyStrengthSlider" Minimum="1" Maximum="31" Value="31" TickFrequency="1" IsSnapToTickEnabled="True"/>
-                    </DockPanel>
+                    
+                    <Button x:Name="ResetTopologyProfileButton" Height="30" Margin="0,8,0,0" Click="ResetTopologyProfileButton_Click" Content="Réglages conseillés du biome"/>
                     <Button x:Name="ShowTopologyViewButton" Height="30" Margin="0,8,0,0" Click="ShowTopologyViewButton_Click">Afficher la vue topologique</Button>
                     <Button x:Name="ApplyTopologyButton" Height="30" Margin="0,6,0,0" Click="ApplyTopologyButton_Click">Mettre à jour image depuis topologie</Button>
                     <TextBlock x:Name="TopologyStatusTextBlock" Text="Vue topologique prête." TextWrapping="Wrap" Margin="0,8,0,0"/>

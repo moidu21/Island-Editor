@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text;
 using Anno1800IslandTool.Pipeline.Services;
 

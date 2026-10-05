@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using Anno1800IslandTool.Core.Models;
 
 namespace Anno1800IslandTool.UI;

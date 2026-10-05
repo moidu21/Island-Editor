@@ -1,4 +1,4 @@
-using Anno1800IslandTool.Core.Common;
+﻿using Anno1800IslandTool.Core.Common;
 using Anno1800IslandTool.Core.Enums;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;
@@ -12,7 +12,6 @@ namespace Anno1800IslandTool.Pipeline.Editing;
 
 public sealed class IslandProjectEditor
 {
-    private const string MaterialSetGameDirectory = "data/config/engine/material_sets";
 
     private readonly DimensionInferenceService _dimensions = new();
     private readonly ProjectTextRegenerator _regenerator = new();
@@ -534,7 +533,7 @@ public sealed class IslandProjectEditor
             ? _materialSetReader.Read(fileName, text)
             : null;
 
-    private static void RemapMaterialMapForMaterialSetTransition(
+    public static void RemapMaterialMapForMaterialSetTransition(
         TerrainMaterialMap map,
         MaterialSetDefinition? previous,
         MaterialSetDefinition selected,
@@ -549,7 +548,7 @@ public sealed class IslandProjectEditor
         }
 
         var targetMaterials = selected.Materials
-            .Where(material => material.Id is >= 0 and < 32)
+            .Where(material => material.Type == "0" && material.Id is >= 0 and < 32)
             .GroupBy(material => material.Id)
             .Select(group => group.First())
             .ToArray();
@@ -583,7 +582,8 @@ public sealed class IslandProjectEditor
                     .ToArray();
                 if (candidates.Length == 0) candidates = targetMaterials;
                 return candidates
-                    .OrderByDescending(candidate => MaterialCategory(candidate.FileName) == sourceCategory ? 1000 : 0)
+                    .OrderByDescending(candidate => string.Equals(sourceMaterial.FileName?.Replace('\\', '/'), candidate.FileName?.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase))
+                    .ThenByDescending(candidate => MaterialCategory(candidate.FileName) == sourceCategory ? 1000 : 0)
                     .ThenByDescending(candidate => MaterialTokenScore(sourceMaterial.FileName, candidate.FileName))
                     .ThenBy(candidate => Math.Abs(candidate.Id - sourceId))
                     .ThenBy(candidate => candidate.Id)
@@ -674,7 +674,8 @@ public sealed class IslandProjectEditor
                     .ToArray();
                 if (candidates.Length == 0) candidates = targetMaterials;
                 result[sourceId] = candidates
-                    .OrderByDescending(candidate => MaterialCategory(candidate.FileName) == sourceCategory ? 1000 : 0)
+                    .OrderByDescending(candidate => string.Equals(sourceMaterial.FileName?.Replace('\\', '/'), candidate.FileName?.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase))
+                    .ThenByDescending(candidate => MaterialCategory(candidate.FileName) == sourceCategory ? 1000 : 0)
                     .ThenByDescending(candidate => MaterialTokenScore(sourceMaterial.FileName, candidate.FileName))
                     .ThenBy(candidate => Math.Abs(candidate.Id - sourceId))
                     .ThenBy(candidate => candidate.Id)
@@ -733,7 +734,9 @@ public sealed class IslandProjectEditor
 
     private static string MaterialCategory(string? path)
     {
-        var value = (path ?? string.Empty).ToLowerInvariant();
+        var value = Path.GetFileName((path ?? string.Empty).Replace('\\', '/')).ToLowerInvariant();
+        if (value.Contains("gras")) return "grass";
+        if (value.Contains("snow")) return "snow";
         foreach (var category in new[] { "beach", "mountain", "mud", "grass", "forest", "underwater", "sand", "stone", "rock", "gravel", "field" })
             if (value.Contains(category, StringComparison.Ordinal)) return category;
         return "other";
@@ -844,7 +847,7 @@ public sealed class IslandProjectEditor
             normalizedFileName = DefaultMaterialSetResolver.VanillaFallbackMaterialSet;
         }
 
-        return $"{MaterialSetGameDirectory}/{normalizedFileName}";
+        return EmbeddedMaterialSetLibrary.GetGamePath(normalizedFileName);
     }
 
     public void ReplaceGroundObjects(IslandProject project, IReadOnlyList<GroundObjectPlacement> placements)

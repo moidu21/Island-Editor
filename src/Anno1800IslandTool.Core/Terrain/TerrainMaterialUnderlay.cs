@@ -1,4 +1,4 @@
-namespace Anno1800IslandTool.Core.Terrain;
+﻿namespace Anno1800IslandTool.Core.Terrain;
 
 /// <summary>Add a lower opaque layer without evicting any neighbour's paint.</summary>
 public static class TerrainMaterialUnderlay

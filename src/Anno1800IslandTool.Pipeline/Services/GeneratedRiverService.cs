@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Numerics;
 using System.Xml.Linq;
 using Anno1800IslandTool.Core.Models;
@@ -256,6 +256,13 @@ public static class GeneratedRiverService
             grid.SetElementValue("y", mapSize);
             grid.SetElementValue("bits", string.Join(" ", new byte[((mapSize + 7) / 8) * mapSize]));
         }
+        var irrigation = document.Descendants("GameSessionManager").Elements("IrrigationManager").FirstOrDefault();
+        if (!irrigatedBiome) irrigation?.Remove();
+        else
+        {
+            irrigation?.Element("m_StaticTileGrid")?.Remove();
+            UpdateIrrigationGrid(document, mapSize, Array.Empty<GeneratedRiverPoint>(), 0f);
+        }
         foreach (var river in rivers)
         {
             var nodes = river.Descendants("BezierCurve").Elements("None").ToArray();
@@ -368,11 +375,7 @@ public static class GeneratedRiverService
 
     public static bool UsesIrrigation(IslandProject project)
     {
-        var evidence = string.Join("|", project.EffectiveMaterialSetName,
-            project.Rd3d.MaterialSetFileName, project.MaterialSetFilePath);
-        return evidence.Contains("colony02", StringComparison.OrdinalIgnoreCase) ||
-               evidence.Contains("colony_02", StringComparison.OrdinalIgnoreCase) ||
-               evidence.Contains("dlc06", StringComparison.OrdinalIgnoreCase);
+        return MaterialSetEnvironmentSynchronizer.ResolveCurrentBiome(project) == "Colony02";
     }
 
     private static XDocument Parse(string? text, string name)
@@ -462,8 +465,12 @@ public static class GeneratedRiverService
     {
         const int blockSize = 32;
         const byte irrigatedValue = 0x06;
-        var session = document.Descendants("GameSessionManager").FirstOrDefault()
-                      ?? throw new InvalidOperationException("GameSessionManager est introuvable dans GameData.");
+        var session = document.Descendants("GameSessionManager").FirstOrDefault();
+        if (session is null)
+        {
+            session = new XElement("GameSessionManager");
+            (document.Root ?? throw new InvalidOperationException("GameData est vide.")).Add(session);
+        }
         var manager = session.Element("IrrigationManager");
         var tileGrid = manager?.Element("m_StaticTileGrid");
         var cells = new byte[mapSize * mapSize];
@@ -474,19 +481,18 @@ public static class GeneratedRiverService
         {
             foreach (var block in tileGrid.Elements("block"))
             {
-                if (!int.TryParse(block.Element("x")?.Value, out var blockX) ||
-                    !int.TryParse(block.Element("y")?.Value, out var blockY)) continue;
-                var hex = new string((block.Element("values")?.Value ?? string.Empty)
-                    .Where(Uri.IsHexDigit).ToArray());
-                if (hex.Length < blockSize * blockSize * 2) continue;
+                if (block.Element("mode") is not null) continue;
+                int.TryParse(block.Element("x")?.Value, out var blockX);
+                int.TryParse(block.Element("y")?.Value, out var blockY);
+                var previousValues = IrrigationGridValues.Parse(block.Element("values")?.Value ?? string.Empty);
+                if (previousValues.Length < blockSize * blockSize) continue;
                 for (var localY = 0; localY < blockSize; localY++)
                 for (var localX = 0; localX < blockSize; localX++)
                 {
                     var x = blockX + localX;
                     var y = blockY + localY;
                     if ((uint)x >= mapSize || (uint)y >= mapSize) continue;
-                    cells[(y * mapSize) + x] = byte.Parse(hex.AsSpan(((localY * blockSize) + localX) * 2, 2),
-                        NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+                    cells[(y * mapSize) + x] = previousValues[(localY * blockSize) + localX];
                 }
             }
         }
@@ -520,11 +526,12 @@ public static class GeneratedRiverService
             }
             if (!hasValue) continue;
             tileGrid.Add(new XElement("block", new XElement("x", blockX), new XElement("y", blockY),
-                new XElement("values", Convert.ToHexString(values).ToLowerInvariant())));
+                new XElement("values", IrrigationGridValues.Format(values))));
         }
         tileGrid.Add(new XElement("block", new XElement("mode", "False")));
-        manager.RemoveNodes();
-        manager.Add(tileGrid, new XElement("IsInitialized", "True"));
+        manager.Element("m_StaticTileGrid")?.Remove();
+        manager.Add(tileGrid);
+        manager.SetElementValue("IsInitialized", "True");
     }
 
     private static bool ApplyWaterFlow(XDocument document, IReadOnlyList<GeneratedRiverPoint> points, float width, float strength, float mapSize)

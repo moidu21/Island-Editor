@@ -1,4 +1,4 @@
-using Anno1800IslandTool.Core.Enums;
+﻿using Anno1800IslandTool.Core.Enums;
 
 namespace Anno1800IslandTool.Formats.Archive;
 

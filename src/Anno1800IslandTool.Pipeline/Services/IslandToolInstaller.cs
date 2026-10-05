@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Net.Http;
 using System.Security.Cryptography;
 
@@ -19,7 +19,7 @@ public sealed class IslandToolInstaller
                 "8EDE89E2B24D0E99976C109EAADF0A370ED7872826557267A0B8C503BC662B38", "build/RdaConsole.exe");
             var fdb = await Install("FileDBReader-3.0.3", "https://github.com/anno-mods/FileDBReader/releases/download/v3.0.3/FileDBReader.zip",
                 "0712661A54C9F28D8F3B85CAE587B3E1304EE0DA1B5359ED2A4296BC5ED57C40", "FileDBReader/FileDBReader.exe");
-            var formats = Path.Combine(toolsFolder, "IslandFormats-46.104");
+            var formats = Path.Combine(toolsFolder, "IslandFormats-46.120");
             Directory.CreateDirectory(formats);
             foreach (var name in new[] { "a7minfo.xml", "tmc.xml", "Island_RD3D.xml", "Island_Gamedata_v3.xml" })
             {
@@ -42,7 +42,7 @@ public sealed class IslandToolInstaller
                 {
                     var zip = Path.Combine(staging, "download.zip");
                     using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
-                    client.DefaultRequestHeaders.UserAgent.ParseAdd("Anno1800IslandTool/46.104");
+                    client.DefaultRequestHeaders.UserAgent.ParseAdd("Anno1800IslandTool/46.120");
                     using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, token);
                     response.EnsureSuccessStatusCode();
                     await using (var output = File.Create(zip)) await response.Content.CopyToAsync(output, token);

@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.IO;
@@ -46,9 +46,20 @@ public partial class MainWindow : Window
     private MapEditMode _mapEditMode = MapEditMode.Select;
     private bool _updatingLanguageSelector;
 
-    public MainWindow()
+    private readonly bool _debugMode;
+
+    public MainWindow(bool debugMode = false)
     {
+        _debugMode = debugMode;
         InitializeComponent();
+        var debugVisibility = debugMode ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var element in new UIElement[] { FilesTab, TerrainPagesTab, MaterialsTab,
+                     SaveReportButton, VegetationTintButton, LanguageSelectorLabel, LanguageSelectorComboBox,
+                     ValidationTab, AdvancedGameplayTab, SelectionTab, TextReportTab, Map2DEditTab })
+            element.Visibility = debugVisibility;
+        // A collapsed tab can still remain selected in WPF: select a visible one explicitly.
+        ProjectTabs.SelectedItem = ProjectTabs.Items.OfType<TabItem>()
+            .First(tab => tab.Visibility == Visibility.Visible);
         Closing += (_, e) => e.Cancel = new QuitConfirmationWindow { Owner = this }.ShowDialog() != true;
         _updatingLanguageSelector = true;
         UiLocalizationManager.FillLanguageCombo(LanguageSelectorComboBox);
@@ -85,7 +96,7 @@ public partial class MainWindow : Window
         var dialog = new OpenFileDialog
         {
             Filter = UiLocalizationManager.T("Archives ZIP (*.zip)|*.zip|Tous les fichiers (*.*)|*.*"),
-            Title = UiLocalizationManager.T("Sélectionner une archive d'île interprétée")
+            Title = UiLocalizationManager.T("Sélectionner une archive d'île")
         };
 
         if (dialog.ShowDialog(this) != true)
@@ -109,7 +120,18 @@ public partial class MainWindow : Window
                 RetainRawPageText = TerrainMemoryMonitor.RetainRawPageTextByDefault,
                 CompactAfterImport = memorySaver
             };
-            _currentProject = await Task.Run(() => _importer.Import(dialog.FileName, importOptions));
+            var archivePath = dialog.FileName;
+            {
+                if (!IslandZipArchive.IsInterpreted(archivePath))
+                {
+                    Mouse.OverrideCursor = null;
+                    var converter = new NativeIslandWindow(archivePath) { Owner = this };
+                    if (converter.ShowDialog() != true || converter.InterpretedArchive is null) return;
+                    archivePath = converter.InterpretedArchive;
+                    Mouse.OverrideCursor = Cursors.Wait;
+                }
+            }
+            _currentProject = await Task.Run(() => _importer.Import(archivePath, importOptions));
 
             RefreshProjectDisplay();
         }
@@ -975,6 +997,9 @@ public partial class MainWindow : Window
             .Where(f => f.Kind == FileKind.PreviewImage)
             .OrderBy(f => f.RelativePath)
             .Select(f => f.RelativePath)
+            .Concat(_currentProject.GeneratedBinaryFileReplacements.Keys.Where(path => path.EndsWith("mapimage.png", StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path.EndsWith("/gamemapimage.png", StringComparison.OrdinalIgnoreCase) ? 0 : path.EndsWith("/mapimage.png", StringComparison.OrdinalIgnoreCase) ? 1 : 2)
             .ToList();
 
         var previousPreview = PreviewSelectorComboBox.SelectedItem as string;

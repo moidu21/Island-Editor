@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using Microsoft.Win32;
 
 namespace Anno1800IslandTool.UI;
@@ -20,6 +20,16 @@ public partial class Terrain3DGpuWindow
             return;
         }
 
+        float? sourceSeaLevel = null;
+        if (!string.IsNullOrWhiteSpace(ObjSeaLevelTextBox.Text))
+        {
+            if (!TryParseFlexibleNumber(ObjSeaLevelTextBox.Text, out var sea) || !float.IsFinite((float)sea))
+            {
+                ObjImportStatusTextBlock.Text = UiLocalizationManager.T("Indiquez un niveau marin source valide.");
+                return;
+            }
+            sourceSeaLevel = (float)sea;
+        }
         var dialog = new OpenFileDialog
         {
             Title = "Choisir le terrain OBJ",
@@ -39,7 +49,7 @@ public partial class Terrain3DGpuWindow
                 GetSelectedLod(),
                 ObjFitFootprintCheckBox.IsChecked == true,
                 Math.Clamp((int)Math.Round(gridStep), 16, 128),
-                Math.Clamp((int)Math.Round(smoothing), 0, 8));
+                Math.Clamp((int)Math.Round(smoothing), 0, 8), sourceSeaLevel);
             var summary = _importObjTerrain(definition);
             _hasDirectProjectCommit = true;
             RebaseTransactionAfterDirectCommit();

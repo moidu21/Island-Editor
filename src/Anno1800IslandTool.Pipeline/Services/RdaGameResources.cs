@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -8,6 +8,9 @@ namespace Anno1800IslandTool.Pipeline.Services;
 /// considered complete until the last archive succeeded, including absent references.</summary>
 public sealed class RdaGameResources(IslandToolProcess process)
 {
+    // Version 3 includes DLC engine material sets (including the native Arctic set).
+    public const string MetadataVersion = "3";
+    public const string MetadataFilter = @"(?i)^data/(?:(?:dlc[0-9]+/)?config/engine/.*\.xml|config/export/main/asset/assets\.xml|(?:dlc[0-9]+/)?graphics/.*\.(?:prp|cfg)|(?:dlc[0-9]+/)?graphics/landscape/terrain/.*\.xml)$";
     private static readonly SemaphoreSlim Gate = new(1, 1);
     public static string WorkspaceFolder => Path.Combine(AppContext.BaseDirectory, "workspace");
     public static string SettingsFile => Path.Combine(WorkspaceFolder, "game-folder.txt");
@@ -43,12 +46,13 @@ public sealed class RdaGameResources(IslandToolProcess process)
         try
         {
             Directory.CreateDirectory(target);
-            if (!File.Exists(Path.Combine(target, "metadata.complete")))
+            var marker = Path.Combine(target, "metadata.complete");
+            if (!File.Exists(marker) || File.ReadAllText(marker).Trim() != MetadataVersion)
             {
                 // Definitions only. Large DDS/RDM resources are fetched on demand below.
-                await ExtractAsync(archives, target, @"(?i)^data/(?:config/engine/.*\.xml|config/export/main/asset/assets\.xml|graphics/.*\.(?:prp|cfg)|graphics/landscape/terrain/.*\.xml)$", progress, token, "Définitions RDA");
+                await ExtractAsync(archives, target, MetadataFilter, progress, token, "Définitions RDA");
                 token.ThrowIfCancellationRequested();
-                File.WriteAllText(Path.Combine(target, "metadata.complete"), "1");
+                File.WriteAllText(marker, MetadataVersion);
             }
             var root = Path.Combine(target, "data");
             if (GameDataTextureResolver.NormalizeDataRoot(root) is null) throw new InvalidDataException("Les archives ne contiennent pas les définitions de matériaux attendues.");

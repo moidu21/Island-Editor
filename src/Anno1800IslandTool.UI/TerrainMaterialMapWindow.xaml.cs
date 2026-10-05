@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Windows;
@@ -24,6 +24,7 @@ public partial class TerrainMaterialMapWindow : Window
     private Dictionary<int, MaterialDefinition> _materialsById = new();
     private List<MaterialPaletteRow> _paletteRows = new();
     private TerrainMaterialMap _workingMap;
+    private MaterialSetDefinition? _workingMaterialSet;
     private TerrainMaterialEditState _editState = new();
     private TerrainMaterialCellPattern? _pickedCellPattern;
     private TerrainMaterialMap? _coastTransitionBaseMap;
@@ -68,6 +69,7 @@ public partial class TerrainMaterialMapWindow : Window
         BeachProtectionCheckBox.DataContext = this;
         _editor = editor ?? throw new ArgumentNullException(nameof(editor));
         _workingMap = _project.Rd3d.MaterialMap.Clone();
+        _workingMaterialSet = _project.MaterialSet;
         _observedTerrainText = _project.RawContent.GameDataText;
         _observedRd3dText = _project.RawContent.Rd3dText;
         MaterialSetSelectionCoordinator.SelectionChanged += MaterialSetSelectionCoordinator_SelectionChanged;
@@ -223,6 +225,19 @@ public partial class TerrainMaterialMapWindow : Window
 
     private void RefreshMaterialSetPaletteFromProject()
     {
+        if (!ReferenceEquals(_workingMaterialSet, _project.MaterialSet) && _project.MaterialSet is not null)
+        {
+            // Preserve local painting, but translate it from its actual old palette.
+            IslandProjectEditor.RemapMaterialMapForMaterialSetTransition(_workingMap, _workingMaterialSet, _project.MaterialSet);
+            _workingMaterialSet = _project.MaterialSet;
+            _editState.MaterialIdsTouched.Clear();
+            foreach (var packed in _workingMap.PackedMaterialIds)
+                for (int slot = 0; slot < 6; slot++) _editState.MaterialIdsTouched.Add((int)((packed >> (5 * slot)) & 31));
+            ResetMaterialHistory();
+            InvalidateCoastTransitionBase();
+            _pickedCellPattern = null;
+            _isShowingCoastPreview = false;
+        }
         _materialsById = (_project.MaterialSet?.Materials ?? new List<MaterialDefinition>())
             .GroupBy(m => m.Id)
             .ToDictionary(g => g.Key, g => g.First());
@@ -486,6 +501,7 @@ public partial class TerrainMaterialMapWindow : Window
             var fixedZeroCoverage = TerrainMaterialMapCoverageSanitizer.EnsureNoZeroCoverageTexels(_workingMap);
             _editor.ReplaceTerrainMaterialMap(_project, _workingMap.Clone(), _editState);
             var usedBitsPages = _editor.ResynchronizeMeshUsedMaterialBitsFromMaterialMap(_project);
+            IslandPreviewImages.Refresh(_project);
             ProjectApplied?.Invoke(this, EventArgs.Empty);
             ResetMaterialHistory();
             InvalidateCoastTransitionBase();
@@ -1152,7 +1168,6 @@ public partial class TerrainMaterialMapWindow : Window
         var rows = _paletteRows.Where(r => r.IsTerrain).ToList();
         var profile=TerrainTopologyProfile.Create(_project.MaterialSet);
         var defaults=profile.Options;
-        SetCoastComboItems(FlatTilingMaterialComboBox, rows, rows.FirstOrDefault(r=>r.Id==defaults.FlatTilingMaterialId));
         SetCoastComboItems(TopologyFlatMaterialComboBox, rows, rows.FirstOrDefault(r=>r.Id==defaults.FlatMaterialId));
         SetCoastComboItems(TopologyGentleMaterialComboBox, rows, rows.FirstOrDefault(r=>r.Id==defaults.GentleSlopeMaterialId));
         SetCoastComboItems(TopologySteepMaterialComboBox, rows, rows.FirstOrDefault(r=>r.Id==defaults.SteepSlopeMaterialId));
@@ -1165,12 +1180,16 @@ public partial class TerrainMaterialMapWindow : Window
     }
 
     private void ResetTopologyProfileButton_Click(object sender,RoutedEventArgs e)
+        => ResetTopologyProfile();
+
+    internal void ResetTopologyProfile()
     {
         RefreshTopologyMaterialSelectors();
-        _largeWindow?.RefreshFromParentData(refreshPalette:true);
+        _largeWindow?.RefreshTopologyProfile();
     }
     internal void ConfigureTopologyContext(TerrainTopologyMaterialOptions options)
     {
+        options.FlatTilingEnabled=false; options.UseBlend=false; options.Strength=31;
         options.WorldWidth=options.WorldHeight=_project.Root.MapSize;
         options.CellRecipes.Clear();
         foreach(var recipe in TerrainTopologyProfile.Create(_project.MaterialSet).Options.CellRecipes)
@@ -1181,22 +1200,16 @@ public partial class TerrainMaterialMapWindow : Window
     private void SetTopologyControls(TerrainTopologyMaterialOptions options)
     {
         SetCoastComboById(TopologyFlatMaterialComboBox, options.FlatMaterialId);
-        SetCoastComboById(FlatTilingMaterialComboBox, options.FlatTilingMaterialId);
         SetCoastComboById(TopologyGentleMaterialComboBox, options.GentleSlopeMaterialId);
         SetCoastComboById(TopologySteepMaterialComboBox, options.SteepSlopeMaterialId);
         SetCoastComboById(TopologyRidgeMaterialComboBox, options.RidgeMaterialId);
         SetCoastComboById(TopologyHollowMaterialComboBox, options.HollowMaterialId);
         NativeCellsCheckBox.IsChecked=options.UseNativeCells;
         EmergedOnlyCheckBox.IsChecked=options.OnlyEmergedLand;
-        FlatTilingCheckBox.IsChecked = options.FlatTilingEnabled;
-        FlatTileSizeTextBox.Text = (options.FlatTileSize / 2).ToString(CultureInfo.InvariantCulture);
-        FlatTileContrastTextBox.Text = options.FlatTileContrast.ToString(CultureInfo.InvariantCulture);
         TopologyFlatSlopeTextBox.Text = options.FlatSlopeMaximum.ToString("0.###", CultureInfo.InvariantCulture);
         TopologySteepSlopeTextBox.Text = options.SteepSlopeMinimum.ToString("0.###", CultureInfo.InvariantCulture);
         TopologyCurvatureTextBox.Text = options.CurvatureSensitivity.ToString("0.###", CultureInfo.InvariantCulture);
         TopologyRadiusTextBox.Text = options.AnalysisRadius.ToString(CultureInfo.InvariantCulture);
-        TopologyStrengthSlider.Value = Math.Clamp(options.Strength, (int)TopologyStrengthSlider.Minimum, (int)TopologyStrengthSlider.Maximum);
-        TopologyBlendCheckBox.IsChecked = options.UseBlend;
         TopologyPreserveWaterBeachCheckBox.IsChecked = options.PreserveExistingWaterAndBeach;
     }
 
@@ -1210,13 +1223,10 @@ public partial class TerrainMaterialMapWindow : Window
     {
         var options = new TerrainTopologyMaterialOptions
         {
+            FlatTilingEnabled=false, UseBlend=false, Strength=31,
             UseNativeCells=NativeCellsCheckBox.IsChecked==true,
             OnlyEmergedLand=EmergedOnlyCheckBox.IsChecked==true,
             FlatMaterialId = SelectedCoastMaterialId(TopologyFlatMaterialComboBox, 2),
-            FlatTilingEnabled = FlatTilingCheckBox.IsChecked == true,
-            FlatTilingMaterialId = SelectedCoastMaterialId(FlatTilingMaterialComboBox, 2),
-            FlatTileSize = ParseIntTextBox(FlatTileSizeTextBox, 4) * 2,
-            FlatTileContrast = ParseIntTextBox(FlatTileContrastTextBox, 12),
             GentleSlopeMaterialId = SelectedCoastMaterialId(TopologyGentleMaterialComboBox, 2),
             SteepSlopeMaterialId = SelectedCoastMaterialId(TopologySteepMaterialComboBox, 16),
             RidgeMaterialId = SelectedCoastMaterialId(TopologyRidgeMaterialComboBox, 16),
@@ -1225,8 +1235,6 @@ public partial class TerrainMaterialMapWindow : Window
             SteepSlopeMinimum = ParseFloatTextBox(TopologySteepSlopeTextBox, 1.15f),
             CurvatureSensitivity = ParseFloatTextBox(TopologyCurvatureTextBox, 0.35f),
             AnalysisRadius = ParseIntTextBox(TopologyRadiusTextBox, 2),
-            Strength = (int)Math.Round(TopologyStrengthSlider.Value),
-            UseBlend = TopologyBlendCheckBox.IsChecked == true,
             PreserveExistingWaterAndBeach = TopologyPreserveWaterBeachCheckBox.IsChecked == true
         };
 

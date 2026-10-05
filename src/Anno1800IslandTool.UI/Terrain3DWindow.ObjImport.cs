@@ -1,4 +1,4 @@
-using Anno1800IslandTool.Core.Common;
+﻿using Anno1800IslandTool.Core.Common;
 using Anno1800IslandTool.Pipeline.Services;
 
 namespace Anno1800IslandTool.UI;
@@ -12,7 +12,7 @@ public partial class Terrain3DWindow
 
         var result = ObjTerrainImporter.Import(_project, definition.Path,
             new ObjTerrainImportOptions(definition.Lod, definition.FitToActiveFootprint,
-                definition.GridStepRaw, definition.SmoothingPasses));
+                definition.GridStepRaw, definition.SmoothingPasses, definition.SourceSeaLevel));
 
         var working = BuildWorkingMap();
         var full = new RectI(0, 0, Math.Max(0, working.Width - 1), Math.Max(0, working.Height - 1));

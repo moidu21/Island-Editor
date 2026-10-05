@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Numerics;
 using System.Windows;
 using System.Windows.Media;
@@ -75,8 +75,6 @@ public partial class Terrain3DGpuWindow
                 var map=new TerrainMaterialMap{Width=original.Width,Height=original.Height,MaterialIdBlockSize=original.MaterialIdBlockSize,
                     PackedMaterialIds=(uint[])original.PackedMaterialIds.Clone(),PackedMaterialAlphas=(uint[])original.PackedMaterialAlphas.Clone()};
                 var materialSet=_project.MaterialSet;
-                if (_embeddedMaterialSets.TryReadGameDefault(_project.EffectiveMaterialSetName, _project.RawContent.MaterialSetText, out var gameMaterialText))
-                    materialSet = new Anno1800IslandTool.Formats.Readers.MaterialSetReader().Read(_project.EffectiveMaterialSetName, gameMaterialText);
                 if(materialSet is null && _embeddedMaterialSets.TryRead(_project.EffectiveMaterialSetName,out var setText))
                     materialSet=new Anno1800IslandTool.Formats.Readers.MaterialSetReader().Read(_project.EffectiveMaterialSetName,setText);
                 var definitions=materialSet?.Materials.ToArray() ?? [];
@@ -122,8 +120,8 @@ public partial class Terrain3DGpuWindow
                     {
                         token.ThrowIfCancellationRequested();
                         var definition=definitions.FirstOrDefault(d=>d.Id==id);
-                        if(definition is null) { missing.Add(id.ToString());continue; }
-                        if(!GameDataTextureResolver.TryResolveTerrainTextures(root,definition,out var diffuse,out _)) {missing.Add(id.ToString());continue;}
+                        if(definition is null) { missing.Add($"{id} ({materialSet?.FileName})");continue; }
+                        if(!GameDataTextureResolver.TryResolveTerrainTextures(root,definition,out var diffuse,out _)) {missing.Add($"{id} ({definition.FileName})");continue;}
                         try { textures[id]=decoder.Read(diffuse!,Math.Max(.1f,definition.Repetition ?? 4f)); }
                         catch(Exception ex) when(ex is IOException or NotSupportedException or SharpDX.SharpDXException) {missing.Add(id.ToString());}
                     }

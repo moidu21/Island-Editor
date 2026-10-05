@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using Anno1800IslandTool.Core.Common;
@@ -733,6 +733,7 @@ public sealed class ProjectTextRegenerator
         var formattedHeightMap = string.Join(" ", gameData.TerrainHeightMap.Samples.Select(v => FormatGameDataHeightSample(v, gameData.TerrainHeightMap)));
 
         var terrainBody = ReadBalancedBlock(text, "TerrainManager");
+        var previousHeightMap = new Anno1800IslandTool.Formats.Readers.GameDataReader().Read("<Content><TerrainManager>" + terrainBody + "</TerrainManager></Content>").TerrainHeightMap;
         if (!string.IsNullOrWhiteSpace(terrainBody))
         {
             var outerHeightMapBody = ReadBalancedBlock(terrainBody, "HeightMap");
@@ -764,10 +765,10 @@ public sealed class ProjectTextRegenerator
         // l'état "montagne/roche/non constructible" alors que la heightmap est devenue plate.
         // On les resynchronise à partir de la heightmap finale :
         // - WorldManager/Water : masque terre/eau vanilla, seuil monde ≈ -0.75.
-        // - AreaIDs : couche île forcée à 1, couche 32 recalculée comme zone basse/plate.
+        // - AreaIDs : zones modifiées recalculées, identifiants de propriétaires conservés.
         // - RegrowManager/TreeMap : conservation des arbres existants uniquement sur terrain valide.
         // - StreetMap : conservation des routes existantes uniquement sur terrain constructible.
-        text = SynchronizeGameDataTerrainMaps(text, gameData.TerrainHeightMap, mapSize, root);
+        text = SynchronizeGameDataTerrainMaps(text, gameData.TerrainHeightMap, mapSize, root, previousHeightMap);
 
         return text;
     }
@@ -776,7 +777,7 @@ public sealed class ProjectTextRegenerator
         => new GameDataWriter().Write(gameData);
 
 
-    private static string SynchronizeGameDataTerrainMaps(string text, CoarseHeightMap heightMap, int mapSize, IslandRootDefinition root)
+    private static string SynchronizeGameDataTerrainMaps(string text, CoarseHeightMap heightMap, int mapSize, IslandRootDefinition root, CoarseHeightMap previousHeightMap)
     {
         if (string.IsNullOrWhiteSpace(text) ||
             heightMap.Width <= 1 ||
@@ -788,7 +789,7 @@ public sealed class ProjectTextRegenerator
         }
 
         text = ReplaceWorldManagerWaterMask(text, heightMap, mapSize, root);
-        text = ReplaceAreaIdsFromTerrain(text, heightMap, mapSize, root);
+        text = ReplaceAreaIdsFromTerrain(text, heightMap, mapSize, root, previousHeightMap);
         text = SanitizeRegrowTreeMapFromTerrain(text, heightMap, mapSize, root);
         text = SanitizeStreetMapFromTerrain(text, heightMap, mapSize, root);
         return text;
@@ -1055,43 +1056,41 @@ public sealed class ProjectTextRegenerator
         return ReplaceBalancedBlock(text, "Water", updated);
     }
 
-    private static string ReplaceAreaIdsFromTerrain(string text, CoarseHeightMap heightMap, int mapSize, IslandRootDefinition root)
+    private static string ReplaceAreaIdsFromTerrain(string text, CoarseHeightMap heightMap, int mapSize, IslandRootDefinition root, CoarseHeightMap previousHeightMap)
     {
-        var body = ReadBalancedBlock(text, "AreaIDs");
-        if (string.IsNullOrWhiteSpace(body) || !body.Contains("<val>", StringComparison.OrdinalIgnoreCase))
+        var body=ReadBalancedBlock(text,"AreaIDs");
+        bool missing = string.IsNullOrWhiteSpace(body);
+        if (missing)
         {
-            return text;
+            var document = System.Xml.Linq.XDocument.Parse(text);
+            var session = document.Descendants("GameSessionManager").FirstOrDefault();
+            if (session?.Element("AreaManagerData") is null) return text;
+            var empty = new Anno1800IslandTool.Pipeline.Services.GameplayGrid(mapSize, mapSize, 2, new byte[checked(mapSize * mapSize * 2)], true);
+            session.Add(Anno1800IslandTool.Pipeline.Services.GameplayGridCodec.Write("AreaIDs", empty));
+            text = document.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+            body = ReadBalancedBlock(text, "AreaIDs");
         }
-
-        var width = ReadIntTag(body, "x") ?? mapSize;
-        var height = ReadIntTag(body, "y") ?? mapSize;
-        if (width <= 0 || height <= 0)
+        var element=System.Xml.Linq.XElement.Parse("<AreaIDs>"+body+"</AreaIDs>");
+        if(element.Element("val") is null && element.Element("block") is null) return text;
+        var grid=Anno1800IslandTool.Pipeline.Services.GameplayGridCodec.Read(element,2);
+        var changed=Anno1800IslandTool.Pipeline.Services.TerrainAreaGridSync.ChangedCells(previousHeightMap,heightMap,grid.Width,grid.Height);
+        if (missing) Array.Fill(changed, true);
+        var beaches=GeneratedBeachZones.Parse(text);
+        var masks=BuildGameDataTerrainMasks(heightMap,grid.Width,grid.Height,mapSize,root,beaches);
+        for(int i=0;i<changed.Length;i++)
         {
-            return text;
+            var point=new System.Numerics.Vector2((i%grid.Width+.5f)/grid.Width*mapSize,(i/grid.Width+.5f)/grid.Height*mapSize);
+            if(beaches.Any(b=>b.Contains(point)))changed[i]=true;
         }
-
-        var cellCount = width * height;
-        var values = ReadIntListTag(body, "val");
-        if (values.Count < cellCount * 2)
-        {
-            return text;
-        }
-
-        var masks = BuildGameDataTerrainMasks(heightMap, width, height, mapSize, root, GeneratedBeachZones.Parse(text));
-        var updatedValues = new int[cellCount * 2];
-        for (var i = 0; i < cellCount; i++)
-        {
-            // Each pair encodes one little-endian ushort area ID (1 or 8193).
-            // Sans masque valide on conserve le comportement historique via masks.Active=true.
-            updatedValues[i * 2] = masks.Active[i] ? 1 : 0;
-            updatedValues[(i * 2) + 1] = masks.BuildableLowFlat[i] ? 32 : 0;
-        }
-
-        Anno1800IslandTool.Pipeline.Services.GameplayAreaOwnership.RestoreObjectAreas(text, root, width, height, updatedValues, masks.Active);
-        var updated = ReplaceTagValue(body, "x", width.ToString(CultureInfo.InvariantCulture));
-        updated = ReplaceTagValue(updated, "y", height.ToString(CultureInfo.InvariantCulture));
-        updated = ReplaceTagValue(updated, "val", FormatIntList(updatedValues));
-        return ReplaceBalancedBlock(text, "AreaIDs", updated);
+        if(!changed.Any(v=>v)&&Enumerable.Range(0,changed.Length).All(i=>masks.Active[i]||(grid.Data[i*2]==0&&grid.Data[i*2+1]==0))) return text;
+        var bytes=Anno1800IslandTool.Pipeline.Services.TerrainAreaGridSync.Rebuild(grid,changed,masks.Active,masks.BuildableLowFlat,text);
+        var values=bytes.Select(b=>(int)b).ToArray();
+        var restore=Enumerable.Range(0,changed.Length).Select(i=>changed[i]&&masks.Active[i]&&masks.BuildableLowFlat[i]).ToArray();
+        Anno1800IslandTool.Pipeline.Services.GameplayAreaOwnership.RestoreObjectAreas(text,root,grid.Width,grid.Height,values,restore);
+        bytes=values.Select(b=>(byte)b).ToArray();
+        if(bytes.SequenceEqual(grid.Data))return text;
+        var updated=Anno1800IslandTool.Pipeline.Services.GameplayGridCodec.Write("AreaIDs",grid with { Data=bytes });
+        return ReplaceBalancedBlock(text,"AreaIDs",updated.ToString(),wholeBlock:true);
     }
 
     private static string SanitizeRegrowTreeMapFromTerrain(string text, CoarseHeightMap heightMap, int mapSize, IslandRootDefinition root)
@@ -1269,7 +1268,12 @@ public sealed class ProjectTextRegenerator
     private static string ReplaceAreaIdsBlock(string text, IReadOnlyList<AreaDefinition> areas)
     {
         var existing = ReadBalancedBlock(text, "AreaIDs");
-        if (!string.IsNullOrWhiteSpace(existing) && existing.Contains("<val>", StringComparison.OrdinalIgnoreCase))
+        // Native islands also store this grid as sparse blocks. The parsed Areas
+        // list is not a replacement for that ownership grid (and may be empty).
+        if (!string.IsNullOrWhiteSpace(existing) &&
+            (existing.Contains("<val>", StringComparison.OrdinalIgnoreCase) ||
+             existing.Contains("<SparseEnabled>", StringComparison.OrdinalIgnoreCase) ||
+             existing.Contains("<block>", StringComparison.OrdinalIgnoreCase)))
         {
             return text;
         }

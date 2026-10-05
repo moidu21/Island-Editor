@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Text;
 
 namespace Anno1800IslandTool.Pipeline.Services;
@@ -32,6 +32,14 @@ public sealed class EmbeddedMaterialSetLibrary
             .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+    public static string GetGamePath(string fileName)
+    {
+        var name=NormalizeFileName(fileName);
+        return string.Equals(name,"arctic_01.xml",StringComparison.OrdinalIgnoreCase)
+            ? $"data/dlc03/config/engine/material_sets/{name}"
+            : $"data/config/engine/material_sets/{name}";
+    }
+
     private static IEnumerable<string> GameMaterialNames()
     {
         var root = RdaGameResources.ActiveDataRoot;
@@ -44,7 +52,7 @@ public sealed class EmbeddedMaterialSetLibrary
     {
         materialText = string.Empty;
         if (RdaGameResources.ActiveDataRoot is not string root) return false;
-        var path = Path.Combine(root, "config", "engine", "material_sets", NormalizeFileName(fileName));
+        var path = Path.Combine(root, GetGamePath(fileName)[5..]);
         if (!File.Exists(path)) return false;
         if (!string.IsNullOrWhiteSpace(currentText))
         {
@@ -71,7 +79,7 @@ public sealed class EmbeddedMaterialSetLibrary
 
         if (RdaGameResources.ActiveDataRoot is string root)
         {
-            var path = Path.Combine(root, "config", "engine", "material_sets", normalizedFileName);
+            var path = Path.Combine(root, GetGamePath(normalizedFileName)[5..]);
             if (File.Exists(path)) { materialText = File.ReadAllText(path); return true; }
         }
 

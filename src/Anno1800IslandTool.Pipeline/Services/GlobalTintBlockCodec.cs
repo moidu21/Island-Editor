@@ -1,4 +1,4 @@
-namespace Anno1800IslandTool.Pipeline.Services;
+﻿namespace Anno1800IslandTool.Pipeline.Services;
 
 /// <summary>RD3D BaseTextureData dimensions count BC1 blocks, each stored as four Int16 words.</summary>
 public static class GlobalTintBlockCodec

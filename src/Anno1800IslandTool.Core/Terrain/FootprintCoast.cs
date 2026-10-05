@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 
 namespace Anno1800IslandTool.Core.Terrain;
 
@@ -7,6 +7,7 @@ public sealed class FootprintCoast
 {
     public IReadOnlyList<Vector2> Points { get; }
     public double Length { get; }
+    public bool IsClosed => Points[0] == Points[^1];
     private readonly double[] _distance;
 
     private FootprintCoast(List<Vector2> points)
@@ -26,10 +27,10 @@ public sealed class FootprintCoast
             if (cleaned.Count == 0 || Vector2.DistanceSquared(cleaned[^1], point) > 0.0001f)
                 cleaned.Add(point);
         }
-        if (cleaned.Count < 3) return null;
+        if (cleaned.Count < (close ? 3 : 2)) return null;
         if (close && Vector2.DistanceSquared(cleaned[0], cleaned[^1]) > 0.0001f)
             cleaned.Add(cleaned[0]);
-        return cleaned.Count >= 4 ? new FootprintCoast(cleaned) : null;
+        return new FootprintCoast(cleaned);
     }
 
     /// <summary>Construit les lignes de rivage directement depuis les triangles du mesh.</summary>
@@ -45,6 +46,11 @@ public sealed class FootprintCoast
                 var ic = cluster.Indices[i + 2];
                 if ((uint)ia >= cluster.Vertices.Count || (uint)ib >= cluster.Vertices.Count || (uint)ic >= cluster.Vertices.Count) continue;
                 var vertices = new[] { cluster.Vertices[ia], cluster.Vertices[ib], cluster.Vertices[ic] };
+                // Vertical page skirts are rendering seams, not playable shorelines.
+                if (vertices.Any(v => v.Attributes.IsSkirtVertex)) continue;
+                var projectedArea = (double)(vertices[1].X-vertices[0].X)*(vertices[2].Z-vertices[0].Z)
+                    -(double)(vertices[1].Z-vertices[0].Z)*(vertices[2].X-vertices[0].X);
+                if (Math.Abs(projectedArea) < .01) continue;
                 var intersections = new List<Vector2>(3);
                 for (var edge = 0; edge < 3; edge++)
                 {
@@ -68,30 +74,48 @@ public sealed class FootprintCoast
             }
         }
 
-        const float snap = 1f;
-        static (int X, int Z) Key(Vector2 p) => ((int)MathF.Round(p.X / snap), (int)MathF.Round(p.Y / snap));
-        var remaining = new HashSet<int>(Enumerable.Range(0, segments.Count));
-        var byStart = segments.Select((s, i) => (s, i)).GroupBy(item => Key(item.s.A)).ToDictionary(g => g.Key, g => g.Select(item => item.i).ToList());
-        var result = new List<FootprintCoast>();
-        while (remaining.Count > 0)
+        return JoinMeshSegments(segments);
+    }
+
+    // A tiny gap between adjacent mesh pages must not truncate the playable coast.
+    // Search neighbouring spatial buckets and grow both ends, independently of triangle order.
+    public static IReadOnlyList<FootprintCoast> JoinMeshSegments(
+        IEnumerable<(Vector2 A, Vector2 B)> source, float tolerance = 2f)
+    {
+        if (!float.IsFinite(tolerance) || tolerance <= 0 || tolerance > 8) throw new ArgumentOutOfRangeException(nameof(tolerance));
+        var segments = source.Distinct().Where(s => Vector2.DistanceSquared(s.A,s.B) > .0001f).ToArray();
+        (int X,int Y) Key(Vector2 p) => ((int)MathF.Floor(p.X/tolerance),(int)MathF.Floor(p.Y/tolerance));
+        var starts = segments.Select((s,i)=>(p:s.A,i)).GroupBy(s=>Key(s.p)).ToDictionary(g=>g.Key,g=>g.Select(s=>s.i).ToArray());
+        var ends = segments.Select((s,i)=>(p:s.B,i)).GroupBy(s=>Key(s.p)).ToDictionary(g=>g.Key,g=>g.Select(s=>s.i).ToArray());
+        var remaining = new HashSet<int>(Enumerable.Range(0,segments.Length));
+        int Nearest(Vector2 p, bool forward)
         {
-            var current = remaining.First();
-            var firstKey = Key(segments[current].A);
-            var points = new List<Vector2> { segments[current].A };
-            while (remaining.Remove(current))
-            {
-                var segment = segments[current];
-                points.Add(segment.B);
-                var endKey = Key(segment.B);
-                if (endKey == firstKey) break;
-                if (!byStart.TryGetValue(endKey, out var candidates)) break;
-                current = candidates.FirstOrDefault(remaining.Contains, -1);
-                if (current < 0) break;
-            }
-            var coast = FromPoints(points, Key(points[0]) == Key(points[^1]));
-            if (coast is not null && coast.Length >= 16) result.Add(coast);
+            var key=Key(p); int best=-1; float distance=tolerance*tolerance;
+            var buckets=forward?starts:ends;
+            for(int x=-1;x<=1;x++) for(int y=-1;y<=1;y++)
+                if(buckets.TryGetValue((key.X+x,key.Y+y),out var candidates))
+                    foreach(var i in candidates)
+                    {
+                        if(!remaining.Contains(i))continue;
+                        var d=Vector2.DistanceSquared(p,forward?segments[i].A:segments[i].B);
+                        if(d<=distance){best=i;distance=d;}
+                    }
+            return best;
         }
-        return result.OrderByDescending(coast => coast.Length).ToList();
+        var result=new List<FootprintCoast>();
+        while(remaining.Count>0)
+        {
+            var first=remaining.First();remaining.Remove(first);
+            var points=new LinkedList<Vector2>();points.AddLast(segments[first].A);points.AddLast(segments[first].B);
+            int next;
+            while((next=Nearest(points.Last!.Value,true))>=0){remaining.Remove(next);points.AddLast(segments[next].B);}
+            while((next=Nearest(points.First!.Value,false))>=0){remaining.Remove(next);points.AddFirst(segments[next].A);}
+            var closed=points.Count>2&&Vector2.Distance(points.First!.Value,points.Last!.Value)<=tolerance;
+            if(closed)points.Last!.Value=points.First!.Value;
+            var coast=FromPoints(points,closed);
+            if(coast is not null&&coast.Length>=16)result.Add(coast);
+        }
+        return result.OrderByDescending(c=>c.Length).ToArray();
     }
 
     public static IReadOnlyList<FootprintCoast> Build(IReadOnlyList<bool> mask, int columns, int rows, float width, float height)
@@ -150,25 +174,27 @@ public sealed class FootprintCoast
 
     public Vector2 PointAt(double along)
     {
+        if (along == Length) return Points[^1];
         along = Wrap(along);
         for (var i = 1; i < Points.Count; i++)
             if (along <= _distance[i]) return Vector2.Lerp(Points[i - 1], Points[i], (float)((along - _distance[i - 1]) / (_distance[i] - _distance[i - 1])));
         return Points[^1];
     }
 
-    public double Wrap(double along) => (along % Length + Length) % Length;
+    public double Wrap(double along) => IsClosed ? (along % Length + Length) % Length : Math.Clamp(along, 0, Length);
 
     public IReadOnlyList<CoastSpan> Slice(double start, double length)
     {
         var result = new List<CoastSpan>();
         var remaining = Math.Clamp(length, 0d, Length);
         var at = Wrap(start);
+        if (!IsClosed) remaining = Math.Min(remaining, Length - at);
         while (remaining > 0.001)
         {
             var i = 1;
             while (i < _distance.Length - 1 && at >= _distance[i] - 0.00001) i++;
             var take = Math.Min(remaining, _distance[i] - at);
-            if (take <= 0.00001) { at = 0; continue; }
+            if (take <= 0.00001) { if (!IsClosed) break; at = 0; continue; }
             var a = PointAt(at);
             var b = PointAt(at + take);
             var tangent = Vector2.Normalize(b - a);
