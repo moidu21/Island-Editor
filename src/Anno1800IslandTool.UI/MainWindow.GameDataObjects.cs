@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.Text.RegularExpressions;
@@ -17,7 +17,7 @@ public partial class MainWindow
     {
         GameDataObjectsDataGrid.ItemsSource = _gameDataObjectRows;
         GameDataObjectContainerComboBox.ItemsSource = _gameDataObjectContainerLabels;
-        GameDataObjectsStatusTextBlock.Text = "Aucun projet chargé.";
+        GameDataObjectsStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun projet chargé.");
     }
 
     private void RefreshGameDataObjectsEditor()
@@ -28,7 +28,7 @@ public partial class MainWindow
 
         if (_currentProject is null || string.IsNullOrWhiteSpace(_currentProject.RawContent.GameDataText))
         {
-            GameDataObjectsStatusTextBlock.Text = "Aucun gamedata.xml chargé.";
+            GameDataObjectsStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun gamedata.xml chargé.");
             return;
         }
 
@@ -37,7 +37,7 @@ public partial class MainWindow
             _gameDataObjectSnapshot = GameDataAreaObjectsXmlEditor.Extract(_currentProject.RawContent.GameDataText!);
             foreach (var container in _gameDataObjectSnapshot.Containers)
             {
-                _gameDataObjectContainerLabels.Add($"{container.Index} - AreaManagerData#{container.AreaManagerDataIndex} / AreaObjectManager#{container.AreaObjectManagerIndex} / objects#{container.ObjectsIndex} ({container.Objects.Count} objet(s))");
+                _gameDataObjectContainerLabels.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"{container.Index} - AreaManagerData#{container.AreaManagerDataIndex} / AreaObjectManager#{container.AreaObjectManagerIndex} / objects#{container.ObjectsIndex} ({container.Objects.Count} objet(s))"));
                 for (var i = 0; i < container.Objects.Count; i++)
                 {
                     _gameDataObjectRows.Add(EditableGameDataAreaObjectRow.FromObject(container.Index, i, container.Objects[i].RawXml));
@@ -46,12 +46,12 @@ public partial class MainWindow
 
             GameDataObjectContainerComboBox.SelectedIndex = _gameDataObjectContainerLabels.Count > 0 ? 0 : -1;
             GameDataObjectsStatusTextBlock.Text = _gameDataObjectContainerLabels.Count == 0
-                ? "Aucun bloc GameObject/objects trouvé dans AreaManagerData."
-                : $"{_gameDataObjectRows.Count} objet(s) dans {_gameDataObjectContainerLabels.Count} container(s).";
+                ? Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun bloc GameObject/objects trouvé dans AreaManagerData.")
+                : Anno1800IslandTool.Core.Localization.TextCatalog.F($"{_gameDataObjectRows.Count} objet(s) dans {_gameDataObjectContainerLabels.Count} container(s).");
         }
         catch (Exception ex)
         {
-            GameDataObjectsStatusTextBlock.Text = "Erreur lecture GameData objects.";
+            GameDataObjectsStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Erreur lecture GameData objects.");
             SelectionDetailsTextBox.Text = ex.ToString();
         }
     }
@@ -64,7 +64,7 @@ public partial class MainWindow
         var containerIndex = ResolveSelectedGameDataObjectContainerIndex();
         if (containerIndex < 0)
         {
-            MessageBox.Show(this, "Aucun container <objects> disponible. Impossible d'ajouter un objet tant que le chemin AreaObjectManager/GameObject/objects n'existe pas dans gamedata.xml.", "GameData objects", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun container <objects> disponible. Impossible d'ajouter un objet tant que le chemin AreaObjectManager/GameObject/objects n'existe pas dans gamedata.xml."), Anno1800IslandTool.Core.Localization.TextCatalog.T("GameData objects"), MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -73,14 +73,14 @@ public partial class MainWindow
         _gameDataObjectRows.Add(row);
         GameDataObjectsDataGrid.SelectedItem = row;
         GameDataObjectsDataGrid.ScrollIntoView(row);
-        GameDataObjectsStatusTextBlock.Text = "Objet ajouté en mémoire. Clique sur Appliquer GameData pour modifier gamedata.xml.";
+        GameDataObjectsStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Objet ajouté en mémoire. Clique sur Appliquer GameData pour modifier gamedata.xml.");
     }
 
     private void DuplicateGameDataObjectButton_Click(object sender, RoutedEventArgs e)
     {
         if (GameDataObjectsDataGrid.SelectedItem is not EditableGameDataAreaObjectRow selected)
         {
-            MessageBox.Show(this, "Sélectionne d'abord un objet GameData à dupliquer.", "GameData objects", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Sélectionne d'abord un objet GameData à dupliquer."), Anno1800IslandTool.Core.Localization.TextCatalog.T("GameData objects"), MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -88,7 +88,7 @@ public partial class MainWindow
         _gameDataObjectRows.Add(clone);
         GameDataObjectsDataGrid.SelectedItem = clone;
         GameDataObjectsDataGrid.ScrollIntoView(clone);
-        GameDataObjectsStatusTextBlock.Text = "Objet dupliqué en mémoire. Pense à modifier guid/ID si nécessaire, puis Appliquer GameData.";
+        GameDataObjectsStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Objet dupliqué en mémoire. Pense à modifier guid/ID si nécessaire, puis Appliquer GameData.");
     }
 
     private void RemoveGameDataObjectButton_Click(object sender, RoutedEventArgs e)
@@ -97,7 +97,7 @@ public partial class MainWindow
         {
             _gameDataObjectRows.Remove(row);
             RenumberGameDataObjectRows();
-            GameDataObjectsStatusTextBlock.Text = "Objet supprimé en mémoire. Clique sur Appliquer GameData pour modifier gamedata.xml.";
+            GameDataObjectsStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Objet supprimé en mémoire. Clique sur Appliquer GameData pour modifier gamedata.xml.");
         }
     }
 
@@ -105,7 +105,7 @@ public partial class MainWindow
     {
         if (_currentProject is null || string.IsNullOrWhiteSpace(_currentProject.RawContent.GameDataText))
         {
-            MessageBox.Show(this, "Aucun gamedata.xml chargé.", "GameData objects", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun gamedata.xml chargé."), Anno1800IslandTool.Core.Localization.TextCatalog.T("GameData objects"), MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -114,26 +114,26 @@ public partial class MainWindow
             var snapshot = GameDataAreaObjectsXmlEditor.Extract(_currentProject.RawContent.GameDataText!);
             if (snapshot.Containers.Count == 0)
             {
-                MessageBox.Show(this, "Aucun container AreaManagerData/Data/AreaObjectManager/GameObject/objects n'a été trouvé. La v39.2 n'ajoute pas encore un AreaObjectManager complet quand il est absent : elle édite les containers existants.", "GameData objects", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun container AreaManagerData/Data/AreaObjectManager/GameObject/objects n'a été trouvé. La v39.2 n'ajoute pas encore un AreaObjectManager complet quand il est absent : elle édite les containers existants."), Anno1800IslandTool.Core.Localization.TextCatalog.T("GameData objects"), MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
             var rows = _gameDataObjectRows.Select(r => r.ToObjectEdit()).ToList();
             var updated = GameDataAreaObjectsXmlEditor.ReplaceObjects(_currentProject.RawContent.GameDataText!, snapshot, rows);
-            var result = _editor.ApplyRawText(_currentProject, "GameData", updated);
+            var result = BusyWork.Run(this, () => _editor.ApplyRawText(_currentProject, "GameData", updated));
             if (!result.Succeeded)
             {
-                MessageBox.Show(this, result.Message, "GameData objects", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(this, result.Message, Anno1800IslandTool.Core.Localization.TextCatalog.T("GameData objects"), MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
 
             RefreshProjectDisplay();
-            GameDataObjectsStatusTextBlock.Text = $"GameData appliqué : {rows.Count} bloc(s) <None> dans <objects>.";
-            MessageBox.Show(this, "Les <objects> AreaObjectManager ont été appliqués dans gamedata.xml.", "GameData objects", MessageBoxButton.OK, MessageBoxImage.Information);
+            GameDataObjectsStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"GameData appliqué : {rows.Count} bloc(s) <None> dans <objects>.");
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Les <objects> AreaObjectManager ont été appliqués dans gamedata.xml."), Anno1800IslandTool.Core.Localization.TextCatalog.T("GameData objects"), MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.ToString(), "GameData objects", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.ToString(), Anno1800IslandTool.Core.Localization.TextCatalog.T("GameData objects"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -269,273 +269,3 @@ public partial class MainWindow
     }
 }
 
-public sealed record AreaObjectEdit(int ContainerIndex, string RawXml);
-internal sealed record AreaObjectBlock(string RawXml);
-
-internal sealed class GameDataAreaObjectsSnapshot
-{
-    public List<GameDataAreaObjectsContainer> Containers { get; } = new();
-}
-
-internal sealed class GameDataAreaObjectsContainer
-{
-    public int Index { get; init; }
-    public int AreaManagerDataIndex { get; init; }
-    public int AreaObjectManagerIndex { get; init; }
-    public int ObjectsIndex { get; init; }
-    public int ContentStart { get; init; }
-    public int ContentEnd { get; init; }
-    public string OriginalBody { get; init; } = string.Empty;
-    public string ItemIndent { get; init; } = "                  ";
-    public string ClosingIndent { get; init; } = "                ";
-    public List<AreaObjectBlock> Objects { get; } = new();
-}
-
-internal static class GameDataAreaObjectsXmlEditor
-{
-    public static GameDataAreaObjectsSnapshot Extract(string text, string objectGroupName = "GameObject")
-    {
-        if (string.IsNullOrWhiteSpace(objectGroupName))
-        {
-            throw new ArgumentException("Le nom du groupe d'objets est requis.", nameof(objectGroupName));
-        }
-
-        var snapshot = new GameDataAreaObjectsSnapshot();
-        var containerIndex = 0;
-        var areaManagerDataIndex = 0;
-
-        foreach (var areaData in FindBlocks(text, "AreaManagerData"))
-        {
-            var areaBodyBase = areaData.ContentStart;
-            var areaObjectManagerIndex = 0;
-            foreach (var manager in FindBlocks(areaData.Body, "AreaObjectManager"))
-            {
-                var managerBodyBase = areaBodyBase + manager.ContentStart;
-                foreach (var gameObject in FindBlocks(manager.Body, objectGroupName))
-                {
-                    var gameObjectBodyBase = managerBodyBase + gameObject.ContentStart;
-                    var objectsIndex = 0;
-                    foreach (var objects in FindBlocks(gameObject.Body, "objects"))
-                    {
-                        var absoluteContentStart = gameObjectBodyBase + objects.ContentStart;
-                        var absoluteContentEnd = gameObjectBodyBase + objects.ContentEnd;
-                        var container = new GameDataAreaObjectsContainer
-                        {
-                            Index = containerIndex++,
-                            AreaManagerDataIndex = areaManagerDataIndex,
-                            AreaObjectManagerIndex = areaObjectManagerIndex,
-                            ObjectsIndex = objectsIndex,
-                            ContentStart = absoluteContentStart,
-                            ContentEnd = absoluteContentEnd,
-                            OriginalBody = objects.Body,
-                            ItemIndent = InferItemIndent(objects.Body),
-                            ClosingIndent = InferClosingIndent(text, absoluteContentEnd)
-                        };
-
-                        foreach (var none in FindBlocks(objects.Body, "None"))
-                        {
-                            container.Objects.Add(new AreaObjectBlock(none.FullText.Trim()));
-                        }
-
-                        snapshot.Containers.Add(container);
-                        objectsIndex++;
-                    }
-                }
-
-                areaObjectManagerIndex++;
-            }
-
-            areaManagerDataIndex++;
-        }
-
-        return snapshot;
-    }
-
-    public static string ReplaceObjects(string text, GameDataAreaObjectsSnapshot snapshot, IReadOnlyList<AreaObjectEdit> edits)
-    {
-        var byContainer = edits
-            .Where(e => e.ContainerIndex >= 0)
-            .GroupBy(e => e.ContainerIndex)
-            .ToDictionary(g => g.Key, g => g.Select(e => EnsureNoneBlock(e.RawXml)).ToList());
-
-        var result = text;
-        foreach (var container in snapshot.Containers.OrderByDescending(c => c.ContentStart))
-        {
-            byContainer.TryGetValue(container.Index, out var objects);
-            objects ??= new List<string>();
-            var newBody = BuildObjectsBody(container, objects);
-            result = result.Substring(0, container.ContentStart) + newBody + result.Substring(container.ContentEnd);
-        }
-
-        return result;
-    }
-
-    public static string EnsureNoneBlock(string rawXml)
-    {
-        var trimmed = NormalizeLineEndings(rawXml ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(trimmed))
-        {
-            return "<None></None>";
-        }
-
-        if (Regex.IsMatch(trimmed, @"^<None(?:\s[^>]*)?>", RegexOptions.IgnoreCase) &&
-            Regex.IsMatch(trimmed, @"</None>\s*$", RegexOptions.IgnoreCase))
-        {
-            return trimmed;
-        }
-
-        return "<None>\n" + trimmed + "\n</None>";
-    }
-
-    private static string BuildObjectsBody(GameDataAreaObjectsContainer container, IReadOnlyList<string> objects)
-    {
-        if (objects.Count == 0)
-        {
-            return "\n" + container.ClosingIndent;
-        }
-
-        var lines = new List<string> { string.Empty };
-        foreach (var raw in objects)
-        {
-            var normalized = Dedent(EnsureNoneBlock(raw));
-            foreach (var line in normalized.Split('\n'))
-            {
-                lines.Add(container.ItemIndent + line.TrimEnd('\r'));
-            }
-        }
-
-        lines.Add(container.ClosingIndent);
-        return string.Join("\n", lines);
-    }
-
-    private static string InferItemIndent(string body)
-    {
-        var normalized = NormalizeLineEndings(body);
-        var match = Regex.Match(normalized, @"\n(?<indent>\s*)<None(?:\s|>)", RegexOptions.IgnoreCase);
-        if (match.Success)
-        {
-            return match.Groups["indent"].Value;
-        }
-
-        return "                  ";
-    }
-
-    private static string InferClosingIndent(string fullText, int contentEnd)
-    {
-        var start = Math.Max(0, contentEnd - 120);
-        var prefix = NormalizeLineEndings(fullText.Substring(start, contentEnd - start));
-        var lastNewLine = prefix.LastIndexOf('\n');
-        if (lastNewLine >= 0)
-        {
-            var trailing = prefix[(lastNewLine + 1)..];
-            if (trailing.All(char.IsWhiteSpace))
-            {
-                return trailing;
-            }
-        }
-
-        return "                ";
-    }
-
-    private static string Dedent(string text)
-    {
-        var normalized = NormalizeLineEndings(text).Trim();
-        var lines = normalized.Split('\n').Select(l => l.TrimEnd('\r')).ToArray();
-        var nonBlank = lines.Where(l => !string.IsNullOrWhiteSpace(l)).ToArray();
-        if (nonBlank.Length == 0)
-        {
-            return string.Empty;
-        }
-
-        var minIndent = nonBlank
-            .Select(l => l.TakeWhile(char.IsWhiteSpace).Count())
-            .DefaultIfEmpty(0)
-            .Min();
-        if (minIndent <= 0)
-        {
-            return string.Join("\n", lines);
-        }
-
-        return string.Join("\n", lines.Select(l => l.Length >= minIndent ? l[minIndent..] : l.TrimStart()));
-    }
-
-    private static string NormalizeLineEndings(string text)
-        => (text ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n');
-
-    private static List<XmlBlockSpan> FindBlocks(string text, string tag)
-    {
-        var result = new List<XmlBlockSpan>();
-        var cursor = 0;
-        while (cursor < text.Length)
-        {
-            var block = FindNextBlock(text, tag, cursor);
-            if (block is null)
-            {
-                break;
-            }
-
-            result.Add(block);
-            cursor = Math.Max(block.CloseEnd, block.OpenStart + 1);
-        }
-
-        return result;
-    }
-
-    private static XmlBlockSpan? FindNextBlock(string text, string tag, int startIndex)
-    {
-        var tokenRegex = new Regex($@"<\s*(?<close>/?)\s*{Regex.Escape(tag)}\b(?<attrs>[^>]*)>", RegexOptions.IgnoreCase);
-        var open = tokenRegex.Match(text, startIndex);
-        while (open.Success && open.Groups["close"].Value == "/")
-        {
-            open = open.NextMatch();
-        }
-
-        if (!open.Success)
-        {
-            return null;
-        }
-
-        var openStart = open.Index;
-        var openEnd = open.Index + open.Length;
-        if (open.Groups["attrs"].Value.TrimEnd().EndsWith("/", StringComparison.Ordinal))
-        {
-            return new XmlBlockSpan(openStart, openEnd, openEnd, openEnd, openEnd, string.Empty, open.Value);
-        }
-
-        var depth = 1;
-        var scan = openEnd;
-        while (scan < text.Length)
-        {
-            var token = tokenRegex.Match(text, scan);
-            if (!token.Success)
-            {
-                return null;
-            }
-
-            var isClose = token.Groups["close"].Value == "/";
-            var isSelfClosing = token.Groups["attrs"].Value.TrimEnd().EndsWith("/", StringComparison.Ordinal);
-            if (isClose)
-            {
-                depth--;
-                if (depth == 0)
-                {
-                    var contentEnd = token.Index;
-                    var closeEnd = token.Index + token.Length;
-                    var body = text.Substring(openEnd, contentEnd - openEnd);
-                    var full = text.Substring(openStart, closeEnd - openStart);
-                    return new XmlBlockSpan(openStart, openEnd, openEnd, contentEnd, closeEnd, body, full);
-                }
-            }
-            else if (!isSelfClosing)
-            {
-                depth++;
-            }
-
-            scan = token.Index + token.Length;
-        }
-
-        return null;
-    }
-
-    private sealed record XmlBlockSpan(int OpenStart, int OpenEnd, int ContentStart, int ContentEnd, int CloseEnd, string Body, string FullText);
-}

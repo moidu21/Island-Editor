@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Core.Common;
+using Anno1800IslandTool.Core.Common;
 using Anno1800IslandTool.Core.Enums;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;
@@ -162,14 +162,14 @@ public sealed class IslandProjectEditor
         return report;
     }
 
-    public void ApplyLocalRegeneration(IslandProject project, TerrainLocalRegenerationState state)
+    public void ApplyLocalRegeneration(IslandProject project, TerrainLocalRegenerationState state, bool validate = true)
     {
         project.LocalRegeneration = state;
         MarkDirty(project, "LocalDerivatives");
-        project.ValidationReport = _validator.Validate(project);
+        if (validate) project.ValidationReport = _validator.Validate(project);
     }
 
-    public void ApplyGeneratedNormalMapWrites(IslandProject project, TerrainLocalRegenerationState state)
+    public void ApplyGeneratedNormalMapWrites(IslandProject project, TerrainLocalRegenerationState state, bool validate = true)
     {
         project.LocalRegeneration ??= state;
         project.LocalRegeneration.GeneratedNormalMapWrites = state.GeneratedNormalMapWrites
@@ -178,10 +178,10 @@ public sealed class IslandProjectEditor
             .Select(g => g.Last())
             .ToList();
         MarkDirty(project, "LocalDerivatives", "NormalMapsInterpreted");
-        project.ValidationReport = _validator.Validate(project);
+        if (validate) project.ValidationReport = _validator.Validate(project);
     }
 
-    public void ApplyGeneratedTintMapWrites(IslandProject project, TerrainLocalRegenerationState state)
+    public void ApplyGeneratedTintMapWrites(IslandProject project, TerrainLocalRegenerationState state, bool validate = true)
     {
         project.LocalRegeneration ??= state;
         project.LocalRegeneration.GeneratedTintMapWrites = state.GeneratedTintMapWrites
@@ -190,10 +190,10 @@ public sealed class IslandProjectEditor
             .Select(g => g.Last())
             .ToList();
         MarkDirty(project, "LocalDerivatives", "TintMapsGenerated");
-        project.ValidationReport = _validator.Validate(project);
+        if (validate) project.ValidationReport = _validator.Validate(project);
     }
 
-    public void ApplyGeneratedMeshPageWrites(IslandProject project, TerrainLocalRegenerationState state)
+    public void ApplyGeneratedMeshPageWrites(IslandProject project, TerrainLocalRegenerationState state, bool validate = true)
     {
         project.LocalRegeneration ??= state;
         project.LocalRegeneration.GeneratedMeshPageWrites = state.GeneratedMeshPageWrites
@@ -202,7 +202,7 @@ public sealed class IslandProjectEditor
             .Select(g => g.Last())
             .ToList();
         MarkDirty(project, "LocalDerivatives", "MeshPagesLocal");
-        project.ValidationReport = _validator.Validate(project);
+        if (validate) project.ValidationReport = _validator.Validate(project);
     }
 
     public void ReplaceTerrainMaterialMap(IslandProject project, TerrainMaterialMap materialMap, TerrainMaterialEditState? editState = null)
@@ -315,8 +315,8 @@ public sealed class IslandProjectEditor
                 TargetPath = targetPath,
                 XmlText = _meshPageXmlWriter.WriteFullPageFromModel(page),
                 Summary = key.Lod < MeshPageClassifier.FirstEditableGeometryLod
-                    ? "v44.4 material window : UsedMaterialBits LOD0/LOD1 metadata resynchronisés depuis MaterialMap ; Indices/Vertices restent vides/inchangés"
-                    : "v43.6 material window : UsedMaterialBits resynchronisés depuis MaterialMap ; vertices/indices inchangés"
+                    ? Anno1800IslandTool.Core.Localization.TextCatalog.T("v44.4 material window : UsedMaterialBits LOD0/LOD1 metadata resynchronisés depuis MaterialMap ; Indices/Vertices restent vides/inchangés")
+                    : Anno1800IslandTool.Core.Localization.TextCatalog.T("v43.6 material window : UsedMaterialBits resynchronisés depuis MaterialMap ; vertices/indices inchangés")
             };
         }
 
@@ -436,7 +436,7 @@ public sealed class IslandProjectEditor
         ArgumentNullException.ThrowIfNull(project);
         if (string.IsNullOrWhiteSpace(text))
         {
-            throw new ArgumentException("Le materialset est vide.", nameof(text));
+            throw new ArgumentException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Le materialset est vide."), nameof(text));
         }
 
         var fileName = string.IsNullOrWhiteSpace(displayFileName)
@@ -724,7 +724,7 @@ public sealed class IslandProjectEditor
                 Key = pair.Key,
                 TargetPath = targetPath,
                 XmlText = _meshPageXmlWriter.WriteFullPageFromModel(page),
-                Summary = "v46.63 MaterialSet : UsedMaterialBits locaux transposés ; géométrie/indices inchangés"
+                Summary = Anno1800IslandTool.Core.Localization.TextCatalog.T("v46.63 MaterialSet : UsedMaterialBits locaux transposés ; géométrie/indices inchangés")
             };
         }
 
@@ -820,7 +820,7 @@ public sealed class IslandProjectEditor
                 // Le marqueur GroundObjects est contractuel : le validateur et l'exporteur
                 // reconnaissent ainsi les écritures LOD0/LOD1 qui ne changent que les objets
                 // de sol et conservent la géométrie vanilla.
-                Summary = $"GroundObjects uniquement — ressources naturelles synchronisées avec le materialset : LOD {item.Key.Lod}, page {item.Key.X}x{item.Key.Y} ; vertices/indices inchangés."
+                Summary = Anno1800IslandTool.Core.Localization.TextCatalog.F($"GroundObjects uniquement — ressources naturelles synchronisées avec le materialset : LOD {item.Key.Lod}, page {item.Key.X}x{item.Key.Y} ; vertices/indices inchangés.")
             })
             .ToList();
 
@@ -874,12 +874,12 @@ public sealed class IslandProjectEditor
         {
             if (!project.MeshPages.TryGetValue(placement.PageKey, out var page))
             {
-                throw new InvalidOperationException($"Page mesh introuvable pour GroundObject : LOD {placement.PageKey.Lod}, X {placement.PageKey.X}, Y {placement.PageKey.Y}.");
+                throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Page mesh introuvable pour GroundObject : LOD {placement.PageKey.Lod}, X {placement.PageKey.X}, Y {placement.PageKey.Y}."));
             }
 
             if (placement.ClusterIndex < 0 || placement.ClusterIndex >= page.Clusters.Count)
             {
-                throw new InvalidOperationException($"Cluster GroundObject invalide : {placement.ClusterIndex} pour la page {page.OriginalRelativePath}.");
+                throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Cluster GroundObject invalide : {placement.ClusterIndex} pour la page {page.OriginalRelativePath}."));
             }
 
             var obj = CloneGroundObject(placement.Object);
@@ -892,7 +892,7 @@ public sealed class IslandProjectEditor
         project.LocalRegeneration ??= new TerrainLocalRegenerationState
         {
             AnchorFamily = "GroundObjects",
-            Summary = "Édition GroundObjects / props / végétation."
+            Summary = Anno1800IslandTool.Core.Localization.TextCatalog.T("Édition GroundObjects / props / végétation.")
         };
 
         var generated = new List<RegeneratedMeshPageWrite>();
@@ -908,7 +908,7 @@ public sealed class IslandProjectEditor
                 Key = key,
                 TargetPath = page.OriginalRelativePath,
                 XmlText = _meshPageXmlWriter.WriteGroundObjectsPreservingMesh(page),
-                Summary = $"GroundObjects édités : {page.Clusters.Sum(c => c.GroundObjects.Count)} objet(s), LOD {key.Lod}, page {key.X}x{key.Y}."
+                Summary = Anno1800IslandTool.Core.Localization.TextCatalog.F($"GroundObjects édités : {page.Clusters.Sum(c => c.GroundObjects.Count)} objet(s), LOD {key.Lod}, page {key.X}x{key.Y}.")
             });
         }
 
@@ -935,14 +935,14 @@ public sealed class IslandProjectEditor
         project.GroundObjectEditState.PropCount = placements.Count(p => p.Object.Kind == GroundObjectKind.Prop || ClassifyGroundObject(p.Object.ObjectFileName) == GroundObjectKind.Prop);
         project.GroundObjectEditState.DecorationCount = placements.Count(p => p.Object.Kind == GroundObjectKind.Decoration || ClassifyGroundObject(p.Object.ObjectFileName) == GroundObjectKind.Decoration);
         project.GroundObjectEditState.UnknownCount = placements.Count(p => string.IsNullOrWhiteSpace(p.Object.ObjectFileName));
-        project.GroundObjectEditState.AddOperation($"{placements.Count} GroundObject(s), {affectedKeys.Count} page(s), {clustersTouched.Count} cluster(s) touché(s).");
+        project.GroundObjectEditState.AddOperation(Anno1800IslandTool.Core.Localization.TextCatalog.F($"{placements.Count} GroundObject(s), {affectedKeys.Count} page(s), {clustersTouched.Count} cluster(s) touché(s)."));
 
         MarkDirty(project, "GroundObjects", "MeshPagesLocal", "LocalDerivatives");
         project.ValidationReport = _validator.Validate(project);
     }
 
     private static string BuildGroundObjectLocalSummary(IslandProject project, int placementCount, int pageCount, int clusterCount)
-        => $"Édition GroundObjects / props / végétation : {placementCount} objet(s), {pageCount} page(s) mesh, {clusterCount} cluster(s). Les pages mesh sont exportées via GeneratedMeshPageWrites sans toucher les vertices.";
+        => Anno1800IslandTool.Core.Localization.TextCatalog.F($"Édition GroundObjects / props / végétation : {placementCount} objet(s), {pageCount} page(s) mesh, {clusterCount} cluster(s). Les pages mesh sont exportées via GeneratedMeshPageWrites sans toucher les vertices.");
 
     private static GroundObjectInstance CloneGroundObject(GroundObjectInstance source)
         => new()
@@ -991,7 +991,7 @@ public sealed class IslandProjectEditor
                 return new ApplyRawTextResult
                 {
                     Succeeded = false,
-                    Message = $"Pseudo-XML invalide pour {section}: {validation.Error}"
+                    Message = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Pseudo-XML invalide pour {section}: {validation.Error}")
                 };
             }
 
@@ -1029,12 +1029,12 @@ public sealed class IslandProjectEditor
                     break;
 
                 default:
-                    return new ApplyRawTextResult { Succeeded = false, Message = "Section de texte brut inconnue." };
+                    return new ApplyRawTextResult { Succeeded = false, Message = Anno1800IslandTool.Core.Localization.TextCatalog.T("Section de texte brut inconnue.") };
             }
 
             MarkDirty(project, section);
             project.ValidationReport = _validator.Validate(project);
-            return new ApplyRawTextResult { Succeeded = true, Message = $"Section {section} appliquée au modèle." };
+            return new ApplyRawTextResult { Succeeded = true, Message = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Section {section} appliquée au modèle.") };
         }
         catch (Exception ex)
         {
@@ -1042,19 +1042,25 @@ public sealed class IslandProjectEditor
         }
     }
 
-    public void RegenerateAllTexts(IslandProject project)
+    public void RegenerateAllTexts(IslandProject project, Action<string>? trace = null, bool rebuildAllTerrainAreas = false)
     {
         _regenerator.RegenerateRootText(project);
+        trace?.Invoke("Texts Root ready");
         _regenerator.RegenerateAnnoEditorLevelText(project);
+        trace?.Invoke("Texts Editor level ready");
         _regenerator.RegenerateRd3dText(project);
-        _regenerator.RegenerateGameDataText(project);
+        trace?.Invoke("Texts RD3D ready");
+        _regenerator.RegenerateGameDataText(project, rebuildAllTerrainAreas);
+        trace?.Invoke("Texts GameData ready");
         if (project.MaterialSet is not null)
         {
             _regenerator.RegenerateMaterialSetText(project);
+        trace?.Invoke("Texts Material set ready");
         }
 
         MarkDirty(project, "Root", "RD3D", "GameData", "AnnoEditorLevel", "MaterialSet");
         project.ValidationReport = _validator.Validate(project);
+        trace?.Invoke("Texts Validation ready");
     }
 
     private void SyncDerivedDimensions(IslandProject project)

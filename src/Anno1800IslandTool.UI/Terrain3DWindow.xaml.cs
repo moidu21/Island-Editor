@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -66,7 +66,7 @@ public partial class Terrain3DWindow : Window
     private TimeSpan _lastSceneBuildDuration = TimeSpan.Zero;
     private Terrain3DSourceMode _lastSceneBuildRenderMode = Terrain3DSourceMode.MeshLodMergedRaw;
     private int _lastSceneBuildQualityStep = 1;
-    private string _lastSceneBuildPhase = "Initialisation";
+    private string _lastSceneBuildPhase = Anno1800IslandTool.Core.Localization.TextCatalog.T("Initialisation");
     private string? _lastSceneBuildError;
     private int _hoverSampleX = -1;
     private int _hoverSampleY = -1;
@@ -443,9 +443,9 @@ public partial class Terrain3DWindow : Window
             MessageBox.Show(
                 this,
                 gpuWindow.MaximumIslandExpansionRequested
-                    ? "L’extension maximale a déjà été créée, appliquée au projet et rechargée dans l’éditeur Direct3D 11. Les éventuelles modifications suivantes ont également été synchronisées."
-                    : "Les hauteurs modifiées par Direct3D 11 sont revenues dans le projet et la zone coarse correspondante a été synchronisée. Utilisez maintenant 'Valider LOD mesh courant' ou 'Valider tout le terrain' pour préparer les écritures d'export.",
-                "Éditeur GPU Direct3D 11",
+                    ? Anno1800IslandTool.Core.Localization.TextCatalog.T("L’extension maximale a déjà été créée, appliquée au projet et rechargée dans l’éditeur Direct3D 11. Les éventuelles modifications suivantes ont également été synchronisées.")
+                    : Anno1800IslandTool.Core.Localization.TextCatalog.T("Les hauteurs modifiées par Direct3D 11 sont revenues dans le projet et la zone coarse correspondante a été synchronisée. Utilisez maintenant 'Valider LOD mesh courant' ou 'Valider tout le terrain' pour préparer les écritures d'export."),
+                Anno1800IslandTool.Core.Localization.TextCatalog.T("Éditeur GPU Direct3D 11"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
         }
@@ -453,15 +453,15 @@ public partial class Terrain3DWindow : Window
         {
             MessageBox.Show(
                 this,
-                $"Le viewport Direct3D 11 n'a pas pu démarrer : {ex.Message}\n\nL'éditeur terrain principal actuel reste disponible.",
-                "Éditeur GPU Direct3D 11",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"Le viewport Direct3D 11 n'a pas pu démarrer : {ex.Message}\n\nL'éditeur terrain principal actuel reste disponible."),
+                Anno1800IslandTool.Core.Localization.TextCatalog.T("Éditeur GPU Direct3D 11"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }
     }
 
     private string ApplyMaximumExpansionFromGpu(
-        IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)> changedRegions)
+        IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)> changedRegions, float newLandHeight)
     {
         foreach (var region in changedRegions)
         {
@@ -469,14 +469,15 @@ public partial class Terrain3DWindow : Window
             MergeDirtyRegionFromWorldBounds(region.MinX, region.MinZ, region.MaxX, region.MaxZ);
         }
 
+        TerrainMemoryTrace.Write($"Maximum start size={_project.Root.MapSize}");
         OriginalBeachCleaner.Remove(_project);
-        ExtendIslandToMaximumActiveMask();
+        ExtendIslandToMaximumActiveMask(newLandHeight);
         var oceanRingSamples = EnforceOuterOceanSafetyRing();
         ApplyActiveMapMaskToProject(regenerateText: true);
         var workingMap = BuildWorkingMap();
         if (workingMap.Width <= 0 || workingMap.Height <= 0)
         {
-            throw new InvalidOperationException("La heightmap du projet est vide.");
+            throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("La heightmap du projet est vide."));
         }
 
         var fullBounds = new RectI(0, 0, Math.Max(0, workingMap.Width - 1), Math.Max(0, workingMap.Height - 1));
@@ -488,7 +489,7 @@ public partial class Terrain3DWindow : Window
             HeightMapHeight = workingMap.Height,
             DirtySampleBounds = dirtyBounds
         };
-        _lastTerrainDependencySyncReport.Notes.Add("Extension GPU directe : les nouvelles zones sont initialisées en fond marin pour éviter l’écume rectangulaire.");
+        _lastTerrainDependencySyncReport.Notes.Add(Anno1800IslandTool.Core.Localization.TextCatalog.T("Extension GPU directe : seules les nouvelles zones prennent la hauteur choisie ; le relief existant est conservé."));
         var oceanMaterialSummary = PaintOuterOceanSafetyRingMaterials();
         var usedMaterialPages = _editor.ResynchronizeMeshUsedMaterialBitsFromMaterialMap(_project);
 
@@ -501,24 +502,34 @@ public partial class Terrain3DWindow : Window
             fullBounds,
             fullBounds,
             0);
+        TerrainMemoryTrace.Write("Maximum heightmap ready");
         state.AnchorMeshLod = selectedLod;
+        // This operation builds the mesh from this exact authoritative map.
+        // Re-indexing the new mesh for normalmaps duplicates millions of samples.
+        state.UseCoarseHeightMap = true;
         var meshWrites = _localRegenerator.GenerateExpandedActiveMeshPageWrites(
             _project,
             workingMap,
             state,
             BuildMeshRegenerationOptions());
+        TerrainMemoryTrace.Write($"Maximum mesh text ready pages={meshWrites.Count}");
         ApplyGeneratedMeshWrites(meshWrites);
+        TerrainMemoryTrace.Write("Maximum mesh models ready");
         var normalWrites = _localRegenerator.GenerateAllInterpretedNormalMapWrites(_project, workingMap, state);
+        TerrainMemoryTrace.Write($"Maximum normals ready pages={normalWrites.Count}");
         var tintWrites = _localRegenerator.GenerateAllTintMapWritesVanillaLike(_project, workingMap, state);
-        CommitTerrainValidationToProject(state, meshWrites, tintWrites);
+        TerrainMemoryTrace.Write("Maximum tints ready");
+        CommitTerrainValidationToProject(state, meshWrites, tintWrites, meshAlreadyApplied: true);
 
+        _project.PendingNewLandOriginalSize = null;
+        TerrainMemoryTrace.Write("Maximum committed");
         InvalidateBrushSpatialIndex();
         PopulatePageRows(GetSelectedPageRow()?.Page.Key);
         RequestSceneRebuild(immediate: true);
         RefreshPropagationInfo();
         UpdateNormalPreview();
-        return $"Extension maximale appliquée et rechargée : {meshWrites.Count} page(s) mesh, {normalWrites.Count} normalmap(s), {tintWrites.Count} tintmap(s). " +
-               $"Anneau océanique : {oceanRingSamples} hauteur(s) protégée(s). {oceanMaterialSummary} {usedMaterialPages} page(s) matériau resynchronisée(s). Vous pouvez la modifier immédiatement.";
+        return Anno1800IslandTool.Core.Localization.TextCatalog.F($"Extension maximale à la hauteur {newLandHeight:0.###} appliquée et rechargée : {meshWrites.Count} page(s) mesh, {normalWrites.Count} normalmap(s), {tintWrites.Count} tintmap(s). ") +
+               Anno1800IslandTool.Core.Localization.TextCatalog.F($"Anneau océanique : {oceanRingSamples} hauteur(s) protégée(s). {oceanMaterialSummary} {usedMaterialPages} page(s) matériau resynchronisée(s). Vous pouvez la modifier immédiatement.");
     }
 
     private string ApplyFootprintFromGpu(
@@ -536,17 +547,17 @@ public partial class Terrain3DWindow : Window
         var expectedCellCount = Math.Max(0, grid.X) * Math.Max(0, grid.Y);
         if (grid.X <= 0 || grid.Y <= 0 || expectedCellCount <= 0)
         {
-            throw new InvalidOperationException("ActiveMapGrid est absent : l’emprise de l’île ne peut pas être modifiée.");
+            throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("ActiveMapGrid est absent : l’emprise de l’île ne peut pas être modifiée."));
         }
         if (requestedMask.Count < expectedCellCount)
         {
-            throw new InvalidOperationException($"Le masque dessiné est incomplet ({requestedMask.Count}/{expectedCellCount} cellules).");
+            throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Le masque dessiné est incomplet ({requestedMask.Count}/{expectedCellCount} cellules)."));
         }
 
         var next = requestedMask.Take(expectedCellCount).ToArray();
         if (!next.Any(static active => active))
         {
-            throw new InvalidOperationException("L’emprise ne peut pas être entièrement vide. Conservez au moins une cellule active.");
+            throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("L’emprise ne peut pas être entièrement vide. Conservez au moins une cellule active."));
         }
 
         if (_activeMapMask.Length < expectedCellCount)
@@ -581,7 +592,7 @@ public partial class Terrain3DWindow : Window
         }
         if (addedCells == 0 && removedCells == 0 && fineTerrainStamps.Count == 0)
         {
-            return "L’emprise dessinée est identique à celle du projet ; aucune cellule n’a été ajoutée ou retirée.";
+            return Anno1800IslandTool.Core.Localization.TextCatalog.T("L’emprise dessinée est identique à celle du projet ; aucune cellule n’a été ajoutée ou retirée.");
         }
 
         if (addedCells > 0 && !_extensionMaterialFillPending)
@@ -629,7 +640,7 @@ public partial class Terrain3DWindow : Window
         var workingMap = BuildWorkingMap();
         if (workingMap.Width <= 0 || workingMap.Height <= 0)
         {
-            throw new InvalidOperationException("La heightmap du projet est vide.");
+            throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("La heightmap du projet est vide."));
         }
 
         var fullBounds = new RectI(0, 0, Math.Max(0, workingMap.Width - 1), Math.Max(0, workingMap.Height - 1));
@@ -679,20 +690,20 @@ public partial class Terrain3DWindow : Window
         IslandExpansionModeCheckBox.IsChecked = false;
 
         MarkDirtyOperation(
-            $"Emprise DX11 v46.15 : +{addedCells} / -{removedCells} cellule(s), " +
-            $"{initializedSamples} échantillon(s) fond marin, {fineTerrainSamples} échantillon(s) de terre fine, {outsideSamples} échantillon(s) hors emprise nettoyés, {oceanRingSamples} échantillon(s) de bord protégés, " +
-            $"{suppressedPages} page(s) hors emprise supprimée(s) à l’export");
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"Emprise DX11 v46.15 : +{addedCells} / -{removedCells} cellule(s), ") +
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"{initializedSamples} échantillon(s) fond marin, {fineTerrainSamples} échantillon(s) de terre fine, {outsideSamples} échantillon(s) hors emprise nettoyés, {oceanRingSamples} échantillon(s) de bord protégés, ") +
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"{suppressedPages} page(s) hors emprise supprimée(s) à l’export"));
         InvalidateBrushSpatialIndex();
         PopulatePageRows(GetSelectedPageRow()?.Page.Key);
         RequestSceneRebuild(immediate: true);
         RefreshPropagationInfo();
         UpdateNormalPreview();
 
-        return $"Emprise appliquée : +{addedCells} cellule(s), -{removedCells} cellule(s), " +
-               $"{initializedSamples} échantillon(s) converti(s) en fond marin et {fineTerrainSamples} échantillon(s) dessiné(s) finement. " +
-               $"{meshWrites.Count} page(s) mesh, {normalWrites.Count} normalmap(s) et {tintWrites.Count} tintmap(s) ont été recalculées ; " +
-               $"{suppressedPages} page(s) entièrement hors emprise seront absentes de l’export. " +
-               $"Anneau océanique : {oceanRingSamples} hauteur(s) protégée(s). {footprintMaterialSummary} {oceanMaterialSummary} {usedMaterialPages} page(s) matériau resynchronisée(s). " +
+        return Anno1800IslandTool.Core.Localization.TextCatalog.F($"Emprise appliquée : +{addedCells} cellule(s), -{removedCells} cellule(s), ") +
+               Anno1800IslandTool.Core.Localization.TextCatalog.F($"{initializedSamples} échantillon(s) converti(s) en fond marin et {fineTerrainSamples} échantillon(s) dessiné(s) finement. ") +
+               Anno1800IslandTool.Core.Localization.TextCatalog.F($"{meshWrites.Count} page(s) mesh, {normalWrites.Count} normalmap(s) et {tintWrites.Count} tintmap(s) ont été recalculées ; ") +
+               Anno1800IslandTool.Core.Localization.TextCatalog.F($"{suppressedPages} page(s) entièrement hors emprise seront absentes de l’export. ") +
+               Anno1800IslandTool.Core.Localization.TextCatalog.F($"Anneau océanique : {oceanRingSamples} hauteur(s) protégée(s). {footprintMaterialSummary} {oceanMaterialSummary} {usedMaterialPages} page(s) matériau resynchronisée(s). ") +
                $"{previewSummary} {objectSummary}";
     }
 
@@ -863,7 +874,7 @@ public partial class Terrain3DWindow : Window
         if (grid.X <= 0 || grid.Y <= 0 || activeMask.Count < grid.X * grid.Y ||
             source.Width <= 0 || source.Height <= 0 || !source.HasAnyData)
         {
-            return "Matériaux : synchronisation d’emprise ignorée.";
+            return Anno1800IslandTool.Core.Localization.TextCatalog.T("Matériaux : synchronisation d’emprise ignorée.");
         }
 
         var map = source.Clone();
@@ -899,11 +910,11 @@ public partial class Terrain3DWindow : Window
             };
             result.AffectedMaterialIds.Add(deepWaterMaterialId);
             var editState = _project.MaterialEditState ?? new TerrainMaterialEditState();
-            editState.AddGeneratedOperation(result, "v46.15 MaterialMap synchronisée à l’empreinte réelle");
+            editState.AddGeneratedOperation(result, Anno1800IslandTool.Core.Localization.TextCatalog.T("v46.15 MaterialMap synchronisée à l’empreinte réelle"));
             _editor.ReplaceTerrainMaterialMap(_project, map, editState);
         }
 
-        return $"Matériaux : {changed} texel(s) hors emprise remis en eau profonde ; plage protégée pour les pinceaux suivants.";
+        return Anno1800IslandTool.Core.Localization.TextCatalog.F($"Matériaux : {changed} texel(s) hors emprise remis en eau profonde ; plage protégée pour les pinceaux suivants.");
     }
 
     private string RegenerateFootprintPreviewImages(IReadOnlyList<bool> activeMask, Int2 grid, CoarseHeightMap heightMap)
@@ -913,7 +924,7 @@ public partial class Terrain3DWindow : Window
     {
         if (grid.X <= 0 || grid.Y <= 0 || activeMask.Count < grid.X * grid.Y)
         {
-            return "Objets : masque actif indisponible.";
+            return Anno1800IslandTool.Core.Localization.TextCatalog.T("Objets : masque actif indisponible.");
         }
 
         var movedSlots = 0;
@@ -969,7 +980,7 @@ public partial class Terrain3DWindow : Window
             _project.ModifiedSections.Add("ObjectPlacements");
         }
 
-        return $"Objets : {movedSlots} point(s) d’objet replacé(s), {removedGroundObjects} décoration(s)/végétation hors île retirée(s), {outsideSpawns} point(s) de spawn maritime conservé(s).";
+        return Anno1800IslandTool.Core.Localization.TextCatalog.F($"Objets : {movedSlots} point(s) d’objet replacé(s), {removedGroundObjects} décoration(s)/végétation hors île retirée(s), {outsideSpawns} point(s) de spawn maritime conservé(s).");
     }
 
     private static Float2 FindNearestActiveRootPoint(IReadOnlyList<bool> activeMask, Int2 grid, double rootX, double rootY)
@@ -1094,7 +1105,7 @@ public partial class Terrain3DWindow : Window
         var workingMap = BuildWorkingMap();
         if (workingMap.Width <= 0 || workingMap.Height <= 0)
         {
-            throw new InvalidOperationException("La heightmap du projet est vide.");
+            throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("La heightmap du projet est vide."));
         }
 
         var fullBounds = new RectI(0, 0, Math.Max(0, workingMap.Width - 1), Math.Max(0, workingMap.Height - 1));
@@ -1174,7 +1185,7 @@ public partial class Terrain3DWindow : Window
         }
 
         var coastAnchorCount = AddPlayableCoastLineToGameData(beach);
-        _editor.RegenerateAllTexts(_project);
+        BusyWork.Run(this, () => { _editor.RegenerateAllTexts(_project, TerrainMemoryTrace.Write); return true; });
         _project.IsModified = true;
         _project.ModifiedSections.Add("GpuBeachClassicMaterials");
         _project.ModifiedSections.Add("GameDataPlayableCoastLine");
@@ -1183,8 +1194,8 @@ public partial class Terrain3DWindow : Window
         RefreshPropagationInfo();
         UpdateNormalPreview();
         var lodText = string.Join(", ", freshMeshWrites.GroupBy(write => write.Key.Lod).OrderBy(group => group.Key).Select(group => $"LOD {group.Key}={group.Count()}"));
-        return $"Plage classique appliquée sans perdre les éditions précédentes : {materialResult.CellsChanged} texel(s) sable forcé(s), {coastAnchorCount} emplacement(s) de comptoir réparti(s) sur toute la côte, tous les LOD concernés resynchronisés ({lodText}), {freshNormalWrites.Count} normalmap(s) et {freshTintWrites.Count} tintmap(s) actualisées ({usedMaterialPages} page(s) matériau). " +
-               $"Anneau océanique : {oceanRingSamples} hauteur(s) protégée(s). {oceanMaterialSummary}";
+        return Anno1800IslandTool.Core.Localization.TextCatalog.F($"Plage classique appliquée sans perdre les éditions précédentes : {materialResult.CellsChanged} texel(s) sable forcé(s), {coastAnchorCount} emplacement(s) de comptoir réparti(s) sur toute la côte, tous les LOD concernés resynchronisés ({lodText}), {freshNormalWrites.Count} normalmap(s) et {freshTintWrites.Count} tintmap(s) actualisées ({usedMaterialPages} page(s) matériau). ") +
+               Anno1800IslandTool.Core.Localization.TextCatalog.F($"Anneau océanique : {oceanRingSamples} hauteur(s) protégée(s). {oceanMaterialSummary}");
     }
 
     private RectI WorldBoundsToCoarseBounds(CoarseHeightMap map, double minX, double minZ, double maxX, double maxZ)
@@ -1203,7 +1214,7 @@ public partial class Terrain3DWindow : Window
         var source = _project.Rd3d.MaterialMap;
         if (source.Width <= 0 || source.Height <= 0 || !source.HasAnyData)
         {
-            throw new InvalidOperationException("La MaterialMap du terrain est absente ; le sable ne peut pas être appliqué.");
+            throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("La MaterialMap du terrain est absente ; le sable ne peut pas être appliqué."));
         }
 
         var map = source.Clone();
@@ -1221,7 +1232,7 @@ public partial class Terrain3DWindow : Window
         var length = axis.Length();
         if (length < 1f)
         {
-            throw new InvalidOperationException("Le tracé de plage est trop court.");
+            throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Le tracé de plage est trop court."));
         }
 
         var tangent = axis / length;
@@ -1286,9 +1297,9 @@ public partial class Terrain3DWindow : Window
         result.AffectedMaterialIds.Add(sandId);
         result.AffectedMaterialIds.Add(shallowWaterId);
         result.AffectedMaterialIds.Add(deepWaterId);
-        result.Messages.Add($"Matériaux plage {sandId}, eau peu profonde {shallowWaterId} et fond marin {deepWaterId} appliqués jusqu'au bord de carte.");
+        result.Messages.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Matériaux plage {sandId}, eau peu profonde {shallowWaterId} et fond marin {deepWaterId} appliqués jusqu'au bord de carte."));
         var editState = _project.MaterialEditState ?? new TerrainMaterialEditState();
-        editState.AddGeneratedOperation(result, "v46.10 plage DX11 : sable puis matériaux sous-marins jusqu'au bord");
+        editState.AddGeneratedOperation(result, Anno1800IslandTool.Core.Localization.TextCatalog.T("v46.10 plage DX11 : sable puis matériaux sous-marins jusqu'au bord"));
         _editor.ReplaceTerrainMaterialMap(_project, map, editState);
         return result;
     }
@@ -1298,7 +1309,7 @@ public partial class Terrain3DWindow : Window
         var text = _project.RawContent.GameDataText;
         if (string.IsNullOrWhiteSpace(text))
         {
-            throw new InvalidOperationException("gamedata.xml est absent ; la ligne de côte du comptoir ne peut pas être créée.");
+            throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("gamedata.xml est absent ; la ligne de côte du comptoir ne peut pas être créée."));
         }
 
         // v46.9 : les CoastLine natives sont des EditorObject. Les anciennes versions
@@ -1310,7 +1321,7 @@ public partial class Terrain3DWindow : Window
         var snapshot = GameDataAreaObjectsXmlEditor.Extract(text, "EditorObject");
         if (snapshot.Containers.Count == 0)
         {
-            throw new InvalidOperationException("Aucun groupe EditorObject n’existe dans AreaObjectManager/gamedata.xml.");
+            throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun groupe EditorObject n’existe dans AreaObjectManager/gamedata.xml."));
         }
 
         var target = snapshot.Containers.FirstOrDefault(container =>
@@ -1484,7 +1495,7 @@ public partial class Terrain3DWindow : Window
         {
             if (_dirtyRegion is null)
             {
-                MessageBox.Show(this, "Modifie d'abord le terrain mesh en 3D pour créer une dirty region avant de valider le LOD courant.", "Validation LOD", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Modifie d'abord le terrain mesh en 3D pour créer une dirty region avant de valider le LOD courant."), Anno1800IslandTool.Core.Localization.TextCatalog.T("Validation LOD"), MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -1555,7 +1566,7 @@ public partial class Terrain3DWindow : Window
                 : _localRegenerator.GenerateInterpretedNormalMapWrites(_project, meshBackedMap, state);
             var oceanMaterialSummary = PaintOuterOceanSafetyRingMaterials();
             _editor.ResynchronizeMeshUsedMaterialBitsFromMaterialMap(_project);
-            var materialSyncSummary = $"Matériaux : MaterialMap intérieure conservée ; {oceanMaterialSummary}";
+            var materialSyncSummary = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Matériaux : MaterialMap intérieure conservée ; {oceanMaterialSummary}");
             // v39.1/v42 : topology source + régénération tintmap automatique locale.
             // Le problème venait du rebuild topologique adaptatif, pas des tintmaps ;
             // on régénère donc les tintmaps tout en conservant X/Z, indices et vertices du mesh courant/importé/édité.
@@ -1570,20 +1581,20 @@ public partial class Terrain3DWindow : Window
             RefreshPropagationInfo();
 
             var meshScopeText = syncAllMeshLods
-                ? "tous les LOD mesh éditables par recouvrement spatial"
+                ? Anno1800IslandTool.Core.Localization.TextCatalog.T("tous les LOD mesh éditables par recouvrement spatial")
                 : $"LOD {selectedLod}";
             var normalScopeText = forceAllNormalHeightPages
-                ? "toutes les height/normal pages forcées, pour éviter le retour du relief en caméra proche"
-                : "height/normal pages affectées";
+                ? Anno1800IslandTool.Core.Localization.TextCatalog.T("toutes les height/normal pages forcées, pour éviter le retour du relief en caméra proche")
+                : Anno1800IslandTool.Core.Localization.TextCatalog.T("height/normal pages affectées");
             MessageBox.Show(this,
-                $"Validation mesh terminée.\nCoarse dérivée des meshes, {meshWrites.Count} mesh page(s) ({meshScopeText}), {normalWrites.Count} normalmap(s) ({normalScopeText}) et {tintWrites.Count} tintmap(s) régénérées automatiquement.\nAnneau océanique : {oceanRingSamples + restoredOceanRingSamples} hauteur(s) protégée(s). {materialSyncSummary}\nMode v46.20 : interpolation des triangles, normales de surface recalculées et plage extérieure sur le contour.\n\n{(_lastTerrainDependencySyncReport?.ToDisplayText() ?? string.Empty)}",
-                "Validation LOD",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"Validation mesh terminée.\nCoarse dérivée des meshes, {meshWrites.Count} mesh page(s) ({meshScopeText}), {normalWrites.Count} normalmap(s) ({normalScopeText}) et {tintWrites.Count} tintmap(s) régénérées automatiquement.\nAnneau océanique : {oceanRingSamples + restoredOceanRingSamples} hauteur(s) protégée(s). {materialSyncSummary}\nMode v46.20 : interpolation des triangles, normales de surface recalculées et plage extérieure sur le contour.\n\n{(_lastTerrainDependencySyncReport?.ToDisplayText() ?? string.Empty)}"),
+                Anno1800IslandTool.Core.Localization.TextCatalog.T("Validation LOD"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Validation LOD", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.Message, Anno1800IslandTool.Core.Localization.TextCatalog.T("Validation LOD"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -1593,14 +1604,14 @@ public partial class Terrain3DWindow : Window
         {
             if (_dirtyRegion is null)
             {
-                MessageBox.Show(this, "Modifie d'abord la hauteur en 3D pour créer une dirty region avant de recalculer les normalmaps locales.", "Normalmaps", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Modifie d'abord la hauteur en 3D pour créer une dirty region avant de recalculer les normalmaps locales."), "Normalmaps", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
             var map = _project.GameData.TerrainHeightMap;
             if (map.Width <= 0 || map.Height <= 0)
             {
-                MessageBox.Show(this, "La coarse heightmap du projet est vide.", "Normalmaps", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("La coarse heightmap du projet est vide."), "Normalmaps", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
@@ -1638,13 +1649,13 @@ public partial class Terrain3DWindow : Window
             PaintOuterOceanSafetyRingMaterials();
             _editor.ApplyLocalRegeneration(_project, state);
             _editor.ApplyGeneratedNormalMapWrites(_project, state);
-            _editor.RegenerateAllTexts(_project);
+            BusyWork.Run(this, () => { _editor.RegenerateAllTexts(_project, TerrainMemoryTrace.Write); return true; });
             _previewLocalRegeneration = state;
             RefreshPropagationInfo();
             UpdateNormalPreview();
 
-            var scope = forceAllNormalHeightPages ? "toutes les height/normal pages de l'île" : "les LOD visuels affectés";
-            MessageBox.Show(this, $"{writes.Count} normalmap(s) interprété(s) ont été générés pour {scope} et appliqués au projet en mémoire pour l'export.", "Normalmaps", MessageBoxButton.OK, MessageBoxImage.Information);
+            var scope = forceAllNormalHeightPages ? Anno1800IslandTool.Core.Localization.TextCatalog.T("toutes les height/normal pages de l'île") : Anno1800IslandTool.Core.Localization.TextCatalog.T("les LOD visuels affectés");
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.F($"{writes.Count} normalmap(s) interprété(s) ont été générés pour {scope} et appliqués au projet en mémoire pour l'export."), "Normalmaps", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
@@ -1658,14 +1669,14 @@ public partial class Terrain3DWindow : Window
         {
             if (_dirtyRegion is null)
             {
-                MessageBox.Show(this, "Modifie d'abord la hauteur en 3D pour créer une dirty region avant de recalculer les tintmaps locales.", "Tintmaps", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Modifie d'abord la hauteur en 3D pour créer une dirty region avant de recalculer les tintmaps locales."), "Tintmaps", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
             var map = _project.GameData.TerrainHeightMap;
             if (map.Width <= 0 || map.Height <= 0)
             {
-                MessageBox.Show(this, "La coarse heightmap du projet est vide.", "Tintmaps", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("La coarse heightmap du projet est vide."), "Tintmaps", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
@@ -1685,7 +1696,7 @@ public partial class Terrain3DWindow : Window
             ApplyGeneratedTintWrites(writes);
             RefreshPropagationInfo();
 
-            MessageBox.Show(this, $"{writes.Count} tintmap(s) DDS ont été générées pour tous les LOD visuels affectés et appliquées au projet en mémoire pour l'export.", "Tintmaps", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.F($"{writes.Count} tintmap(s) DDS ont été générées pour tous les LOD visuels affectés et appliquées au projet en mémoire pour l'export."), "Tintmaps", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
@@ -1720,12 +1731,14 @@ public partial class Terrain3DWindow : Window
 
     private void CommitToProjectButton_Click(object sender, RoutedEventArgs e)
     {
+        var (oceanRingSamples, oceanMaterialSummary) = BusyWork.RunOnUi(this, () =>
+        {
         var usesIslandExpansion = IsIslandExpansionModeEnabled() || _activeMapMaskDirty;
         ApplyActiveMapMaskToProject(regenerateText: true);
-        var oceanRingSamples = EnforceOuterOceanSafetyRing();
+        var oceanSamples = EnforceOuterOceanSafetyRing();
         var workingMap = BuildWorkingMap();
         var fullBounds = new RectI(0, 0, Math.Max(0, workingMap.Width - 1), Math.Max(0, workingMap.Height - 1));
-        var dirtyBounds = oceanRingSamples > 0 ? fullBounds : GetDirtySampleBoundsFromExactMask();
+        var dirtyBounds = oceanSamples > 0 ? fullBounds : GetDirtySampleBoundsFromExactMask();
         if (usesIslandExpansion)
         {
             _editor.ReplaceCoarseHeightMap(_project, workingMap);
@@ -1735,7 +1748,7 @@ public partial class Terrain3DWindow : Window
                 HeightMapHeight = workingMap.Height,
                 DirtySampleBounds = dirtyBounds
             };
-            _lastTerrainDependencySyncReport.Notes.Add("v42.3 extension-safe : commit d'emprise sans resynchronisation des positions Y.");
+            _lastTerrainDependencySyncReport.Notes.Add(Anno1800IslandTool.Core.Localization.TextCatalog.T("v42.3 extension-safe : commit d'emprise sans resynchronisation des positions Y."));
         }
         else
         {
@@ -1743,11 +1756,13 @@ public partial class Terrain3DWindow : Window
         }
         var oceanMaterialSummary = PaintOuterOceanSafetyRingMaterials();
         _editor.ResynchronizeMeshUsedMaterialBitsFromMaterialMap(_project);
-        _editor.RegenerateAllTexts(_project);
+        BusyWork.Run(this, () => { _editor.RegenerateAllTexts(_project, TerrainMemoryTrace.Write); return true; });
+            return (oceanSamples, oceanMaterialSummary);
+        });
         RefreshPropagationInfo();
         MessageBox.Show(this,
-            $"La coarse dérivée des meshes édités a été appliquée au projet en mémoire. GameData/RD3D ont été resynchronisés. Anneau océanique : {oceanRingSamples} hauteur(s) protégée(s). {oceanMaterialSummary}" + Environment.NewLine + Environment.NewLine + _lastTerrainDependencySyncReport.ToDisplayText(),
-            "Terrain 3D",
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"La coarse dérivée des meshes édités a été appliquée au projet en mémoire. GameData/RD3D ont été resynchronisés. Anneau océanique : {oceanRingSamples} hauteur(s) protégée(s). {oceanMaterialSummary}") + Environment.NewLine + Environment.NewLine + _lastTerrainDependencySyncReport.ToDisplayText(),
+            Anno1800IslandTool.Core.Localization.TextCatalog.T("Terrain 3D"),
             MessageBoxButton.OK,
             MessageBoxImage.Information);
     }
@@ -1756,24 +1771,25 @@ public partial class Terrain3DWindow : Window
     {
         try
         {
-            var summary = ValidateEntireTerrainCore();
-            MessageBox.Show(this, summary, "Validation terrain", MessageBoxButton.OK, MessageBoxImage.Information);
+            var summary = BusyWork.RunOnUi(this, () => ValidateEntireTerrainCore());
+            MessageBox.Show(this, summary, Anno1800IslandTool.Core.Localization.TextCatalog.T("Validation terrain"), MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Validation terrain", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.Message, Anno1800IslandTool.Core.Localization.TextCatalog.T("Validation terrain"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
     private string ValidateEntireTerrainFromGpu(int selectedLod, IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)> changedRegions)
     {
-        if (changedRegions.Count == 0 && !_activeMapMaskDirty && !IsIslandExpansionModeEnabled()
+        if (changedRegions.Count == 0 && !_activeMapMaskDirty
             && !_preserveDirectRiverMeshWritesOnNextValidation)
         {
             // HeightEditState is cumulative export history, not uncommitted GPU edits.
             // Revalidating must not rebuild already-committed meshes from stale coarse samples.
-            _editor.RegenerateAllTexts(_project);
-            return "Aucune nouvelle modification du relief : maillages et pages de hauteur validés conservés.";
+            BusyWork.Run(this, () => { _editor.RegenerateAllTexts(_project, TerrainMemoryTrace.Write); return true; });
+            BusyWork.RunOnUi(this, () => IslandPreviewImages.Refresh(_project));
+            return Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune nouvelle modification du relief : maillages conservés, aperçus 2D actualisés.");
         }
         LodComboBox.SelectedItem = LodComboBox.Items.OfType<ComboBoxItem>()
             .FirstOrDefault(item => item.Tag is int lod && lod == selectedLod);
@@ -1827,7 +1843,7 @@ public partial class Terrain3DWindow : Window
         // GPU brushes now write every LOD directly. Snapshot those exact pages before
         // validation so no rectangular heightmap resampling can replace their topology.
         var preserveDirectGpuMeshWrites = changedRegions.Count > 0 &&
-            CommitDirectTerrainMeshWrites("Édition GPU : mêmes coups de pinceau appliqués à tous les LOD, raccords et jupes structurelles conservés.");
+            CommitDirectTerrainMeshWrites(Anno1800IslandTool.Core.Localization.TextCatalog.T("Édition GPU : mêmes coups de pinceau appliqués à tous les LOD, raccords et jupes structurelles conservés."));
         var preserveDirectMeshWrites = preserveDirectGpuMeshWrites ||
             (_preserveDirectRiverMeshWritesOnNextValidation && changedRegions.Count > 0);
         try
@@ -1868,7 +1884,7 @@ public partial class Terrain3DWindow : Window
             var workingMap = BuildWorkingMap();
             if (workingMap.Width <= 0 || workingMap.Height <= 0)
             {
-                throw new InvalidOperationException("La coarse dérivée du projet est vide.");
+                throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("La coarse dérivée du projet est vide."));
             }
 
             var fullBounds = new RectI(0, 0, Math.Max(0, workingMap.Width - 1), Math.Max(0, workingMap.Height - 1));
@@ -1910,7 +1926,7 @@ public partial class Terrain3DWindow : Window
                     HeightMapHeight = workingMap.Height,
                     DirtySampleBounds = null
                 };
-                _lastTerrainDependencySyncReport.Notes.Add("v46.63 : aucune édition géométrique ; hauteurs, indices, raccords et jupes LOD source conservés sans rééchantillonnage.");
+                _lastTerrainDependencySyncReport.Notes.Add(Anno1800IslandTool.Core.Localization.TextCatalog.T("v46.63 : aucune édition géométrique ; hauteurs, indices, raccords et jupes LOD source conservés sans rééchantillonnage."));
             }
             else if (usesIslandExpansion)
             {
@@ -1924,7 +1940,7 @@ public partial class Terrain3DWindow : Window
                     HeightMapHeight = workingMap.Height,
                     DirtySampleBounds = dirtyBounds
                 };
-                _lastTerrainDependencySyncReport.Notes.Add("v42.3 extension-safe : synchro positions Y et mesh-backed heightmap ignorées ; la heightmap GameData existante reste source de vérité.");
+                _lastTerrainDependencySyncReport.Notes.Add(Anno1800IslandTool.Core.Localization.TextCatalog.T("v42.3 extension-safe : synchro positions Y et mesh-backed heightmap ignorées ; la heightmap GameData existante reste source de vérité."));
             }
             else
             {
@@ -1953,11 +1969,12 @@ public partial class Terrain3DWindow : Window
                 ? _project.MeshPages.Values.Where(MeshPageClassifier.CanEditGeometry).Min(p => p.Key.Lod)
                 : sourceLod ?? selectedLod;
             state.UseCoarseHeightMap = (useCoarseHeightMap && !preserveDirectMeshWrites) || usesIslandExpansion;
+            var meshOptions = BuildMeshRegenerationOptions();
             IReadOnlyList<RegeneratedMeshPageWrite> editableMeshWrites = !regenerateMeshGeometry
                 ? Array.Empty<RegeneratedMeshPageWrite>()
-                : usesIslandExpansion
-                    ? _localRegenerator.GenerateExpandedActiveMeshPageWrites(_project, workingMap, state, BuildMeshRegenerationOptions())
-                    : _localRegenerator.GenerateMeshPageWrites(_project, workingMap, state, true, 99, BuildMeshRegenerationOptions());
+                : BusyWork.Run(this, () => usesIslandExpansion
+                    ? _localRegenerator.GenerateExpandedActiveMeshPageWrites(_project, workingMap, state, meshOptions)
+                    : _localRegenerator.GenerateMeshPageWrites(_project, workingMap, state, true, 99, meshOptions));
 
             ApplyGeneratedMeshWrites(editableMeshWrites);
 
@@ -1983,43 +2000,45 @@ public partial class Terrain3DWindow : Window
                     restoredOceanRingSamples > 0 ? fullBounds : expandedDirtyBounds);
             }
 
+            // Full validation must also replace synthetic pages from an earlier
+            // footprint expansion: they can exist only in pending writes, not in
+            // NormalMapPages. A local pass would leave their old flat heights alive.
             IReadOnlyList<RegeneratedNormalMapWrite> normalWrites = regenerateGeometry
-                ? usesIslandExpansion || restoredOceanRingSamples > 0
-                    ? _localRegenerator.GenerateAllInterpretedNormalMapWrites(_project, authoritativeMap, state)
-                    : _localRegenerator.GenerateInterpretedNormalMapWrites(_project, authoritativeMap, state)
+                ? BusyWork.Run(this, () => _localRegenerator.GenerateAllInterpretedNormalMapWrites(
+                    _project, authoritativeMap, state, includeMissingPages: true, includeInactivePages: true))
                 : Array.Empty<RegeneratedNormalMapWrite>();
             var oceanMaterialSummary = regenerateGeometry && protectOuterRing
                 ? PaintOuterOceanSafetyRingMaterials()
-                : "Anneau océanique matériaux conservé (édition intérieure locale).";
+                : Anno1800IslandTool.Core.Localization.TextCatalog.T("Anneau océanique matériaux conservé (édition intérieure locale).");
             var usedMaterialPages = _editor.ResynchronizeMeshUsedMaterialBitsFromMaterialMap(_project);
-            var materialSyncSummary = $"MaterialMap intérieure conservée ; {oceanMaterialSummary} UsedMaterialBits resynchronisés sur {usedMaterialPages} page(s).";
+            var materialSyncSummary = Anno1800IslandTool.Core.Localization.TextCatalog.F($"MaterialMap intérieure conservée ; {oceanMaterialSummary} UsedMaterialBits resynchronisés sur {usedMaterialPages} page(s).");
             // v42.1 : "Valider tout le terrain" force maintenant une régénération complète
             // des tintmaps, en DDS DXT1 vanilla-like, et ajoute uniquement les pages manquantes
             // qui recoupent ActiveMapGrid.bits. Si la MaterialMap a été recalée depuis la hauteur,
             // les tintmaps sont générées après cette mise à jour.
             IReadOnlyList<RegeneratedTintMapWrite> tintWrites = regenerateGeometry
-                ? usesIslandExpansion || restoredOceanRingSamples > 0
+                ? BusyWork.Run(this, () => usesIslandExpansion || restoredOceanRingSamples > 0
                     ? _localRegenerator.GenerateAllTintMapWritesVanillaLike(_project, authoritativeMap, state)
-                    : _localRegenerator.GenerateTintMapWrites(_project, authoritativeMap, state)
+                    : _localRegenerator.GenerateTintMapWrites(_project, authoritativeMap, state))
                 : Array.Empty<RegeneratedTintMapWrite>();
-            CommitTerrainValidationToProject(state, editableMeshWrites, tintWrites);
+            CommitTerrainValidationToProject(state, editableMeshWrites, tintWrites, rebuildAllTerrainAreas: true);
             UpdateNormalPreview();
             PopulatePageRows(GetSelectedPageRow()?.Page.Key);
             RequestSceneRebuild(immediate: true);
             RefreshPropagationInfo();
 
             var presetInfo = _pickedRawAttributePreset is null || UsePickedRawPresetCheckBox?.IsChecked != true
-                ? "preset Raw3..Raw7 inactif"
-                : $"preset Raw3..Raw7 appliqué {_pickedRawAttributePreset}";
+                ? Anno1800IslandTool.Core.Localization.TextCatalog.T("preset Raw3..Raw7 inactif")
+                : Anno1800IslandTool.Core.Localization.TextCatalog.F($"preset Raw3..Raw7 appliqué {_pickedRawAttributePreset}");
             var coastInfo = repairedCoastAnchors > 0
-                ? $"Côte du comptoir réparée : {repairedCoastAnchors} emplacement(s) réparti(s) sur toute la plage."
-                : "Aucune côte de comptoir générée à réparer.";
+                ? Anno1800IslandTool.Core.Localization.TextCatalog.F($"Côte du comptoir réparée : {repairedCoastAnchors} emplacement(s) réparti(s) sur toute la plage.")
+                : Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune côte de comptoir générée à réparer.");
             var geometryInfo = preserveDirectMeshWrites
-                ? $"Édition GPU multi-LOD : pages mesh directes conservées sans second rééchantillonnage rectangulaire ; {normalWrites.Count} normalmap(s) régénérées."
+                ? Anno1800IslandTool.Core.Localization.TextCatalog.F($"Édition GPU multi-LOD : pages mesh directes conservées sans second rééchantillonnage rectangulaire ; {normalWrites.Count} normalmap(s) régénérées.")
                 : regenerateGeometry
-                ? $"Géométrie modifiée : {editableMeshWrites.Count} mesh page(s) et {normalWrites.Count} normalmap(s) régénérées."
-                : "Aucune édition de hauteur détectée : géométrie et raccords LOD source conservés intégralement ; 0 mesh et 0 normalmap rééchantillonnés.";
-            return $"Validation globale terrain terminée.\n{geometryInfo} {tintWrites.Count} tintmap(s) régénérées complètement en format DDS DXT1 vanilla-like.\nAnneau océanique : {oceanRingSamples + restoredOceanRingSamples} hauteur(s) protégée(s). {materialSyncSummary}\n{coastInfo}\nLes pages normalmap/tintmap manquantes sont ajoutées seulement quand elles recoupent ActiveMapGrid.bits ; LOD0/LOD1 restent protégés comme pages de métadonnées.\n{presetInfo}.\n\n{(_lastTerrainDependencySyncReport?.ToDisplayText() ?? string.Empty)}";
+                ? Anno1800IslandTool.Core.Localization.TextCatalog.F($"Géométrie modifiée : {editableMeshWrites.Count} mesh page(s) et {normalWrites.Count} normalmap(s) régénérées.")
+                : Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune édition de hauteur détectée : géométrie et raccords LOD source conservés intégralement ; 0 mesh et 0 normalmap rééchantillonnés.");
+            return Anno1800IslandTool.Core.Localization.TextCatalog.F($"Validation globale terrain terminée.\n{geometryInfo} {tintWrites.Count} tintmap(s) régénérées complètement en format DDS DXT1 vanilla-like.\nAnneau océanique : {oceanRingSamples + restoredOceanRingSamples} hauteur(s) protégée(s). {materialSyncSummary}\n{coastInfo}\nLes pages normalmap/tintmap manquantes sont ajoutées seulement quand elles recoupent ActiveMapGrid.bits ; LOD0/LOD1 restent protégés comme pages de métadonnées.\n{presetInfo}.\n\n{(_lastTerrainDependencySyncReport?.ToDisplayText() ?? string.Empty)}");
     }
 
     private void PickRawPresetButton_Click(object sender, RoutedEventArgs e)
@@ -2096,7 +2115,8 @@ public partial class Terrain3DWindow : Window
     private void CommitTerrainValidationToProject(
         TerrainLocalRegenerationState state,
         IReadOnlyCollection<RegeneratedMeshPageWrite> meshWrites,
-        IReadOnlyCollection<RegeneratedTintMapWrite> tintWrites)
+        IReadOnlyCollection<RegeneratedTintMapWrite> tintWrites,
+        bool meshAlreadyApplied = false, bool rebuildAllTerrainAreas = false)
     {
         // v46.63 : la sélection/repeinture du MaterialSet prépare ses écritures mesh
         // avant l'ouverture de la fenêtre 3D. Une validation sans géométrie ne doit pas
@@ -2123,21 +2143,25 @@ public partial class Terrain3DWindow : Window
                 .Select(group => group.Last())
                 .ToList();
         }
-        _editor.ApplyLocalRegeneration(_project, state);
-        _editor.ApplyGeneratedMeshPageWrites(_project, state);
-        _editor.ApplyGeneratedNormalMapWrites(_project, state);
+        _editor.ApplyLocalRegeneration(_project, state, validate: false);
+        _editor.ApplyGeneratedMeshPageWrites(_project, state, validate: false);
+        _editor.ApplyGeneratedNormalMapWrites(_project, state, validate: false);
         if (tintWrites.Count > 0)
         {
-            _editor.ApplyGeneratedTintMapWrites(_project, state);
+            _editor.ApplyGeneratedTintMapWrites(_project, state, validate: false);
         }
+        TerrainMemoryTrace.Write("Commit derivatives registered");
         IslandPreviewImages.Refresh(_project);
+        TerrainMemoryTrace.Write("Commit preview images ready");
         _previewLocalRegeneration = state;
-        ApplyGeneratedMeshWrites(meshWrites);
+        if (!meshAlreadyApplied) ApplyGeneratedMeshWrites(meshWrites);
         if (tintWrites.Count > 0)
         {
             ApplyGeneratedTintWrites(tintWrites);
         }
-        _editor.RegenerateAllTexts(_project);
+        TerrainMemoryTrace.Write("Commit models ready; regenerating texts");
+        BusyWork.Run(this, () => { _editor.RegenerateAllTexts(_project, TerrainMemoryTrace.Write, rebuildAllTerrainAreas); return true; });
+        TerrainMemoryTrace.Write("Commit texts and final validation ready");
         _activeMapMaskDirty = false;
     }
 
@@ -2150,7 +2174,7 @@ public partial class Terrain3DWindow : Window
         // vanilla proches. Cela évite de transformer toute la carte en quelques patterns synthétiques.
         if (!_extensionMaterialFillPending && !_activeMapMaskDirty)
         {
-            return "Matériaux v43.3 : MaterialMap conservée ; aucune extension ActiveMapGrid en attente.";
+            return Anno1800IslandTool.Core.Localization.TextCatalog.T("Matériaux v43.3 : MaterialMap conservée ; aucune extension ActiveMapGrid en attente.");
         }
 
         var sourceMap = _originalMaterialMapForExtensionPreserve;
@@ -2180,7 +2204,7 @@ public partial class Terrain3DWindow : Window
         {
             _extensionMaterialFillPending = false;
             _extensionMaterialFillSourceMask = currentMask.ToArray();
-            return "Matériaux v43.3 : restauration/patch-fill ignoré, masque actif source ou cible vide.";
+            return Anno1800IslandTool.Core.Localization.TextCatalog.T("Matériaux v43.3 : restauration/patch-fill ignoré, masque actif source ou cible vide.");
         }
 
         var rootWidth = ResolveRootWidthForActiveMask();
@@ -2195,7 +2219,7 @@ public partial class Terrain3DWindow : Window
         {
             _extensionMaterialFillPending = false;
             _extensionMaterialFillSourceMask = currentMask.ToArray();
-            return "Matériaux v43.3 : restauration/patch-fill ignoré, MaterialIDs2 vide.";
+            return Anno1800IslandTool.Core.Localization.TextCatalog.T("Matériaux v43.3 : restauration/patch-fill ignoré, MaterialIDs2 vide.");
         }
 
         var currentBlockActive = new bool[totalBlocks];
@@ -2257,7 +2281,7 @@ public partial class Terrain3DWindow : Window
         {
             _extensionMaterialFillPending = false;
             _extensionMaterialFillSourceMask = currentMask.ToArray();
-            return "Matériaux v43.3 : restauration/patch-fill ignoré, aucun bloc source vanilla trouvé.";
+            return Anno1800IslandTool.Core.Localization.TextCatalog.T("Matériaux v43.3 : restauration/patch-fill ignoré, aucun bloc source vanilla trouvé.");
         }
 
         PropagateNearestMaterialSourceBlocks(blockWidth, blockHeight, nearestSourceBlock);
@@ -2397,7 +2421,7 @@ public partial class Terrain3DWindow : Window
         _extensionMaterialFillSourceMask = currentMask.ToArray();
         if (changedBlocks.Count == 0 && changedCells == 0)
         {
-            return "Matériaux v43.3 : MaterialMap déjà conforme au snapshot vanilla/patch-fill classé ; aucun changement.";
+            return Anno1800IslandTool.Core.Localization.TextCatalog.T("Matériaux v43.3 : MaterialMap déjà conforme au snapshot vanilla/patch-fill classé ; aucun changement.");
         }
 
         var result = new TerrainMaterialPaintResult
@@ -2407,11 +2431,11 @@ public partial class Terrain3DWindow : Window
             BlocksChanged = changedBlocks.Count,
             AffectedBounds = changedCells > 0 ? new RectI(left, top, right, bottom) : null
         };
-        result.Messages.Add("v43.3 : ancienne zone active restaurée depuis le snapshot MaterialMap vanilla ; nouvelles cellules actives remplies par clonage de patches classés hauteur/côte (terre, plage, eau). La heightmap flatten n'est pas utilisée pour repeindre les anciennes zones.");
+        result.Messages.Add(Anno1800IslandTool.Core.Localization.TextCatalog.T("v43.3 : ancienne zone active restaurée depuis le snapshot MaterialMap vanilla ; nouvelles cellules actives remplies par clonage de patches classés hauteur/côte (terre, plage, eau). La heightmap flatten n'est pas utilisée pour repeindre les anciennes zones."));
         var editState = _project.MaterialEditState ?? new TerrainMaterialEditState();
         editState.AddGeneratedOperation(result, "v43.3 extension : material-preserve + class-aware patch-fill");
         _editor.ReplaceTerrainMaterialMap(_project, updatedMap, editState);
-        return $"Matériaux v43.3 : zone active vanilla restaurée, extension remplie par patches classés ; {changedCells} alpha(s), {changedBlocks.Count} bloc(s) MaterialIDs2 modifié(s), blocs restaurés={restoredBlocks}, blocs extension={filledBlocks}, extension terre={classLandBlocks}, plage={classBeachBlocks}, eau={classWaterBlocks}, fallback={classFallbackBlocks}.";
+        return Anno1800IslandTool.Core.Localization.TextCatalog.F($"Matériaux v43.3 : zone active vanilla restaurée, extension remplie par patches classés ; {changedCells} alpha(s), {changedBlocks.Count} bloc(s) MaterialIDs2 modifié(s), blocs restaurés={restoredBlocks}, blocs extension={filledBlocks}, extension terre={classLandBlocks}, plage={classBeachBlocks}, eau={classWaterBlocks}, fallback={classFallbackBlocks}.");
     }
 
 
@@ -2670,7 +2694,7 @@ public partial class Terrain3DWindow : Window
     {
         if (!_extensionMaterialFillPending)
         {
-            return "Matériaux : aucune nouvelle cellule ActiveMapGrid à initialiser ; MaterialMap conservée.";
+            return Anno1800IslandTool.Core.Localization.TextCatalog.T("Matériaux : aucune nouvelle cellule ActiveMapGrid à initialiser ; MaterialMap conservée.");
         }
 
         var materialMap = _project.Rd3d.MaterialMap;
@@ -2678,7 +2702,7 @@ public partial class Terrain3DWindow : Window
         if (materialMap.Width <= 0 || materialMap.Height <= 0 || !materialMap.HasAnyData || grid.X <= 0 || grid.Y <= 0)
         {
             _extensionMaterialFillPending = false;
-            return "Matériaux : remplissage extension ignoré, MaterialMap ou ActiveMapGrid invalide.";
+            return Anno1800IslandTool.Core.Localization.TextCatalog.T("Matériaux : remplissage extension ignoré, MaterialMap ou ActiveMapGrid invalide.");
         }
 
         var currentMask = _activeMapMask.Length >= grid.X * grid.Y
@@ -2690,7 +2714,7 @@ public partial class Terrain3DWindow : Window
         if (!ActiveMapGridMaskCodec.HasAnyActiveCell(currentMask) || !ActiveMapGridMaskCodec.HasAnyActiveCell(sourceMask))
         {
             _extensionMaterialFillPending = false;
-            return "Matériaux : remplissage extension ignoré, masque source ou cible vide.";
+            return Anno1800IslandTool.Core.Localization.TextCatalog.T("Matériaux : remplissage extension ignoré, masque source ou cible vide.");
         }
 
         var rootWidth = ResolveRootWidthForActiveMask();
@@ -2721,7 +2745,7 @@ public partial class Terrain3DWindow : Window
         if (sourceCells == 0)
         {
             _extensionMaterialFillPending = false;
-            return "Matériaux : remplissage extension ignoré, aucune cellule source dans la MaterialMap.";
+            return Anno1800IslandTool.Core.Localization.TextCatalog.T("Matériaux : remplissage extension ignoré, aucune cellule source dans la MaterialMap.");
         }
 
         while (queue.Count > 0)
@@ -2798,7 +2822,7 @@ public partial class Terrain3DWindow : Window
         _extensionMaterialFillSourceMask = currentMask.ToArray();
         if (changedCells <= 0)
         {
-            return "Matériaux : nouvelles cellules ActiveMapGrid déjà cohérentes ; MaterialMap conservée.";
+            return Anno1800IslandTool.Core.Localization.TextCatalog.T("Matériaux : nouvelles cellules ActiveMapGrid déjà cohérentes ; MaterialMap conservée.");
         }
 
         var result = new TerrainMaterialPaintResult
@@ -2808,11 +2832,11 @@ public partial class Terrain3DWindow : Window
             BlocksChanged = changedBlocks.Count,
             AffectedBounds = new RectI(left, top, right, bottom)
         };
-        result.Messages.Add("v42.4 : extension MaterialMap initialisée par copie du motif vanilla le plus proche, sans classifier les matériaux depuis la hauteur flatten.");
+        result.Messages.Add(Anno1800IslandTool.Core.Localization.TextCatalog.T("v42.4 : extension MaterialMap initialisée par copie du motif vanilla le plus proche, sans classifier les matériaux depuis la hauteur flatten."));
         var editState = _project.MaterialEditState ?? new TerrainMaterialEditState();
-        editState.AddGeneratedOperation(result, "v42.4 extension : copie nearest vanilla MaterialIDs2/MaterialAlphas2");
+        editState.AddGeneratedOperation(result, Anno1800IslandTool.Core.Localization.TextCatalog.T("v42.4 extension : copie nearest vanilla MaterialIDs2/MaterialAlphas2"));
         _editor.ReplaceTerrainMaterialMap(_project, updatedMap, editState);
-        return $"Matériaux : {changedCells} cellule(s) MaterialMap d'extension initialisées par copie du motif vanilla le plus proche ; {changedBlocks.Count} bloc(s) MaterialIDs2 modifié(s). La heightmap flatten n'a pas été utilisée pour choisir les matériaux.";
+        return Anno1800IslandTool.Core.Localization.TextCatalog.F($"Matériaux : {changedCells} cellule(s) MaterialMap d'extension initialisées par copie du motif vanilla le plus proche ; {changedBlocks.Count} bloc(s) MaterialIDs2 modifié(s). La heightmap flatten n'a pas été utilisée pour choisir les matériaux.");
     }
 
     private static void TryPropagateNearestMaterialSource(int x, int y, int width, int height, int[] nearestSource, int sourceIndex, Queue<int> queue)
@@ -2844,19 +2868,19 @@ public partial class Terrain3DWindow : Window
     {
         if (AutoSyncMaterialsFromHeightCheckBox?.IsChecked != true)
         {
-            return "Matériaux : mise à jour hauteur->matériau désactivée.";
+            return Anno1800IslandTool.Core.Localization.TextCatalog.T("Matériaux : mise à jour hauteur->matériau désactivée.");
         }
 
         var materialMap = _project.Rd3d.MaterialMap;
         if (heightMap.Width <= 1 || heightMap.Height <= 1 || materialMap.Width <= 0 || materialMap.Height <= 0 || !materialMap.HasAnyData)
         {
-            return "Matériaux : mise à jour hauteur->matériau ignorée, heightmap ou MaterialMap vide.";
+            return Anno1800IslandTool.Core.Localization.TextCatalog.T("Matériaux : mise à jour hauteur->matériau ignorée, heightmap ou MaterialMap vide.");
         }
 
         var materialBounds = ConvertInclusiveSampleBoundsToMaterialBounds(heightMap, materialMap, sampleBoundsInclusive, marginCells: IsIslandExpansionModeEnabled() || _activeMapMaskDirty ? 24 : 8);
         if (materialBounds.Right <= materialBounds.Left || materialBounds.Bottom <= materialBounds.Top)
         {
-            return "Matériaux : mise à jour hauteur->matériau ignorée, zone convertie vide.";
+            return Anno1800IslandTool.Core.Localization.TextCatalog.T("Matériaux : mise à jour hauteur->matériau ignorée, zone convertie vide.");
         }
 
         var updatedMap = materialMap.Clone();
@@ -2865,13 +2889,13 @@ public partial class Terrain3DWindow : Window
         var result = TerrainCoastTransitionPainter.ApplyHeightToMaterialTransition(updatedMap, heightMap, options, out var stats, materialBounds, activeCellPredicate);
         if (!result.HasChanges)
         {
-            return $"Matériaux : image peinture déjà cohérente sur {materialBounds.Left},{materialBounds.Top}->{materialBounds.Right},{materialBounds.Bottom} ({result.CellsVisited} cellule(s) vérifiées).";
+            return Anno1800IslandTool.Core.Localization.TextCatalog.F($"Matériaux : image peinture déjà cohérente sur {materialBounds.Left},{materialBounds.Top}->{materialBounds.Right},{materialBounds.Bottom} ({result.CellsVisited} cellule(s) vérifiées).");
         }
 
         var editState = _project.MaterialEditState ?? new TerrainMaterialEditState();
-        editState.AddGeneratedOperation(result, $"v42 {reason} : hauteur -> MaterialMap bornée par ActiveMapGrid.bits");
+        editState.AddGeneratedOperation(result, Anno1800IslandTool.Core.Localization.TextCatalog.F($"v42 {reason} : hauteur -> MaterialMap bornée par ActiveMapGrid.bits"));
         _editor.ReplaceTerrainMaterialMap(_project, updatedMap, editState);
-        return $"Matériaux : MaterialMap mise à jour depuis la heightmap sur {materialBounds.Left},{materialBounds.Top}->{materialBounds.Right},{materialBounds.Bottom} ; {result.CellsChanged} cellule(s), {result.BlocksChanged} bloc(s). Eau profonde={stats.DeepWaterCells}, eau faible={stats.ShallowWaterCells}, plage={stats.BeachCells}, terre basse={stats.LowLandCells}, roche={stats.RockCells}.";
+        return Anno1800IslandTool.Core.Localization.TextCatalog.F($"Matériaux : MaterialMap mise à jour depuis la heightmap sur {materialBounds.Left},{materialBounds.Top}->{materialBounds.Right},{materialBounds.Bottom} ; {result.CellsChanged} cellule(s), {result.BlocksChanged} bloc(s). Eau profonde={stats.DeepWaterCells}, eau faible={stats.ShallowWaterCells}, plage={stats.BeachCells}, terre basse={stats.LowLandCells}, roche={stats.RockCells}.");
     }
 
     private static RectI ConvertInclusiveSampleBoundsToMaterialBounds(CoarseHeightMap heightMap, TerrainMaterialMap materialMap, RectI sampleBoundsInclusive, int marginCells)
@@ -3047,7 +3071,7 @@ public partial class Terrain3DWindow : Window
                 _originalMeshPagesForCompare[write.Key] = CloneMeshPage(original);
             }
 
-            var generated = _meshPageReader.Read(write.TargetPath, write.Key, write.XmlText);
+            var generated = _meshPageReader.Read(write.TargetPath, write.Key, write.XmlText, retainRawText: false);
             generated.OriginalRelativePath = write.TargetPath;
             _generatedMeshPages[write.Key] = generated;
             _project.MeshPages[write.Key] = generated;
@@ -3062,8 +3086,8 @@ public partial class Terrain3DWindow : Window
         }
 
         PickRawPresetButton.Content = _awaitingRawPresetPick
-            ? "Cliquer sur la mesh..."
-            : "Piquer Raw3..Raw7";
+            ? Anno1800IslandTool.Core.Localization.TextCatalog.T("Cliquer sur la mesh...")
+            : Anno1800IslandTool.Core.Localization.TextCatalog.T("Piquer Raw3..Raw7");
     }
 
     private bool TryPickRawPresetAtViewport(Point viewportPoint, out MeshRawAttributePreset preset, out TerrainPageKey? pageKey)
@@ -3129,15 +3153,15 @@ public partial class Terrain3DWindow : Window
 
         if (_awaitingRawPresetPick)
         {
-            PickedRawPresetTextBlock.Text = "Preset Raw3..Raw7 : clic gauche sur une mesh visible pour piquer, clic droit pour annuler";
+            PickedRawPresetTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Preset Raw3..Raw7 : clic gauche sur une mesh visible pour piquer, clic droit pour annuler");
             return;
         }
 
         PickedRawPresetTextBlock.Text = _pickedRawAttributePreset is null
-            ? "Preset Raw3..Raw7 : aucun"
+            ? Anno1800IslandTool.Core.Localization.TextCatalog.T("Preset Raw3..Raw7 : aucun")
             : pageKey is null
-                ? $"Preset Raw3..Raw7 : {_pickedRawAttributePreset}"
-                : $"Preset Raw3..Raw7 : {_pickedRawAttributePreset} (LOD {pageKey.Value.Lod}, X {pageKey.Value.X}, Y {pageKey.Value.Y})";
+                ? Anno1800IslandTool.Core.Localization.TextCatalog.F($"Preset Raw3..Raw7 : {_pickedRawAttributePreset}")
+                : Anno1800IslandTool.Core.Localization.TextCatalog.F($"Preset Raw3..Raw7 : {_pickedRawAttributePreset} (LOD {pageKey.Value.Lod}, X {pageKey.Value.X}, Y {pageKey.Value.Y})");
     }
 
 
@@ -3190,7 +3214,7 @@ public partial class Terrain3DWindow : Window
     private void ExtendIslandRightButton_Click(object sender, RoutedEventArgs e) => ExtendIslandActiveMask(0, 0, ParseIslandExpansionCellCount(), 0);
     private void ExtendIslandBottomButton_Click(object sender, RoutedEventArgs e) => ExtendIslandActiveMask(0, 0, 0, ParseIslandExpansionCellCount());
 
-    private void ExtendIslandToMaximumActiveMask()
+    private void ExtendIslandToMaximumActiveMask(float newLandHeight)
     {
         var grid = _project.Root.ActiveMapGrid;
         if (grid.X <= 0 || grid.Y <= 0 || _activeMapMask.Length < grid.X * grid.Y)
@@ -3205,14 +3229,15 @@ public partial class Terrain3DWindow : Window
 
         var before = _activeMapMask.ToArray();
         var maximum = Enumerable.Repeat(true, grid.X * grid.Y).ToArray();
-        var initializedOceanSamples = InitializeNewlyActivatedSamplesAsDeepWater(before, grid);
+        var initializedLandSamples = InitializeNewlyActivatedSamples(before, grid, newLandHeight);
+        TerrainMemoryTrace.Write($"Maximum height={newLandHeight} samplesChanged={initializedLandSamples} previouslyActive={ActiveMapGridMaskCodec.CountActiveCells(before)}/{before.Length} originalCanvas={_project.PendingNewLandOriginalSize}");
         if (before.SequenceEqual(maximum))
         {
             IslandExpansionModeCheckBox.IsChecked = true;
-            if (initializedOceanSamples > 0)
+            if (initializedLandSamples > 0)
             {
                 _activeMapMaskDirty = true;
-                MarkDirtyOperation($"Nettoyage bord océanique GPU v46.6 : {initializedOceanSamples} échantillon(s) replacé(s) à -8 sous l’eau");
+                MarkDirtyOperation(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Extension maximale : {initializedLandSamples} échantillon(s) placé(s) à la hauteur {newLandHeight:0.###}"));
                 MergeDirtyRegionFromWorldBounds(0, 0, _project.Rd3d.GridWidth, _project.Rd3d.GridHeight);
             }
             return;
@@ -3230,61 +3255,22 @@ public partial class Terrain3DWindow : Window
         var dirtyRoot = ActiveMapGridMaskCodec.ComputeDifferenceRect(grid, before, maximum)
                         ?? new RectI(0, 0, grid.X * ActiveMapGridMaskCodec.RootUnitsPerCell, grid.Y * ActiveMapGridMaskCodec.RootUnitsPerCell);
         var addedCells = ActiveMapGridMaskCodec.CountActiveCells(maximum) - ActiveMapGridMaskCodec.CountActiveCells(before);
-        MarkDirtyOperation($"Extension maximale XML GPU v46.6 : +{Math.Max(0, addedCells)} cellule(s), {initializedOceanSamples} échantillon(s) initialisé(s) à -8 sous l’eau, zone root complète {_project.Root.ActiveMapRect}");
+        MarkDirtyOperation(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Extension maximale XML GPU v46.6 : +{Math.Max(0, addedCells)} cellule(s), {initializedLandSamples} échantillon(s) initialisé(s) à la hauteur {newLandHeight:0.###}, zone root complète {_project.Root.ActiveMapRect}"));
         MergeDirtyRegionFromWorldBounds(dirtyRoot.Left * 32.0, dirtyRoot.Top * 32.0, dirtyRoot.Right * 32.0, dirtyRoot.Bottom * 32.0);
         IslandExpansionModeCheckBox.IsChecked = true;
     }
 
-    private int InitializeNewlyActivatedSamplesAsDeepWater(bool[] previousActiveMask, Int2 grid)
+    private int InitializeNewlyActivatedSamples(bool[] previousActiveMask, Int2 grid, float newLandHeight)
     {
         var map = _project.GameData.TerrainHeightMap;
-        if (map.Width <= 0 || map.Height <= 0 ||
-            _editedCoarseSamples.Length < map.Width * map.Height ||
-            previousActiveMask.Length < grid.X * grid.Y)
-        {
-            return 0;
-        }
-
-        var worldWidth = _project.Rd3d.GridWidth > 0
-            ? _project.Rd3d.GridWidth
-            : Math.Max(1, _project.Root.MapSize * 32);
-        var worldHeight = _project.Rd3d.GridHeight > 0
-            ? _project.Rd3d.GridHeight
-            : Math.Max(1, _project.Root.MapSize * 32);
-        var oceanBorderWidthX = worldWidth / (double)Math.Max(1, grid.X);
-        var oceanBorderWidthZ = worldHeight / (double)Math.Max(1, grid.Y);
-        var deepWaterRaw = TerrainHeightEncoding.WorldHeightToGameDataRaw(-8f);
-        var changed = 0;
-        for (var y = 0; y < map.Height; y++)
-        {
-            var worldZ = map.Height > 1 ? y * (worldHeight / (double)(map.Height - 1)) : 0d;
-            for (var x = 0; x < map.Width; x++)
-            {
-                var worldX = map.Width > 1 ? x * (worldWidth / (double)(map.Width - 1)) : 0d;
-                var wasPreviouslyActive = ActiveMapGridMaskCodec.IsWorldPointActive(previousActiveMask, grid, worldX, worldZ, worldWidth, worldHeight);
-                var isOuterOceanBorder = worldX <= oceanBorderWidthX || worldX >= worldWidth - oceanBorderWidthX ||
-                                         worldZ <= oceanBorderWidthZ || worldZ >= worldHeight - oceanBorderWidthZ;
-                if (wasPreviouslyActive)
-                {
-                    continue;
-                }
-
-                var index = (y * map.Width) + x;
-                if ((int)Math.Round(_editedCoarseSamples[index], MidpointRounding.AwayFromZero) == deepWaterRaw)
-                {
-                    continue;
-                }
-                _editedCoarseSamples[index] = deepWaterRaw;
-                changed++;
-            }
-        }
-
-        return changed;
+        return MaximumFootprintHeightInitializer.Apply(
+            _editedCoarseSamples, map.Width, map.Height, previousActiveMask, grid, newLandHeight,
+            _project.PendingNewLandOriginalSize, _project.Root.MapSize);
     }
 
     // The full XML extent is editable. Do not lower or repaint a reserved border.
     private int EnforceOuterOceanSafetyRing() => 0;
-    private string PaintOuterOceanSafetyRingMaterials() => "Bords libres : aucune bande oceanique imposee.";
+    private string PaintOuterOceanSafetyRingMaterials() => Anno1800IslandTool.Core.Localization.TextCatalog.T("Bords libres : aucune bande oceanique imposee.");
     private bool ActiveFootprintTouchesOuterMapBoundary()
     {
         var grid = _project.Root.ActiveMapGrid;
@@ -3345,7 +3331,7 @@ public partial class Terrain3DWindow : Window
 
         if (grid.X <= 0 || grid.Y <= 0)
         {
-            MessageBox.Show(this, "ActiveMapGrid absent ou invalide : impossible d'étendre l'île.", "Extension île", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("ActiveMapGrid absent ou invalide : impossible d'étendre l'île."), Anno1800IslandTool.Core.Localization.TextCatalog.T("Extension île"), MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -3353,7 +3339,7 @@ public partial class Terrain3DWindow : Window
         var expandedMask = ActiveMapGridMaskCodec.ExpandDirectionalOuterEdges(before, grid, leftCells, topCells, rightCells, bottomCells);
         if (before.SequenceEqual(expandedMask))
         {
-            MessageBox.Show(this, "Le masque actif touche déjà la limite root dans cette direction, ou aucune cellule active n'a été trouvée.", "Extension île", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Le masque actif touche déjà la limite root dans cette direction, ou aucune cellule active n'a été trouvée."), Anno1800IslandTool.Core.Localization.TextCatalog.T("Extension île"), MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -3370,7 +3356,7 @@ public partial class Terrain3DWindow : Window
         var dirtyRoot = ActiveMapGridMaskCodec.ComputeDifferenceRect(grid, before, expandedMask)
                         ?? ActiveMapGridMaskCodec.ComputeActiveRect(grid, _activeMapMask, _project.Root.ActiveMapRect);
         var addedCells = ActiveMapGridMaskCodec.CountActiveCells(expandedMask) - ActiveMapGridMaskCodec.CountActiveCells(before);
-        MarkDirtyOperation($"Extension ActiveMapGrid.bits v42 masque précis +{Math.Max(0, addedCells)} cellule(s) -> {_project.Root.ActiveMapRect}");
+        MarkDirtyOperation(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Extension ActiveMapGrid.bits v42 masque précis +{Math.Max(0, addedCells)} cellule(s) -> {_project.Root.ActiveMapRect}"));
         MergeDirtyRegionFromWorldBounds(dirtyRoot.Left * 32.0, dirtyRoot.Top * 32.0, dirtyRoot.Right * 32.0, dirtyRoot.Bottom * 32.0);
         IslandExpansionModeCheckBox.IsChecked = true;
         RequestSceneRebuild(immediate: true);
@@ -3434,7 +3420,7 @@ public partial class Terrain3DWindow : Window
         if (regenerateText)
         {
             if (changed) OriginalBeachCleaner.Remove(_project);
-            _editor.RegenerateAllTexts(_project);
+            BusyWork.Run(this, () => { _editor.RegenerateAllTexts(_project, TerrainMemoryTrace.Write); return true; });
         }
     }
 
@@ -3503,7 +3489,7 @@ public partial class Terrain3DWindow : Window
     {
         if (!TryParseDirtyHeightThreshold(out var threshold))
         {
-            MessageBox.Show(this, "Seuil invalide. Exemple attendu : 0 ou 12.5", "Vérification dirty area", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Seuil invalide. Exemple attendu : 0 ou 12.5"), Anno1800IslandTool.Core.Localization.TextCatalog.T("Vérification dirty area"), MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -3511,7 +3497,7 @@ public partial class Terrain3DWindow : Window
         var state = _project.HeightEditState;
         if (state.DirtyGameDataSamples.Count == 0)
         {
-            MessageBox.Show(this, "Aucun sample GameData exact dans le masque dirty.", "Vérification dirty area", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun sample GameData exact dans le masque dirty."), Anno1800IslandTool.Core.Localization.TextCatalog.T("Vérification dirty area"), MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -3522,25 +3508,25 @@ public partial class Terrain3DWindow : Window
             .ToList();
 
         var maxText = state.TryGetAfterHeightMaximum(out var maxSample) && maxSample is not null
-            ? $"Max après : {maxSample.AfterWorldHeight.ToString("0.###", CultureInfo.InvariantCulture)} au sample X={maxSample.X}, Z={maxSample.Z}"
-            : "Max après : n/a";
+            ? Anno1800IslandTool.Core.Localization.TextCatalog.F($"Max après : {maxSample.AfterWorldHeight.ToString("0.###", CultureInfo.InvariantCulture)} au sample X={maxSample.X}, Z={maxSample.Z}")
+            : Anno1800IslandTool.Core.Localization.TextCatalog.T("Max après : n/a");
 
         var sb = new StringBuilder();
-        sb.AppendLine($"Zone dirty exacte : {state.DirtyGameDataSamples.Count} sample(s)");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Zone dirty exacte : {state.DirtyGameDataSamples.Count} sample(s)"));
         sb.AppendLine(maxText);
-        sb.AppendLine($"Seuil : {threshold.ToString("0.###", CultureInfo.InvariantCulture)}");
-        sb.AppendLine($"Résultat : {(above.Count > 0 ? "OUI" : "NON")} — {state.CountSamplesAboveThreshold(threshold)} sample(s) > seuil");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Seuil : {threshold.ToString("0.###", CultureInfo.InvariantCulture)}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Résultat : {(above.Count > 0 ? Anno1800IslandTool.Core.Localization.TextCatalog.T("OUI") : Anno1800IslandTool.Core.Localization.TextCatalog.T("NON"))} — {state.CountSamplesAboveThreshold(threshold)} sample(s) > seuil"));
         if (above.Count > 0)
         {
             sb.AppendLine();
-            sb.AppendLine("Plus hauts samples dans la zone modifiée :");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Plus hauts samples dans la zone modifiée :"));
             foreach (var sample in above)
             {
-                sb.AppendLine($"- X={sample.X}, Z={sample.Z} : avant={sample.BeforeWorldHeight.ToString("0.###", CultureInfo.InvariantCulture)}, après={sample.AfterWorldHeight.ToString("0.###", CultureInfo.InvariantCulture)}, raw {sample.BeforeRaw.ToString("0.###", CultureInfo.InvariantCulture)}->{sample.AfterRaw.ToString("0.###", CultureInfo.InvariantCulture)}");
+                sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"- X={sample.X}, Z={sample.Z} : avant={sample.BeforeWorldHeight.ToString("0.###", CultureInfo.InvariantCulture)}, après={sample.AfterWorldHeight.ToString("0.###", CultureInfo.InvariantCulture)}, raw {sample.BeforeRaw.ToString("0.###", CultureInfo.InvariantCulture)}->{sample.AfterRaw.ToString("0.###", CultureInfo.InvariantCulture)}"));
             }
         }
 
-        MessageBox.Show(this, sb.ToString(), "Vérification dirty area", MessageBoxButton.OK, above.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
+        MessageBox.Show(this, sb.ToString(), Anno1800IslandTool.Core.Localization.TextCatalog.T("Vérification dirty area"), MessageBoxButton.OK, above.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
         UpdateSceneSummary(_lastSceneBuildRenderMode, Math.Max(1, _lastSceneBuildQualityStep), HeightScaleSlider.Value);
     }
 
@@ -3554,7 +3540,7 @@ public partial class Terrain3DWindow : Window
         if (!IsViewportPointInsideImage(viewportPoint) ||
             !TryGetTerrainIntersection(viewportPoint, out var world, out _, allowGroundFallback: true))
         {
-            MouseCoordinateTextBlock.Text = "RD3D : hors terrain";
+            MouseCoordinateTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("RD3D : hors terrain");
             return;
         }
 
@@ -3619,7 +3605,7 @@ public partial class Terrain3DWindow : Window
                     _awaitingRawPresetPick = false;
                     UpdatePickedRawPresetText(pageKey);
                     UpdatePickRawButtonState();
-                    MessageBox.Show(this, $"Preset Raw3..Raw7 piqué depuis la mesh {pageKey?.Lod}/{pageKey?.X}/{pageKey?.Y} : {preset}", "Raw3..Raw7", MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.F($"Preset Raw3..Raw7 piqué depuis la mesh {pageKey?.Lod}/{pageKey?.X}/{pageKey?.Y} : {preset}"), "Raw3..Raw7", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
                 else
                 {
@@ -3866,7 +3852,7 @@ public partial class Terrain3DWindow : Window
 
         UpdateCoarseFromEditedMeshRegion(lod, minX, minZ, maxX, maxZ);
         MergeDirtyRegionFromWorldBounds(minX, minZ, maxX, maxZ);
-        MarkDirtyOperation($"3D Zone {action} LOD {lod} rectangle X={minX.ToString("0.##", CultureInfo.InvariantCulture)}..{maxX.ToString("0.##", CultureInfo.InvariantCulture)}, Z={minZ.ToString("0.##", CultureInfo.InvariantCulture)}..{maxZ.ToString("0.##", CultureInfo.InvariantCulture)}");
+        MarkDirtyOperation(Anno1800IslandTool.Core.Localization.TextCatalog.F($"3D Zone {action} LOD {lod} rectangle X={minX.ToString("0.##", CultureInfo.InvariantCulture)}..{maxX.ToString("0.##", CultureInfo.InvariantCulture)}, Z={minZ.ToString("0.##", CultureInfo.InvariantCulture)}..{maxZ.ToString("0.##", CultureInfo.InvariantCulture)}"));
         PopulatePageRows(GetSelectedPageRow()?.Page.Key);
         _lastBrushAffectedVertices = affected.Count;
         _lastBrushSpatialCellsVisited = spatialIndex.CellCount;
@@ -4130,7 +4116,7 @@ public partial class Terrain3DWindow : Window
         // Le masque root doit être étendu uniquement par les boutons ← ↑ → ↓.
         // Sinon un flatten large active tout le footprint du pinceau et transforme
         // l'île en quasi-rectangle, ce qui produit les grandes plaques blanches/vertes en jeu.
-        MarkDirtyOperation($"3D {mode} LOD {lod} autour RD3D X={world.X.ToString("0.##", CultureInfo.InvariantCulture)}, Z={world.Z.ToString("0.##", CultureInfo.InvariantCulture)}" + (coarseAffectedSamples > 0 ? $" + extension coarse {coarseAffectedSamples} sample(s) borné(s) au masque actif" : string.Empty));
+        MarkDirtyOperation(Anno1800IslandTool.Core.Localization.TextCatalog.F($"3D {mode} LOD {lod} autour RD3D X={world.X.ToString("0.##", CultureInfo.InvariantCulture)}, Z={world.Z.ToString("0.##", CultureInfo.InvariantCulture)}") + (coarseAffectedSamples > 0 ? Anno1800IslandTool.Core.Localization.TextCatalog.F($" + extension coarse {coarseAffectedSamples} sample(s) borné(s) au masque actif") : string.Empty));
         if (_isPainting && IsFastLargeIslandModeEnabled())
         {
             _pendingInteractivePageRowsRefresh = true;
@@ -5143,7 +5129,7 @@ public partial class Terrain3DWindow : Window
             if (buildVersion == Interlocked.Read(ref _sceneBuildRequestVersion))
             {
                 _lastSceneBuildError = ex.Message;
-                _lastSceneBuildPhase = "Erreur de rebuild";
+                _lastSceneBuildPhase = Anno1800IslandTool.Core.Localization.TextCatalog.T("Erreur de rebuild");
                 UpdateSceneSummary(_lastSceneBuildRenderMode, Math.Max(1, _lastSceneBuildQualityStep), HeightScaleSlider.Value);
             }
         }
@@ -5320,8 +5306,8 @@ public partial class Terrain3DWindow : Window
     private static string DescribeBuildPhase(SceneBuildResult result)
     {
         return result.InteractivePreviewMode
-            ? "Rebuild interactif qualité complète"
-            : "Rebuild complet";
+            ? Anno1800IslandTool.Core.Localization.TextCatalog.T("Rebuild interactif qualité complète")
+            : Anno1800IslandTool.Core.Localization.TextCatalog.T("Rebuild complet");
     }
 
     private static IslandMetadata CloneMetadata(IslandMetadata metadata)
@@ -5721,7 +5707,7 @@ public partial class Terrain3DWindow : Window
         var sampledZs = sampleZIndices.Select(i => zs[Math.Clamp(i, 0, zs.Count - 1)]).Distinct().OrderBy(v => v).ToList();
         var byCoord = samples.ToDictionary(g => (g.X, g.Z), g => g.Height);
         var weldedCount = Math.Max(0, samples.Sum(s => s.Count) - samples.Count);
-        return BuildGridSurfaceCore(sampledXs, sampledZs, byCoord, heightScale, offsetX, "X/Z uniques", samples.Sum(s => s.Count), weldedCount, 0);
+        return BuildGridSurfaceCore(sampledXs, sampledZs, byCoord, heightScale, offsetX, Anno1800IslandTool.Core.Localization.TextCatalog.T("X/Z uniques"), samples.Sum(s => s.Count), weldedCount, 0);
     }
 
     private ReconstructedSurfaceData BuildRegularGridSurfaceData(IReadOnlyList<ReconstructedSample> samples, double heightScale, double offsetX, int decimationStep)
@@ -5766,7 +5752,7 @@ public partial class Terrain3DWindow : Window
         }
 
         var weldedCount = Math.Max(0, samples.Sum(s => s.Count) - samples.Count);
-        return BuildGridSurfaceCore(sampledXs, sampledZs, byCoord, heightScale, offsetX, "Grille régulière", samples.Sum(s => s.Count), weldedCount, 2);
+        return BuildGridSurfaceCore(sampledXs, sampledZs, byCoord, heightScale, offsetX, Anno1800IslandTool.Core.Localization.TextCatalog.T("Grille régulière"), samples.Sum(s => s.Count), weldedCount, 2);
     }
 
     private ReconstructedSurfaceData BuildGridSurfaceCore(IReadOnlyList<int> sampledXs, IReadOnlyList<int> sampledZs, IReadOnlyDictionary<(int, int), double> byCoord, double heightScale, double offsetX, string methodName, int sourceVertexCount, int weldedCount, int smoothingPasses)
@@ -5928,7 +5914,7 @@ public partial class Terrain3DWindow : Window
         geometry.Normals = BuildNormals(geometry);
         FreezeIfPossible(geometry);
         var preview = BuildBlankRaster(192, 192, Color.FromRgb(22, 22, 22));
-        return new ReconstructedSurfaceData(geometry, geometry.Bounds, Math.Max(1.0, baseSpan * 0.0015), "Triangulation brute", allVertices.Count, positions.Count, triangleIndices.Count / 3, 0, 0, minX, maxX, minZ, maxZ, minH, maxH, preview);
+        return new ReconstructedSurfaceData(geometry, geometry.Bounds, Math.Max(1.0, baseSpan * 0.0015), Anno1800IslandTool.Core.Localization.TextCatalog.T("Triangulation brute"), allVertices.Count, positions.Count, triangleIndices.Count / 3, 0, 0, minX, maxX, minZ, maxZ, minH, maxH, preview);
     }
 
     private static List<int> BuildRegularAxis(int min, int max, int targetCount)
@@ -6565,7 +6551,7 @@ public partial class Terrain3DWindow : Window
         var shapeText = GetBrushShape().ToString();
         var info = new TextBlock
         {
-            Text = $"{modeText}  {shapeText}  rayon {BrushRadiusSlider.Value:0.##}",
+            Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"{modeText}  {shapeText}  rayon {BrushRadiusSlider.Value:0.##}"),
             Foreground = new SolidColorBrush(Color.FromArgb(235, 255, 245, 190)),
             Background = new SolidColorBrush(Color.FromArgb(130, 0, 0, 0)),
             Padding = new Thickness(4, 1, 4, 1),
@@ -6762,7 +6748,7 @@ public partial class Terrain3DWindow : Window
             var actionText = GetZoneAction().ToString();
             var info = new TextBlock
             {
-                Text = $"Zone hauteur : {actionText}  {((maxX - minX) / GetBrushWorldScale()):0.#} x {((maxZ - minZ) / GetBrushWorldScale()):0.#}",
+                Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Zone hauteur : {actionText}  {((maxX - minX) / GetBrushWorldScale()):0.#} x {((maxZ - minZ) / GetBrushWorldScale()):0.#}"),
                 Foreground = new SolidColorBrush(Color.FromArgb(240, 220, 245, 255)),
                 Background = new SolidColorBrush(Color.FromArgb(150, 0, 0, 0)),
                 Padding = new Thickness(4, 1, 4, 1),
@@ -7053,7 +7039,7 @@ public partial class Terrain3DWindow : Window
         var row = GetSelectedPageRow();
         if (row?.Page is null)
         {
-            PageDetailsTextBox.Text = "Aucune page mesh sélectionnée.";
+            PageDetailsTextBox.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune page mesh sélectionnée.");
             return;
         }
 
@@ -7063,20 +7049,20 @@ public partial class Terrain3DWindow : Window
         var firstVertex = vertices.FirstOrDefault();
 
         var sb = new StringBuilder();
-        sb.AppendLine($"Chemin : {page.OriginalRelativePath}");
-        sb.AppendLine($"Statut : {page.DecodeStatus}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Chemin : {page.OriginalRelativePath}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Statut : {page.DecodeStatus}"));
         sb.AppendLine($"Clusters : {page.ParsedClusterCount}/{page.DeclaredClusterCount}");
         sb.AppendLine($"Vertices : {vertices.Count}");
         sb.AppendLine($"Indices : {indices}");
         sb.AppendLine($"Triangles : {indices / 3}");
-        sb.AppendLine($"Éditable : {page.HasEditablePayload}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Éditable : {page.HasEditablePayload}"));
         sb.AppendLine($"Stride : {page.VertexStride}");
-        sb.AppendLine($"Hypothèse layout : {page.VertexLayoutHypothesis}");
-        sb.AppendLine($"Plages : {page.CoordinateRanges}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Hypothèse layout : {page.VertexLayoutHypothesis}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Plages : {page.CoordinateRanges}"));
         if (firstVertex is not null)
         {
             sb.AppendLine();
-            sb.AppendLine($"Exemple Raw : {firstVertex.BuildRawSummary()}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Exemple Raw : {firstVertex.BuildRawSummary()}"));
             sb.AppendLine($"DecodedHeight : {firstVertex.DecodedHeight.ToString(CultureInfo.InvariantCulture)}");
             sb.AppendLine($"Raw3..Raw7 : [{firstVertex.Raw3}, {firstVertex.Raw4}, {firstVertex.Raw5}, {firstVertex.Raw6}, {firstVertex.Raw7}]");
         }
@@ -7085,12 +7071,12 @@ public partial class Terrain3DWindow : Window
         {
             var recon = _selectedPagePreviewBundle.ReconstructedData;
             sb.AppendLine();
-            sb.AppendLine("Diagnostic reconstruction v16.2 :");
-            sb.AppendLine($"Méthode : {recon.MethodName}");
-            sb.AppendLine($"Points uniques : {recon.UniquePointCount}");
-            sb.AppendLine($"Triangles générés : {recon.TriangleCount}");
-            sb.AppendLine($"Cellules vides : {recon.EmptyCellCount}");
-            sb.AppendLine($"Fusion sommets : {recon.WeldedPointCount}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Diagnostic reconstruction v16.2 :"));
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Méthode : {recon.MethodName}"));
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Points uniques : {recon.UniquePointCount}"));
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Triangles générés : {recon.TriangleCount}"));
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Cellules vides : {recon.EmptyCellCount}"));
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Fusion sommets : {recon.WeldedPointCount}"));
             sb.AppendLine($"Min/Max X : {recon.MinX.ToString("0.###", CultureInfo.InvariantCulture)} .. {recon.MaxX.ToString("0.###", CultureInfo.InvariantCulture)}");
             sb.AppendLine($"Min/Max Z : {recon.MinZ.ToString("0.###", CultureInfo.InvariantCulture)} .. {recon.MaxZ.ToString("0.###", CultureInfo.InvariantCulture)}");
             sb.AppendLine($"Min/Max H : {recon.MinHeight.ToString("0.###", CultureInfo.InvariantCulture)} .. {recon.MaxHeight.ToString("0.###", CultureInfo.InvariantCulture)}");
@@ -7099,7 +7085,7 @@ public partial class Terrain3DWindow : Window
         }
 
         sb.AppendLine();
-        sb.AppendLine("v16.2 : lecture directe des meshes brutes sans décimation, validation locale par LOD actif et chaîne terrain complète (coarse, mesh, normalmaps, tintmaps). Compare une page brute, la page reconstruite et le crop coarse correspondant pour identifier si le problème vient du mapping X/Z, de la topologie ou des attributs de vertex.");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("v16.2 : lecture directe des meshes brutes sans décimation, validation locale par LOD actif et chaîne terrain complète (coarse, mesh, normalmaps, tintmaps). Compare une page brute, la page reconstruite et le crop coarse correspondant pour identifier si le problème vient du mapping X/Z, de la topologie ou des attributs de vertex."));
         sb.AppendLine(page.DecodeNotes);
         PageDetailsTextBox.Text = sb.ToString();
     }
@@ -7132,14 +7118,14 @@ public partial class Terrain3DWindow : Window
 
         if (stats.Count == 0)
         {
-            sb.AppendLine("Stats mesh : aucune page mesh chargée");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Stats mesh : aucune page mesh chargée"));
             return;
         }
 
-        sb.AppendLine("Stats mesh par LOD :");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Stats mesh par LOD :"));
         foreach (var item in stats)
         {
-            sb.AppendLine($"  LOD {item.Lod}: pages={item.Pages} (décodées={item.DecodedPages}, éditables={item.EditablePages}), clusters={item.Clusters}, vertices={item.Vertices}, indices={item.Indices}, triangles={item.Triangles}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"  LOD {item.Lod}: pages={item.Pages} (décodées={item.DecodedPages}, éditables={item.EditablePages}), clusters={item.Clusters}, vertices={item.Vertices}, indices={item.Indices}, triangles={item.Triangles}"));
         }
     }
 
@@ -7213,35 +7199,35 @@ public partial class Terrain3DWindow : Window
         var sb = new StringBuilder();
         sb.AppendLine($"Mode : {DescribeSourceMode(mode)}");
         sb.AppendLine($"MapSize : {_project.Metadata.MapSize}");
-        sb.AppendLine($"Pages mesh : {meshPageCount} ({editablePageCount} éditables)");
-        sb.AppendLine($"LOD actif : {GetSelectedLod()} / LOD auto détaillé : {FindMostDetailedEditableLod()}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Pages mesh : {meshPageCount} ({editablePageCount} éditables)"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"LOD actif : {GetSelectedLod()} / LOD auto détaillé : {FindMostDetailedEditableLod()}"));
         AppendMeshStatisticsSummary(sb);
-        sb.AppendLine($"Filtres pages : décodées={(OnlyDecodedPagesCheckBox?.IsChecked == true ? "oui" : "non")}, vides ignorées={(IgnoreEmptyPagesCheckBox?.IsChecked == true ? "oui" : "non")}");
-        sb.AppendLine($"Reconstruction : {GetReconstructionMethod()} / soudure inter-pages={(UseInterPageWelding() ? "oui" : "non")}");
-        sb.AppendLine("Décimation interactive : désactivée depuis v40.3 (qualité complète pendant peinture/navigation)");
-        sb.AppendLine($"Relief : {heightScale.ToString("0.0x", CultureInfo.InvariantCulture)}");
-        sb.AppendLine($"Pipeline v42 terrain : {_lastSceneBuildPhase} / version appliquée #{_lastAppliedSceneBuildVersion} / {_lastSceneBuildDuration.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture)} ms");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Filtres pages : décodées={(OnlyDecodedPagesCheckBox?.IsChecked == true ? Anno1800IslandTool.Core.Localization.TextCatalog.T("oui") : Anno1800IslandTool.Core.Localization.TextCatalog.T("non"))}, vides ignorées={(IgnoreEmptyPagesCheckBox?.IsChecked == true ? Anno1800IslandTool.Core.Localization.TextCatalog.T("oui") : Anno1800IslandTool.Core.Localization.TextCatalog.T("non"))}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Reconstruction : {GetReconstructionMethod()} / soudure inter-pages={(UseInterPageWelding() ? Anno1800IslandTool.Core.Localization.TextCatalog.T("oui") : Anno1800IslandTool.Core.Localization.TextCatalog.T("non"))}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Décimation interactive : désactivée depuis v40.3 (qualité complète pendant peinture/navigation)"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Relief : {heightScale.ToString("0.0x", CultureInfo.InvariantCulture)}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Pipeline v42 terrain : {_lastSceneBuildPhase} / version appliquée #{_lastAppliedSceneBuildVersion} / {_lastSceneBuildDuration.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture)} ms"));
         sb.AppendLine(BuildComputeStatusLine());
         UpdateComputeStatusDisplay();
         if (_lastBrushDuration > TimeSpan.Zero)
         {
-            sb.AppendLine($"Dernier pinceau : {_lastBrushAffectedVertices} vertices touchés / index spatial={(_brushSpatialIndex is null ? "absent" : $"{_brushSpatialIndex.CellCount} cellules, {_brushSpatialIndex.VertexCount} vertices")} / {_lastBrushDuration.TotalMilliseconds.ToString("0.0", CultureInfo.InvariantCulture)} ms");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Dernier pinceau : {_lastBrushAffectedVertices} vertices touchés / index spatial={(_brushSpatialIndex is null ? Anno1800IslandTool.Core.Localization.TextCatalog.T("absent") : Anno1800IslandTool.Core.Localization.TextCatalog.F($"{_brushSpatialIndex.CellCount} cellules, {_brushSpatialIndex.VertexCount} vertices"))} / {_lastBrushDuration.TotalMilliseconds.ToString("0.0", CultureInfo.InvariantCulture)} ms"));
         }
         if (mode != GetSourceMode())
         {
-            sb.AppendLine($"Mode demandé : {DescribeSourceMode(GetSourceMode())} (rendu courant simplifié : {DescribeSourceMode(mode)})");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Mode demandé : {DescribeSourceMode(GetSourceMode())} (rendu courant simplifié : {DescribeSourceMode(mode)})"));
         }
         if (!string.IsNullOrWhiteSpace(_lastSceneBuildError))
         {
-            sb.AppendLine($"Dernière erreur rebuild : {_lastSceneBuildError}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Dernière erreur rebuild : {_lastSceneBuildError}"));
         }
-        sb.AppendLine($"Outil : {GetBrushMode()}");
-        sb.AppendLine($"Rayon : {BrushRadiusSlider.Value.ToString("0.##", CultureInfo.InvariantCulture)} / Intensité : {BrushStrengthSlider.Value.ToString("0.0", CultureInfo.InvariantCulture)} / Falloff : {(BrushFalloffComboBox.SelectedItem as ComboBoxItem)?.Content}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Outil : {GetBrushMode()}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Rayon : {BrushRadiusSlider.Value.ToString("0.##", CultureInfo.InvariantCulture)} / Intensité : {BrushStrengthSlider.Value.ToString("0.0", CultureInfo.InvariantCulture)} / Falloff : {(BrushFalloffComboBox.SelectedItem as ComboBoxItem)?.Content}"));
         var exactDirty = _project.HeightEditState;
         if (exactDirty.DirtySampleBounds is not null)
         {
             var d = exactDirty.DirtySampleBounds.Value;
-            sb.AppendLine($"Dirty area exacte GameData : [{d.Left}, {d.Top}] -> [{d.Right}, {d.Bottom}] | samples exacts={exactDirty.DirtyGameDataSamples.Count}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Dirty area exacte GameData : [{d.Left}, {d.Top}] -> [{d.Right}, {d.Bottom}] | samples exacts={exactDirty.DirtyGameDataSamples.Count}"));
         }
         else if (_dirtyRegion is not null)
         {
@@ -7250,20 +7236,20 @@ public partial class Terrain3DWindow : Window
         }
         else
         {
-            sb.AppendLine("Dirty area exacte GameData : aucune");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Dirty area exacte GameData : aucune"));
         }
 
         if (exactDirty.MeshVerticesTouched.Count > 0)
         {
-            sb.AppendLine($"Mesh pages touchées : {exactDirty.MeshVerticesTouched.Count} | vertices modifiés suivis={exactDirty.MeshVerticesTouched.Values.Sum()}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Mesh pages touchées : {exactDirty.MeshVerticesTouched.Count} | vertices modifiés suivis={exactDirty.MeshVerticesTouched.Values.Sum()}"));
         }
         if (!_sceneBounds.IsEmpty)
         {
-            sb.AppendLine($"Bounds scène : X={_sceneBounds.X.ToString("0.##", CultureInfo.InvariantCulture)}..{(_sceneBounds.X + _sceneBounds.SizeX).ToString("0.##", CultureInfo.InvariantCulture)} ; Y={_sceneBounds.Y.ToString("0.##", CultureInfo.InvariantCulture)}..{(_sceneBounds.Y + _sceneBounds.SizeY).ToString("0.##", CultureInfo.InvariantCulture)} ; Z={_sceneBounds.Z.ToString("0.##", CultureInfo.InvariantCulture)}..{(_sceneBounds.Z + _sceneBounds.SizeZ).ToString("0.##", CultureInfo.InvariantCulture)}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Bounds scène : X={_sceneBounds.X.ToString("0.##", CultureInfo.InvariantCulture)}..{(_sceneBounds.X + _sceneBounds.SizeX).ToString("0.##", CultureInfo.InvariantCulture)} ; Y={_sceneBounds.Y.ToString("0.##", CultureInfo.InvariantCulture)}..{(_sceneBounds.Y + _sceneBounds.SizeY).ToString("0.##", CultureInfo.InvariantCulture)} ; Z={_sceneBounds.Z.ToString("0.##", CultureInfo.InvariantCulture)}..{(_sceneBounds.Z + _sceneBounds.SizeZ).ToString("0.##", CultureInfo.InvariantCulture)}"));
         }
         if (selected is not null)
         {
-            sb.AppendLine($"Sélection : LOD {selected.Lod} / {selected.X}x{selected.Y} / {selected.Status}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Sélection : LOD {selected.Lod} / {selected.X}x{selected.Y} / {selected.Status}"));
         }
         if (map.Width > 0 && map.Height > 0 && _editedCoarseSamples.Length >= map.Width * map.Height)
         {
@@ -7271,15 +7257,15 @@ public partial class Terrain3DWindow : Window
         }
 
         sb.AppendLine();
-        sb.AppendLine("Commandes caméra / édition :");
-        sb.AppendLine("- outil Navigation + clic gauche : orbite");
-        sb.AppendLine("- outil actif + clic gauche : peinture hauteur");
-        sb.AppendLine("- clic droit : pan");
-        sb.AppendLine("- molette : zoom");
-        sb.AppendLine("- Valider LOD courant : synchronise coarse + RD3D/PropGrid/positions, régénère le mesh du LOD actif et tous les normalmaps/tintmaps visuels affectés");
-        sb.AppendLine("- Régénérer normalmaps / tintmaps : recalcule la famille voulue sur tous les LOD visuels affectés");
-        sb.AppendLine("- Valider tout le terrain : régénère coarse, meshes, normalmaps et tintmaps sur tous les LOD/pages existants, sans propagation multi-LOD");
-        sb.AppendLine("- Appliquer au projet : copie la coarse heightmap et resynchronise les dépendances terrain en mémoire");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Commandes caméra / édition :"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("- outil Navigation + clic gauche : orbite"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("- outil actif + clic gauche : peinture hauteur"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("- clic droit : pan"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("- molette : zoom"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("- Valider LOD courant : synchronise coarse + RD3D/PropGrid/positions, régénère le mesh du LOD actif et tous les normalmaps/tintmaps visuels affectés"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("- Régénérer normalmaps / tintmaps : recalcule la famille voulue sur tous les LOD visuels affectés"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("- Valider tout le terrain : régénère coarse, meshes, normalmaps et tintmaps sur tous les LOD/pages existants, sans propagation multi-LOD"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("- Appliquer au projet : copie la coarse heightmap et resynchronise les dépendances terrain en mémoire"));
 
         SceneSummaryTextBox.Text = sb.ToString();
     }
@@ -7383,15 +7369,15 @@ public partial class Terrain3DWindow : Window
     private string BuildComputeStatusLine()
     {
         var spatial = _brushSpatialIndex is null
-            ? "index spatial : absent"
-            : $"index spatial : {_brushSpatialIndex.CellCount} cellules / {_brushSpatialIndex.VertexCount} vertices";
+            ? Anno1800IslandTool.Core.Localization.TextCatalog.T("index spatial : absent")
+            : Anno1800IslandTool.Core.Localization.TextCatalog.F($"index spatial : {_brushSpatialIndex.CellCount} cellules / {_brushSpatialIndex.VertexCount} vertices");
         var preview = _sceneBuildInFlight
-            ? "rebuild : en cours/coalescé"
-            : "rebuild : prêt";
+            ? Anno1800IslandTool.Core.Localization.TextCatalog.T("rebuild : en cours/coalescé")
+            : Anno1800IslandTool.Core.Localization.TextCatalog.T("rebuild : prêt");
         var interaction = IsFastLargeIslandModeEnabled()
-            ? "grande île : rendu GPU maintenu, calculs différés pendant le pinceau"
-            : "grande île : désactivé, aperçu recalculé pendant le pinceau";
-        return $"Calcul terrain : {TerrainComputeScheduler.DescribeCpuBackend()} | rendu : {SceneViewport.RendererDescription}\nCompute shaders : {_computeCapabilities.GpuComputeBackendName} | {interaction}\n{spatial} | {preview}\n{TerrainMemoryMonitor.Capture().ToShortDisplay()}";
+            ? Anno1800IslandTool.Core.Localization.TextCatalog.T("grande île : rendu GPU maintenu, calculs différés pendant le pinceau")
+            : Anno1800IslandTool.Core.Localization.TextCatalog.T("grande île : désactivé, aperçu recalculé pendant le pinceau");
+        return Anno1800IslandTool.Core.Localization.TextCatalog.F($"Calcul terrain : {TerrainComputeScheduler.DescribeCpuBackend()} | rendu : {SceneViewport.RendererDescription}\nCompute shaders : {_computeCapabilities.GpuComputeBackendName} | {interaction}\n{spatial} | {preview}\n{TerrainMemoryMonitor.Capture().ToShortDisplay()}");
     }
 
     private void UpdateComputeStatusDisplay()
@@ -7404,13 +7390,13 @@ public partial class Terrain3DWindow : Window
 
     private static string DescribeSourceMode(Terrain3DSourceMode mode) => mode switch
     {
-        Terrain3DSourceMode.MeshLodExactRaw => "LOD brut exact",
-        Terrain3DSourceMode.MeshLodMergedRaw => "Mesh brut fusionné du LOD",
-        Terrain3DSourceMode.CoarseHeightmap => "Coarse dérivée des meshes (debug)",
-        Terrain3DSourceMode.MeshLodMergedReconstructed => "Surface reconstruite lissée du LOD",
-        Terrain3DSourceMode.MeshSelectedPageRaw => "Page mesh brute sélectionnée",
-        Terrain3DSourceMode.MeshSelectedPageReconstructed => "Page reconstruite lissée",
-        Terrain3DSourceMode.MeshComparisonReconstructed => "Comparaison page brute / lissée / coarse",
+        Terrain3DSourceMode.MeshLodExactRaw => Anno1800IslandTool.Core.Localization.TextCatalog.T("LOD brut exact"),
+        Terrain3DSourceMode.MeshLodMergedRaw => Anno1800IslandTool.Core.Localization.TextCatalog.T("Mesh brut fusionné du LOD"),
+        Terrain3DSourceMode.CoarseHeightmap => Anno1800IslandTool.Core.Localization.TextCatalog.T("Coarse dérivée des meshes (debug)"),
+        Terrain3DSourceMode.MeshLodMergedReconstructed => Anno1800IslandTool.Core.Localization.TextCatalog.T("Surface reconstruite lissée du LOD"),
+        Terrain3DSourceMode.MeshSelectedPageRaw => Anno1800IslandTool.Core.Localization.TextCatalog.T("Page mesh brute sélectionnée"),
+        Terrain3DSourceMode.MeshSelectedPageReconstructed => Anno1800IslandTool.Core.Localization.TextCatalog.T("Page reconstruite lissée"),
+        Terrain3DSourceMode.MeshComparisonReconstructed => Anno1800IslandTool.Core.Localization.TextCatalog.T("Comparaison page brute / lissée / coarse"),
         _ => mode.ToString(),
     };
 
@@ -7419,7 +7405,7 @@ public partial class Terrain3DWindow : Window
         var grid = _project.Root.ActiveMapGrid;
         if (grid.X <= 0 || grid.Y <= 0)
         {
-            sb.AppendLine("ActiveMapGrid.bits : absent/invalide");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("ActiveMapGrid.bits : absent/invalide"));
             return;
         }
 
@@ -7430,14 +7416,14 @@ public partial class Terrain3DWindow : Window
         var memoryCount = ActiveMapGridMaskCodec.CountActiveCells(memoryMask);
         var rootCount = ActiveMapGridMaskCodec.CountActiveCells(rootMask);
         var total = Math.Max(1, grid.X * grid.Y);
-        sb.AppendLine($"ActiveMapGrid.bits : {grid.X}x{grid.Y}, cellules actives mémoire={memoryCount}/{total}, root={rootCount}/{total}, rect={_project.Root.ActiveMapRect}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"ActiveMapGrid.bits : {grid.X}x{grid.Y}, cellules actives mémoire={memoryCount}/{total}, root={rootCount}/{total}, rect={_project.Root.ActiveMapRect}"));
         if (memoryCount > rootCount)
         {
-            sb.AppendLine("Attention : le masque en mémoire contient des cellules non encore écrites dans root.xml.");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Attention : le masque en mémoire contient des cellules non encore écrites dans root.xml."));
         }
         if (rootCount > total * 0.90)
         {
-            sb.AppendLine("Attention : masque presque plein ; pour moderate_l_10 vanilla on attend environ 1459 cellules avant extension, pas un rectangle quasi complet.");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Attention : masque presque plein ; pour moderate_l_10 vanilla on attend environ 1459 cellules avant extension, pas un rectangle quasi complet."));
         }
     }
 
@@ -7456,11 +7442,11 @@ public partial class Terrain3DWindow : Window
         sb.AppendLine();
         if (_previewLocalRegeneration is null)
         {
-            sb.AppendLine("Aucune propagation mesh locale n'a encore été lancée depuis la fenêtre 3D.");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune propagation mesh locale n'a encore été lancée depuis la fenêtre 3D."));
             if (_dirtyRegion is not null)
             {
                 var d = _dirtyRegion.Value;
-                sb.AppendLine($"Dirty region en attente : [{d.X}, {d.Y}] -> [{d.X + d.Width - 1}, {d.Y + d.Height - 1}]");
+                sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Dirty region en attente : [{d.X}, {d.Y}] -> [{d.X + d.Width - 1}, {d.Y + d.Height - 1}]"));
             }
             if (_lastTerrainDependencySyncReport is not null)
             {
@@ -7471,26 +7457,26 @@ public partial class Terrain3DWindow : Window
             return;
         }
 
-        sb.AppendLine("Validation terrain locale v18 (coarse + mesh + normalmaps + tintmaps)");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Validation terrain locale v18 (coarse + mesh + normalmaps + tintmaps)"));
         sb.AppendLine($"Dirty sample bounds : {_previewLocalRegeneration.DirtySampleBounds}");
         sb.AppendLine($"Expanded sample bounds : {_previewLocalRegeneration.ExpandedSampleBounds}");
-        sb.AppendLine($"Pages affectées : {_previewLocalRegeneration.AffectedPages.Count}");
-        sb.AppendLine($"Portée : {(_previewLocalRegeneration.AnchorPageKey is null ? "globale (tous les LOD/pages)" : $"LOD {_previewLocalRegeneration.AnchorMeshLod} uniquement")}");
-        sb.AppendLine($"LOD ancre : {_previewLocalRegeneration.AnchorMeshLod}");
-        sb.AppendLine($"Mesh pages générées : {_previewLocalRegeneration.GeneratedMeshPageWrites.Count}");
-        sb.AppendLine($"Tintmaps générées : {_previewLocalRegeneration.GeneratedTintMapWrites.Count}");
-        sb.AppendLine($"NormalMaps interprétés générés : {_previewLocalRegeneration.GeneratedInterpretedNormalMapWritesCount}");
-        sb.AppendLine($"LOD ancre générées : {_previewLocalRegeneration.BaseLodMeshPagesGenerated}");
-        sb.AppendLine($"LOD supérieures générées : {_previewLocalRegeneration.HigherLodMeshPagesGenerated}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Pages affectées : {_previewLocalRegeneration.AffectedPages.Count}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Portée : {(_previewLocalRegeneration.AnchorPageKey is null ? Anno1800IslandTool.Core.Localization.TextCatalog.T("globale (tous les LOD/pages)") : Anno1800IslandTool.Core.Localization.TextCatalog.F($"LOD {_previewLocalRegeneration.AnchorMeshLod} uniquement"))}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"LOD ancre : {_previewLocalRegeneration.AnchorMeshLod}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Mesh pages générées : {_previewLocalRegeneration.GeneratedMeshPageWrites.Count}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Tintmaps générées : {_previewLocalRegeneration.GeneratedTintMapWrites.Count}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"NormalMaps interprétés générés : {_previewLocalRegeneration.GeneratedInterpretedNormalMapWritesCount}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"LOD ancre générées : {_previewLocalRegeneration.BaseLodMeshPagesGenerated}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"LOD supérieures générées : {_previewLocalRegeneration.HigherLodMeshPagesGenerated}"));
         foreach (var lod in _previewLocalRegeneration.GeneratedMeshPagesByLod.OrderBy(kv => kv.Key))
         {
-            sb.AppendLine($"  génération mesh LOD {lod.Key} : {lod.Value}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"  génération mesh LOD {lod.Key} : {lod.Value}"));
         }
         foreach (var lod in _previewLocalRegeneration.GeneratedNormalMapsByLod.OrderBy(kv => kv.Key))
         {
-            sb.AppendLine($"  génération normalmap LOD {lod.Key} : {lod.Value}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"  génération normalmap LOD {lod.Key} : {lod.Value}"));
         }
-        sb.AppendLine($"Mesh non éditables ignorées : {_previewLocalRegeneration.SkippedNonEditableMeshPages}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Mesh non éditables ignorées : {_previewLocalRegeneration.SkippedNonEditableMeshPages}"));
         if (_lastTerrainDependencySyncReport is not null)
         {
             sb.AppendLine();
@@ -7503,24 +7489,24 @@ public partial class Terrain3DWindow : Window
             var comparison = _previewLocalRegeneration.GeneratedMeshPageWrites.FirstOrDefault(w => w.Key.Equals(selected.Value))?.Comparison;
             if (comparison is not null)
             {
-                sb.AppendLine($"LOD de la page : {selected.Value.Lod}");
+                sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"LOD de la page : {selected.Value.Lod}"));
                 sb.AppendLine();
-                sb.AppendLine($"Page sélectionnée : {selected.Value}");
-                sb.AppendLine($"Bounds coarse utilisés : {comparison.SampleBounds}");
-                sb.AppendLine($"Résumé : clusters={comparison.ClusterCount}, vtx={comparison.VertexCount}, changed={comparison.ChangedVertexCount}, Δavg={comparison.AverageAbsoluteDelta.ToString("0.###", CultureInfo.InvariantCulture)}, Δmax={comparison.MaxAbsoluteDelta.ToString("0.###", CultureInfo.InvariantCulture)}");
-                sb.AppendLine($"Hauteur brute : {comparison.OriginalMinHeightRaw.ToString("0.###", CultureInfo.InvariantCulture)}..{comparison.OriginalMaxHeightRaw.ToString("0.###", CultureInfo.InvariantCulture)} -> {comparison.GeneratedMinHeightRaw.ToString("0.###", CultureInfo.InvariantCulture)}..{comparison.GeneratedMaxHeightRaw.ToString("0.###", CultureInfo.InvariantCulture)}");
-                sb.AppendLine($"Hauteur décodée : {comparison.OriginalMinDecodedHeight.ToString("0.###", CultureInfo.InvariantCulture)}..{comparison.OriginalMaxDecodedHeight.ToString("0.###", CultureInfo.InvariantCulture)} -> {comparison.GeneratedMinDecodedHeight.ToString("0.###", CultureInfo.InvariantCulture)}..{comparison.GeneratedMaxDecodedHeight.ToString("0.###", CultureInfo.InvariantCulture)}");
+                sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Page sélectionnée : {selected.Value}"));
+                sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Bounds coarse utilisés : {comparison.SampleBounds}"));
+                sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Résumé : clusters={comparison.ClusterCount}, vtx={comparison.VertexCount}, changed={comparison.ChangedVertexCount}, Δavg={comparison.AverageAbsoluteDelta.ToString("0.###", CultureInfo.InvariantCulture)}, Δmax={comparison.MaxAbsoluteDelta.ToString("0.###", CultureInfo.InvariantCulture)}"));
+                sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Hauteur brute : {comparison.OriginalMinHeightRaw.ToString("0.###", CultureInfo.InvariantCulture)}..{comparison.OriginalMaxHeightRaw.ToString("0.###", CultureInfo.InvariantCulture)} -> {comparison.GeneratedMinHeightRaw.ToString("0.###", CultureInfo.InvariantCulture)}..{comparison.GeneratedMaxHeightRaw.ToString("0.###", CultureInfo.InvariantCulture)}"));
+                sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Hauteur décodée : {comparison.OriginalMinDecodedHeight.ToString("0.###", CultureInfo.InvariantCulture)}..{comparison.OriginalMaxDecodedHeight.ToString("0.###", CultureInfo.InvariantCulture)} -> {comparison.GeneratedMinDecodedHeight.ToString("0.###", CultureInfo.InvariantCulture)}..{comparison.GeneratedMaxDecodedHeight.ToString("0.###", CultureInfo.InvariantCulture)}"));
                 sb.AppendLine($"Notes : {comparison.Notes}");
                 if (_originalMeshPagesForCompare.ContainsKey(selected.Value) && _generatedMeshPages.ContainsKey(selected.Value))
                 {
-                    sb.AppendLine("Comparaison 3D disponible : passe la source sur 'Comparaison page brute / lissée / coarse'.");
+                    sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Comparaison 3D disponible : passe la source sur 'Comparaison page brute / lissée / coarse'."));
                 }
             }
             else
             {
                 sb.AppendLine();
-                sb.AppendLine($"Page sélectionnée : {selected.Value}");
-                sb.AppendLine("Aucun patch mesh généré pour cette page sélectionnée.");
+                sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Page sélectionnée : {selected.Value}"));
+                sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun patch mesh généré pour cette page sélectionnée."));
             }
         }
 
@@ -8856,7 +8842,7 @@ public partial class Terrain3DWindow : Window
             var sampledZs = sampleZIndices.Select(index => zs[Math.Clamp(index, 0, zs.Count - 1)]).Distinct().OrderBy(value => value).ToList();
             var byCoord = samples.ToDictionary(sample => (sample.X, sample.Z), sample => sample.Height);
             var weldedCount = Math.Max(0, samples.Sum(sample => sample.Count) - samples.Count);
-            return BuildGridSurfaceCore(sampledXs, sampledZs, byCoord, heightScale, offsetX, "X/Z uniques", samples.Sum(sample => sample.Count), weldedCount, 0);
+            return BuildGridSurfaceCore(sampledXs, sampledZs, byCoord, heightScale, offsetX, Anno1800IslandTool.Core.Localization.TextCatalog.T("X/Z uniques"), samples.Sum(sample => sample.Count), weldedCount, 0);
         }
 
         private ReconstructedSurfaceData BuildRegularGridSurfaceData(IReadOnlyList<ReconstructedSample> samples, double heightScale, double offsetX, int decimationStep)
@@ -8902,7 +8888,7 @@ public partial class Terrain3DWindow : Window
             }
 
             var weldedCount = Math.Max(0, samples.Sum(sample => sample.Count) - samples.Count);
-            return BuildGridSurfaceCore(sampledXs, sampledZs, byCoord, heightScale, offsetX, "Grille régulière", samples.Sum(sample => sample.Count), weldedCount, 2);
+            return BuildGridSurfaceCore(sampledXs, sampledZs, byCoord, heightScale, offsetX, Anno1800IslandTool.Core.Localization.TextCatalog.T("Grille régulière"), samples.Sum(sample => sample.Count), weldedCount, 2);
         }
 
         private ReconstructedSurfaceData BuildGridSurfaceCore(IReadOnlyList<int> sampledXs, IReadOnlyList<int> sampledZs, IReadOnlyDictionary<(int, int), double> byCoord, double heightScale, double offsetX, string methodName, int sourceVertexCount, int weldedCount, int smoothingPasses)
@@ -9067,7 +9053,7 @@ public partial class Terrain3DWindow : Window
             geometry.Normals = BuildTerrainNormals(geometry);
             FreezeIfPossible(geometry);
             var preview = BuildBlankRaster(192, 192, Color.FromRgb(22, 22, 22));
-            return new ReconstructedSurfaceData(geometry, geometry.Bounds, Math.Max(1.0, baseSpan * 0.0015), "Triangulation brute", allVertices.Count, positions.Count, triangleIndices.Count / 3, 0, 0, minX, maxX, minZ, maxZ, minH, maxH, preview);
+            return new ReconstructedSurfaceData(geometry, geometry.Bounds, Math.Max(1.0, baseSpan * 0.0015), Anno1800IslandTool.Core.Localization.TextCatalog.T("Triangulation brute"), allVertices.Count, positions.Count, triangleIndices.Count / 3, 0, 0, minX, maxX, minZ, maxZ, minH, maxH, preview);
         }
 
         private RasterPreview BuildCoarseCropRaster(Rect3D bounds, int width, int height)
@@ -9604,7 +9590,7 @@ public partial class Terrain3DWindow : Window
         public int Vertices => Page.Clusters.Sum(c => c.Vertices.Count);
         public int Indices => Page.Clusters.Sum(c => c.Indices.Count);
         public int Triangles => Indices / 3;
-        public string Summary => $"déclarés={Page.DeclaredClusterCount}, parsed={Page.ParsedClusterCount}, stride={Page.VertexStride}, éditable={(Page.HasEditablePayload ? "oui" : "non")}";
+        public string Summary => Anno1800IslandTool.Core.Localization.TextCatalog.F($"déclarés={Page.DeclaredClusterCount}, parsed={Page.ParsedClusterCount}, stride={Page.VertexStride}, éditable={(Page.HasEditablePayload ? Anno1800IslandTool.Core.Localization.TextCatalog.T("oui") : Anno1800IslandTool.Core.Localization.TextCatalog.T("non"))}");
     }
 }
 

@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using HelixToolkit.SharpDX;
 using HelixToolkit.Wpf.SharpDX;
 

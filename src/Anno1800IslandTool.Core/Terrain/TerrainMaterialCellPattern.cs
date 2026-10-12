@@ -1,4 +1,4 @@
-﻿namespace Anno1800IslandTool.Core.Terrain;
+namespace Anno1800IslandTool.Core.Terrain;
 
 /// <summary>
 /// Empreinte de cellule MaterialIDs2 / MaterialAlphas2 capturée avec l'outil pickup.

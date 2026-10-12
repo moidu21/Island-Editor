@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.IO.Compression;
 using System.Windows;
 using System.Windows.Controls;
@@ -22,7 +22,7 @@ public partial class NativeIslandWindow : Window
         InitializeComponent();_project=project;_debugMode=debugMode;
         Directory.CreateDirectory(_cache);
         GameFolder.Text=RdaGameResources.SavedGameFolder() ?? "";
-        if(project is not null){BrowserHeader.Visibility=Visibility.Collapsed;Islands.Visibility=Visibility.Collapsed;ActionButton.Content="Exporter l’île compilée";Log.Text="Le projet chargé sera exporté puis réencodé en A7M, TMC et CTT dans un nouveau ZIP.";}
+        if(project is not null){BrowserHeader.Visibility=Visibility.Collapsed;Islands.Visibility=Visibility.Collapsed;ActionButton.Content=Anno1800IslandTool.Core.Localization.TextCatalog.T("Exporter l’île compilée");Log.Text=Anno1800IslandTool.Core.Localization.TextCatalog.T("Le projet chargé sera exporté puis réencodé en A7M, TMC et CTT dans un nouveau ZIP.");}
         Closing+=(_,e)=>{if(_operation is not null){e.Cancel=true;_operation.Cancel();}};
         Loaded+=(_,_)=>UiLocalizationManager.ApplyTo(this);
     }
@@ -49,7 +49,7 @@ public partial class NativeIslandWindow : Window
     {
         if(_operation is not null)return;_operation=new();ActionButton.IsEnabled=ScanButton.IsEnabled=BrowserHeader.IsEnabled=Islands.IsEnabled=false;
         CancelButton.Content=UiLocalizationManager.T("Annuler");
-        var progress=new Progress<string>(line=>{foreach(var prefix in new[]{"Téléchargement : ","Lecture des archives : ","Extraction de ","Interprétation ","Encodage "}) if(line.StartsWith(prefix)){line=UiLocalizationManager.T(prefix)+line[prefix.Length..];break;} Log.AppendText(line+Environment.NewLine);Log.ScrollToEnd();});
+        var progress=new Progress<string>(line=>{foreach(var prefix in new[]{Anno1800IslandTool.Core.Localization.TextCatalog.T("Téléchargement : "),Anno1800IslandTool.Core.Localization.TextCatalog.T("Lecture des archives : "),Anno1800IslandTool.Core.Localization.TextCatalog.T("Extraction de "),Anno1800IslandTool.Core.Localization.TextCatalog.T("Interprétation "),Anno1800IslandTool.Core.Localization.TextCatalog.T("Encodage ")}) if(line.StartsWith(prefix)){line=UiLocalizationManager.T(prefix)+line[prefix.Length..];break;} Log.AppendText(line+Environment.NewLine);Log.ScrollToEnd();});
         try
         {
             var token=_operation.Token;
@@ -115,7 +115,7 @@ public partial class NativeIslandWindow : Window
                         info = GameIslandCatalog.SafePath(raw, choice!.InternalPath);
                     }
                     else info=localInfo??await new GameIslandCatalog(process).ExtractAsync(folder,choice!,Path.Combine(work,"raw"),progress,token);
-                    if(!File.Exists(info)||!File.Exists(Path.ChangeExtension(info,"a7m")))throw new InvalidDataException("A7M ou A7MINFO absent du dossier sélectionné.");
+                    if(!File.Exists(info)||!File.Exists(Path.ChangeExtension(info,"a7m")))throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("A7M ou A7MINFO absent du dossier sélectionné."));
                     var sourceMap=localInfo is null?Path.ChangeExtension(choice!.InternalPath,"a7m"):Path.GetFileName(Path.ChangeExtension(info,"a7m"));
                     zip=await Task.Run(()=>converter.DecodeAsync(info,sourceMap,work,progress,token),token);
                 }

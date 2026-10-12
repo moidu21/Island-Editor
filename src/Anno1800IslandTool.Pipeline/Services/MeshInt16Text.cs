@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace Anno1800IslandTool.Pipeline.Services;
@@ -9,7 +9,7 @@ public static class MeshInt16Text
     public static string Format(float value)
     {
         if (!float.IsFinite(value) || value != MathF.Truncate(value) || value < short.MinValue || value > ushort.MaxValue)
-            throw new InvalidDataException($"Mot de sommet TMC invalide : {value.ToString(CultureInfo.InvariantCulture)}.");
+            throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Mot de sommet TMC invalide : {value.ToString(CultureInfo.InvariantCulture)}."));
         // Change only the textual interpretation, never the 16 stored bits or the height.
         return unchecked((short)(ushort)(int)value).ToString(CultureInfo.InvariantCulture);
     }

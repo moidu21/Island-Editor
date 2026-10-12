@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Core.Terrain;
+using Anno1800IslandTool.Core.Terrain;
 
 namespace Anno1800IslandTool.Pipeline.Services;
 
@@ -12,7 +12,7 @@ public static class GamePreviewTint
     {
         if (size <= 0 || bgra.LongLength != (long)size * size * 4
             || !float.IsFinite(rawWidth) || !float.IsFinite(rawHeight) || rawWidth <= 0 || rawHeight <= 0)
-            throw new ArgumentException("Invalid preview tint dimensions.");
+            throw new ArgumentException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Invalid preview tint dimensions."));
         // Finest available page wins; coarse pages fill holes, never multiply a tint twice.
         // Only one decoded page plus one bit per output texel is kept in memory.
         var covered = new System.Collections.BitArray(size * size);

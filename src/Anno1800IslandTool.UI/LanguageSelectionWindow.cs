@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -26,7 +26,7 @@ public sealed class LanguageSelectionWindow : Window
 
         var title = new TextBlock
         {
-            Text = "Choisir la langue / Choose language / Sprache wählen",
+            Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Choisir la langue / Choose language / Sprache wählen"),
             FontWeight = FontWeights.SemiBold,
             FontSize = 15,
             Margin = new Thickness(0, 0, 0, 10)
@@ -55,7 +55,7 @@ public sealed class LanguageSelectionWindow : Window
 
         var hint = new TextBlock
         {
-            Text = "Auto OS utilise la langue de Windows si elle est prise en charge. Le choix peut ensuite être changé dans la fenêtre principale.",
+            Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Auto OS utilise la langue de Windows si elle est prise en charge. Le choix peut ensuite être changé dans la fenêtre principale."),
             TextWrapping = TextWrapping.Wrap,
             Foreground = Brushes.DimGray,
             Margin = new Thickness(0, 0, 0, 12)
@@ -83,7 +83,7 @@ public sealed class LanguageSelectionWindow : Window
         };
         var cancel = new Button
         {
-            Content = "Annuler / Cancel",
+            Content = Anno1800IslandTool.Core.Localization.TextCatalog.T("Annuler / Cancel"),
             IsCancel = true,
             Width = 120,
             Height = 30

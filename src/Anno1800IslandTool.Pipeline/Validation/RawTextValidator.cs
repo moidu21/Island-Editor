@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Core.Models;
+using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Validation;
 using Anno1800IslandTool.Pipeline.Abstractions;
 
@@ -10,9 +10,9 @@ public sealed class RawTextValidator : IValidator<IslandProject>
     {
         var report = new ValidationReport();
 
-        ValidateRawText(report, project.RootFilePath, project.RawContent.RootText, ValidationCode.MissingRawRootText, "Le texte brut du fichier racine n'a pas été conservé.");
-        ValidateRawText(report, project.Rd3dFilePath, project.RawContent.Rd3dText, ValidationCode.MissingRawRd3dText, "Le texte brut de rd3d.xml n'a pas été conservé.");
-        ValidateRawText(report, project.GameDataFilePath, project.RawContent.GameDataText, ValidationCode.MissingRawGameDataText, "Le texte brut de gamedata.xml n'a pas été conservé.");
+        ValidateRawText(report, project.RootFilePath, project.RawContent.RootText, ValidationCode.MissingRawRootText, Anno1800IslandTool.Core.Localization.TextCatalog.T("Le texte brut du fichier racine n'a pas été conservé."));
+        ValidateRawText(report, project.Rd3dFilePath, project.RawContent.Rd3dText, ValidationCode.MissingRawRd3dText, Anno1800IslandTool.Core.Localization.TextCatalog.T("Le texte brut de rd3d.xml n'a pas été conservé."));
+        ValidateRawText(report, project.GameDataFilePath, project.RawContent.GameDataText, ValidationCode.MissingRawGameDataText, Anno1800IslandTool.Core.Localization.TextCatalog.T("Le texte brut de gamedata.xml n'a pas été conservé."));
 
         ValidatePseudoXml(report, project.RawContent.RootText, project.RootFilePath);
         ValidatePseudoXml(report, project.RawContent.Rd3dText, project.Rd3dFilePath);
@@ -48,7 +48,7 @@ public sealed class RawTextValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.XmlDeclarationNotSupported,
-                "Le pseudo-XML interprété ne devrait pas contenir de déclaration XML en tête. Le jeu et les exports existants attendent généralement un contenu sans <?xml ...?>.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.T("Le pseudo-XML interprété ne devrait pas contenir de déclaration XML en tête. Le jeu et les exports existants attendent généralement un contenu sans <?xml ...?>."),
                 filePath);
         }
     }

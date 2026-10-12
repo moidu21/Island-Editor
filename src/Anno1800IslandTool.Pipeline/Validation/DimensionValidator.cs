@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Core.Models;
+using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Validation;
 using Anno1800IslandTool.Pipeline.Abstractions;
 using Anno1800IslandTool.Pipeline.Services;
@@ -16,7 +16,7 @@ public sealed class DimensionValidator : IValidator<IslandProject>
 
         if (mapSize <= 0)
         {
-            report.Add(ValidationSeverity.Error, ValidationCode.InconsistentDimensions, "MapSize invalide ou non lu.");
+            report.Add(ValidationSeverity.Error, ValidationCode.InconsistentDimensions, Anno1800IslandTool.Core.Localization.TextCatalog.T("MapSize invalide ou non lu."));
             return report;
         }
 
@@ -26,7 +26,7 @@ public sealed class DimensionValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.InconsistentDimensions,
-                $"ActiveMapGrid.X personnalisé : {project.Root.ActiveMapGrid.X} (valeur habituelle {expectedActiveGrid}). Export autorisé.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"ActiveMapGrid.X personnalisé : {project.Root.ActiveMapGrid.X} (valeur habituelle {expectedActiveGrid}). Export autorisé."),
                 project.Metadata.RootIslandFileName);
         }
 
@@ -35,7 +35,7 @@ public sealed class DimensionValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.InconsistentDimensions,
-                $"ActiveMapGrid.Y personnalisé : {project.Root.ActiveMapGrid.Y} (valeur habituelle {expectedActiveGrid}). Export autorisé.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"ActiveMapGrid.Y personnalisé : {project.Root.ActiveMapGrid.Y} (valeur habituelle {expectedActiveGrid}). Export autorisé."),
                 project.Metadata.RootIslandFileName);
         }
 
@@ -44,7 +44,7 @@ public sealed class DimensionValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Error,
                 ValidationCode.InconsistentDimensions,
-                $"GridWidth incohérent. Attendu {_dimensions.ComputeGridWidth(mapSize)}, obtenu {project.Rd3d.GridWidth}.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"GridWidth incohérent. Attendu {_dimensions.ComputeGridWidth(mapSize)}, obtenu {project.Rd3d.GridWidth}."),
                 "rd3d.xml");
         }
 
@@ -53,7 +53,7 @@ public sealed class DimensionValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Error,
                 ValidationCode.InconsistentDimensions,
-                $"GridHeight incohérent. Attendu {_dimensions.ComputeGridHeight(mapSize)}, obtenu {project.Rd3d.GridHeight}.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"GridHeight incohérent. Attendu {_dimensions.ComputeGridHeight(mapSize)}, obtenu {project.Rd3d.GridHeight}."),
                 "rd3d.xml");
         }
 
@@ -62,7 +62,7 @@ public sealed class DimensionValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.InconsistentDimensions,
-                $"MaterialMapWidth inattendu. Attendu {_dimensions.ComputeMaterialMapSize(mapSize)}, obtenu {project.Rd3d.MaterialMapWidth}.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"MaterialMapWidth inattendu. Attendu {_dimensions.ComputeMaterialMapSize(mapSize)}, obtenu {project.Rd3d.MaterialMapWidth}."),
                 "rd3d.xml");
         }
 
@@ -71,7 +71,7 @@ public sealed class DimensionValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.InconsistentDimensions,
-                $"MaterialMapHeight inattendu. Attendu {_dimensions.ComputeMaterialMapSize(mapSize)}, obtenu {project.Rd3d.MaterialMapHeight}.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"MaterialMapHeight inattendu. Attendu {_dimensions.ComputeMaterialMapSize(mapSize)}, obtenu {project.Rd3d.MaterialMapHeight}."),
                 "rd3d.xml");
         }
 
@@ -80,7 +80,7 @@ public sealed class DimensionValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.InconsistentDimensions,
-                $"TintMapWidth inattendu. Attendu {_dimensions.ComputeTintMapSize(mapSize)}, obtenu {project.Rd3d.TintMapWidth}.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"TintMapWidth inattendu. Attendu {_dimensions.ComputeTintMapSize(mapSize)}, obtenu {project.Rd3d.TintMapWidth}."),
                 "rd3d.xml");
         }
 
@@ -89,7 +89,7 @@ public sealed class DimensionValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.InconsistentDimensions,
-                $"TintMapHeight inattendu. Attendu {_dimensions.ComputeTintMapSize(mapSize)}, obtenu {project.Rd3d.TintMapHeight}.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"TintMapHeight inattendu. Attendu {_dimensions.ComputeTintMapSize(mapSize)}, obtenu {project.Rd3d.TintMapHeight}."),
                 "rd3d.xml");
         }
 
@@ -98,7 +98,7 @@ public sealed class DimensionValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.InconsistentDimensions,
-                $"Largeur de la coarse heightmap inattendue. Attendu {_dimensions.ComputeHeightMapSize(mapSize)}, obtenu {project.GameData.TerrainHeightMap.Width}.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"Largeur de la coarse heightmap inattendue. Attendu {_dimensions.ComputeHeightMapSize(mapSize)}, obtenu {project.GameData.TerrainHeightMap.Width}."),
                 "gamedata.xml");
         }
 
@@ -107,7 +107,7 @@ public sealed class DimensionValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.InconsistentDimensions,
-                $"Hauteur de la coarse heightmap inattendue. Attendu {_dimensions.ComputeHeightMapSize(mapSize)}, obtenu {project.GameData.TerrainHeightMap.Height}.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"Hauteur de la coarse heightmap inattendue. Attendu {_dimensions.ComputeHeightMapSize(mapSize)}, obtenu {project.GameData.TerrainHeightMap.Height}."),
                 "gamedata.xml");
         }
 

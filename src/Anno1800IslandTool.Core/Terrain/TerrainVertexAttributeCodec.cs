@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Core.Common;
+using Anno1800IslandTool.Core.Common;
 
 namespace Anno1800IslandTool.Core.Terrain;
 
@@ -216,7 +216,7 @@ public static class TerrainVertexAttributeCodec
     {
         if (rawValues.Length < minLength)
         {
-            throw new ArgumentException($"Le tableau de vertex doit contenir au moins {minLength} valeurs.", nameof(rawValues));
+            throw new ArgumentException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Le tableau de vertex doit contenir au moins {minLength} valeurs."), nameof(rawValues));
         }
     }
 

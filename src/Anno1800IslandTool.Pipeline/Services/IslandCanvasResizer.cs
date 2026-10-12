@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Core.Common;
+using Anno1800IslandTool.Core.Common;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;
 
@@ -10,7 +10,7 @@ public static class IslandCanvasResizer
     public static void Resize(IslandProject project, int size)
     {
         if (size <= 0 || size > 2040 || size % 8 != 0)
-            throw new ArgumentException("La taille doit être un multiple de 8 compris entre 8 et 2040 (coordonnées de terrain sur 16 bits).");
+            throw new ArgumentException(Anno1800IslandTool.Core.Localization.TextCatalog.T("La taille doit être un multiple de 8 compris entre 8 et 2040 (coordonnées de terrain sur 16 bits)."));
         var side = checked(size * 2 + 1);
         var oldSize = project.Root.MapSize;
         var oldMap = project.GameData.TerrainHeightMap;
@@ -41,6 +41,10 @@ public static class IslandCanvasResizer
         var gameDataText = IslandCanvasXmlResizer.Resize(project.RawContent.GameDataText, oldSize, size);
         var rd3dText = IslandCanvasXmlResizer.Resize(project.RawContent.Rd3dText, oldSize, size);
         // Allocate complete replacements before publishing dimensions to consumers.
+        if (size > oldSize && oldSize > 0)
+            project.PendingNewLandOriginalSize = Math.Min(project.PendingNewLandOriginalSize ?? oldSize, oldSize);
+        else if (project.PendingNewLandOriginalSize >= size)
+            project.PendingNewLandOriginalSize = null;
         project.RawContent.GameDataText = gameDataText;
         project.RawContent.Rd3dText = rd3dText;
         project.GameData.TerrainHeightMap = new CoarseHeightMap { Width = side, Height = side,

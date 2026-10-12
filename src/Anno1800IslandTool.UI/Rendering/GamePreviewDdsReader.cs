@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Runtime.InteropServices;
 using SharpDX;
 using SharpDX.D3DCompiler;
@@ -30,25 +30,25 @@ internal sealed class GamePreviewDdsReader : IDisposable
     {
         using var file=File.OpenRead(path);using var reader=new BinaryReader(file);
         var header=reader.ReadBytes(128);
-        if(header.Length!=128 || BitConverter.ToUInt32(header,0)!=0x20534444)throw new InvalidDataException("Invalid DDS: "+path);
+        if(header.Length!=128 || BitConverter.ToUInt32(header,0)!=0x20534444)throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Invalid DDS: ")+path);
         int h=BitConverter.ToInt32(header,12),w=BitConverter.ToInt32(header,16),mips=Math.Max(1,BitConverter.ToInt32(header,28));
-        if(w<=0 || h<=0 || w>32768 || h>32768 || mips>16)throw new InvalidDataException("Invalid DDS dimensions.");
+        if(w<=0 || h<=0 || w>32768 || h>32768 || mips>16)throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Invalid DDS dimensions."));
         uint four=BitConverter.ToUInt32(header,84);Format format;
         if(four==0x30315844)
         {
-            var dx=reader.ReadBytes(20);if(dx.Length!=20)throw new InvalidDataException("Truncated DX10 header.");
+            var dx=reader.ReadBytes(20);if(dx.Length!=20)throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Truncated DX10 header."));
             format=(Format)BitConverter.ToInt32(dx,0);
-            if(BitConverter.ToInt32(dx,4)!=3 || BitConverter.ToInt32(dx,12)!=1)throw new InvalidDataException("DDS must be a single 2D texture.");
+            if(BitConverter.ToInt32(dx,4)!=3 || BitConverter.ToInt32(dx,12)!=1)throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("DDS must be a single 2D texture."));
         }
         else format=four switch {0x31545844=>Format.BC1_UNorm,0x33545844=>Format.BC2_UNorm,0x35545844=>Format.BC3_UNorm,_=>Format.Unknown};
         // Keep encoded colour values; the preview blend uses the same colour convention throughout.
         format=format switch {Format.BC1_UNorm_SRgb=>Format.BC1_UNorm,Format.BC2_UNorm_SRgb=>Format.BC2_UNorm,Format.BC3_UNorm_SRgb=>Format.BC3_UNorm,Format.BC7_UNorm_SRgb=>Format.BC7_UNorm,_=>format};
-        int block=format switch {Format.BC1_UNorm=>8,Format.BC2_UNorm or Format.BC3_UNorm or Format.BC7_UNorm=>16,_=>throw new InvalidDataException("Unsupported DDS format: "+format)};
+        int block=format switch {Format.BC1_UNorm=>8,Format.BC2_UNorm or Format.BC3_UNorm or Format.BC7_UNorm=>16,_=>throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Unsupported DDS format: ")+format)};
         for(int mip=0;mip<mips-1 && Math.Max(w,h)>maxSize;mip++)
         {file.Position+=((w+3)/4)*((h+3)/4)*block;w=Math.Max(1,w/2);h=Math.Max(1,h/2);}
-        if(Math.Max(w,h)>maxSize)throw new InvalidDataException("DDS has no small mip level: "+path);
+        if(Math.Max(w,h)>maxSize)throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("DDS has no small mip level: ")+path);
         int pitch=((w+3)/4)*block,count=pitch*((h+3)/4);
-        var data=reader.ReadBytes(count);if(data.Length!=count)throw new InvalidDataException("Truncated DDS mip.");
+        var data=reader.ReadBytes(count);if(data.Length!=count)throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Truncated DDS mip."));
         var pin=GCHandle.Alloc(data,GCHandleType.Pinned);
         Texture2D source;
         try { source=new Texture2D(device,new Texture2DDescription{Width=w,Height=h,MipLevels=1,ArraySize=1,Format=format,SampleDescription=new(1,0),Usage=ResourceUsage.Immutable,BindFlags=BindFlags.ShaderResource},new DataRectangle(pin.AddrOfPinnedObject(),pitch)); }

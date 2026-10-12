@@ -1,8 +1,12 @@
-﻿namespace Anno1800IslandTool.Pipeline.Services;
+namespace Anno1800IslandTool.Pipeline.Services;
 
 /// <summary>Small display-only colour adjustment. Never applied to exported textures.</summary>
 public static class PreviewColor
 {
+    // Use the destination biome, independently of the previously selected material set.
+    public static bool ShouldEnhance(Anno1800IslandTool.Core.Models.IslandProject project)
+        => MaterialSetEnvironmentSynchronizer.ResolveCurrentBiome(project) != "Colony02";
+
     public static void Enhance(byte[] pixels,bool bgra=false)
     {
         for(int i=0;i+3<pixels.Length;i+=4)

@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -60,20 +60,21 @@ public sealed class LocalTerrainDerivativeRegenerator
         return state;
     }
 
-    public List<RegeneratedMeshPageWrite> SnapshotCurrentMeshPageWrites(IslandProject project, IEnumerable<TerrainPageKey>? keys)
+    public List<RegeneratedMeshPageWrite> SnapshotCurrentMeshPageWrites(IslandProject project, IEnumerable<TerrainPageKey>? keys, bool includeEmptyPages = false)
     {
         ArgumentNullException.ThrowIfNull(project);
 
         HashSet<TerrainPageKey>? filter = keys is null ? null : new HashSet<TerrainPageKey>(keys);
         return project.MeshPages.Values
             .Where(page => filter is null || filter.Contains(page.Key))
-            .Where(MeshPageClassifier.CanEditGeometry)
+            .Where(page => MeshPageClassifier.CanEditGeometry(page) ||
+                (includeEmptyPages && MeshPageClassifier.IsGeometryCandidateLod(page.Key) && page.HasEditablePayload))
             .OrderBy(page => page.Key.Lod)
             .ThenBy(page => page.Key.X)
             .ThenBy(page => page.Key.Y)
             .AsParallel()
             .AsOrdered()
-            .WithDegreeOfParallelism(Math.Max(1, Environment.ProcessorCount))
+            .WithDegreeOfParallelism(Math.Clamp(Environment.ProcessorCount, 1, 2))
             .Select(page => new RegeneratedMeshPageWrite
             {
                 Key = page.Key,
@@ -148,15 +149,15 @@ public sealed class LocalTerrainDerivativeRegenerator
                     var role = MeshPageClassifier.Classify(key, mesh);
                     info.IsEditable = role == MeshPageRole.EditableGeometry;
                     info.EditabilityReason = MeshPageClassifier.BuildReason(key, mesh);
-                    var status = mesh is null ? "non chargé" : mesh.DecodeStatus;
-                    info.Summary = $"{info.Summary} | rôle={MeshPageClassifier.GetRoleLabel(role)} | {status}" + (info.IsEditable ? " | éditable" : " | protégé/non éditable");
+                    var status = mesh is null ? Anno1800IslandTool.Core.Localization.TextCatalog.T("non chargé") : mesh.DecodeStatus;
+                    info.Summary = Anno1800IslandTool.Core.Localization.TextCatalog.F($"{info.Summary} | rôle={MeshPageClassifier.GetRoleLabel(role)} | {status}") + (info.IsEditable ? Anno1800IslandTool.Core.Localization.TextCatalog.T(" | éditable") : Anno1800IslandTool.Core.Localization.TextCatalog.T(" | protégé/non éditable"));
                 }
 
                 if (!pageBounds.IsExactKeyGrid)
                 {
                     info.Summary = string.IsNullOrWhiteSpace(info.Summary)
-                        ? "grille non rectangulaire/crop détectée"
-                        : $"{info.Summary} | grille non rectangulaire/crop détectée";
+                        ? Anno1800IslandTool.Core.Localization.TextCatalog.T("grille non rectangulaire/crop détectée")
+                        : Anno1800IslandTool.Core.Localization.TextCatalog.F($"{info.Summary} | grille non rectangulaire/crop détectée");
                 }
 
                 pages.Add(info);
@@ -205,27 +206,27 @@ public sealed class LocalTerrainDerivativeRegenerator
     private static string BuildSummary(TerrainLocalRegenerationState state)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("Régénération locale des dérivés terrain");
-        sb.AppendLine($"Parallélisme CPU : {CpuParallelOptions.MaxDegreeOfParallelism}/{Environment.ProcessorCount} workers");
-        sb.AppendLine($"Famille ancre : {state.AnchorFamily}");
-        sb.AppendLine($"Page ancre demandée : {(state.AnchorPageKey is null ? "aucune" : state.AnchorPageKey.Value.ToString())}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Régénération locale des dérivés terrain"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Parallélisme CPU : {CpuParallelOptions.MaxDegreeOfParallelism}/{Environment.ProcessorCount} workers"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Famille ancre : {state.AnchorFamily}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Page ancre demandée : {(state.AnchorPageKey is null ? Anno1800IslandTool.Core.Localization.TextCatalog.T("aucune") : state.AnchorPageKey.Value.ToString())}"));
         if (state.ResolvedEditableMeshAnchor is not null)
         {
-            sb.AppendLine($"Page mesh éditable résolue : {state.ResolvedEditableMeshAnchor.Value}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Page mesh éditable résolue : {state.ResolvedEditableMeshAnchor.Value}"));
         }
         sb.AppendLine($"Dirty sample bounds : {state.DirtySampleBounds}");
         sb.AppendLine($"Expanded sample bounds : {state.ExpandedSampleBounds}");
-        sb.AppendLine($"Expansion pages : {state.ExpansionPages}");
-        sb.AppendLine($"Pages affectées : {state.AffectedPages.Count}");
-        sb.AppendLine($"Mesh éditables affectées : {state.EditableMeshPagesAffected}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Expansion pages : {state.ExpansionPages}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Pages affectées : {state.AffectedPages.Count}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Mesh éditables affectées : {state.EditableMeshPagesAffected}"));
         if (state.AnchorMeshLod >= 0)
         {
-            sb.AppendLine($"LOD ancre mesh : {state.AnchorMeshLod}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"LOD ancre mesh : {state.AnchorMeshLod}"));
         }
         var meshScope = state.IncludesHigherLods
-            ? "tous les LOD mesh éditables par recouvrement spatial"
-            : (state.AnchorPageKey is null ? "validation globale (tous les LOD/pages présents)" : $"LOD {state.AnchorMeshLod} seulement");
-        sb.AppendLine($"Portée mesh : {meshScope}");
+            ? Anno1800IslandTool.Core.Localization.TextCatalog.T("tous les LOD mesh éditables par recouvrement spatial")
+            : (state.AnchorPageKey is null ? Anno1800IslandTool.Core.Localization.TextCatalog.T("validation globale (tous les LOD/pages présents)") : Anno1800IslandTool.Core.Localization.TextCatalog.F($"LOD {state.AnchorMeshLod} seulement"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Portée mesh : {meshScope}"));
 
         foreach (var familyGroup in state.AffectedPages.GroupBy(p => p.Family).OrderBy(g => g.Key))
         {
@@ -233,33 +234,33 @@ public sealed class LocalTerrainDerivativeRegenerator
             if (string.Equals(familyGroup.Key, "Mesh", StringComparison.OrdinalIgnoreCase))
             {
                 var editable = familyGroup.Count(p => p.IsEditable);
-                sb.AppendLine($"    éditables : {editable} / {familyGroup.Count()}");
+                sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"    éditables : {editable} / {familyGroup.Count()}"));
                 foreach (var lodGroup in familyGroup.GroupBy(p => p.Key.Lod).OrderBy(g => g.Key))
                 {
-                    sb.AppendLine($"    LOD {lodGroup.Key} : {lodGroup.Count()} page(s)");
+                    sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"    LOD {lodGroup.Key} : {lodGroup.Count()} page(s)"));
                 }
             }
         }
 
         if (state.GeneratedMeshPageWrites.Count > 0)
         {
-            sb.AppendLine($"Mesh pages générées : {state.GeneratedMeshPageWrites.Count}");
-            sb.AppendLine($"  LOD ancre générées : {state.BaseLodMeshPagesGenerated}");
-            sb.AppendLine($"  LOD supérieures générées : {state.HigherLodMeshPagesGenerated}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Mesh pages générées : {state.GeneratedMeshPageWrites.Count}"));
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"  LOD ancre générées : {state.BaseLodMeshPagesGenerated}"));
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"  LOD supérieures générées : {state.HigherLodMeshPagesGenerated}"));
             foreach (var lod in state.GeneratedMeshPagesByLod.OrderBy(kv => kv.Key))
             {
-                sb.AppendLine($"  génération LOD {lod.Key} : {lod.Value}");
+                sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"  génération LOD {lod.Key} : {lod.Value}"));
             }
         }
 
         if (state.SkippedNonEditableMeshPages > 0)
         {
-            sb.AppendLine($"Mesh non éditables ignorées : {state.SkippedNonEditableMeshPages}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Mesh non éditables ignorées : {state.SkippedNonEditableMeshPages}"));
         }
 
         if (state.GeneratedInterpretedNormalMapWritesCount > 0)
         {
-            sb.AppendLine($"NormalMaps interprétés générés : {state.GeneratedInterpretedNormalMapWritesCount}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"NormalMaps interprétés générés : {state.GeneratedInterpretedNormalMapWritesCount}"));
             foreach (var lod in state.GeneratedNormalMapsByLod.OrderBy(kv => kv.Key))
             {
                 sb.AppendLine($"  normalmaps LOD {lod.Key} : {lod.Value}");
@@ -268,7 +269,7 @@ public sealed class LocalTerrainDerivativeRegenerator
 
         if (state.GeneratedTintMapWritesCount > 0)
         {
-            sb.AppendLine($"TintMaps générées : {state.GeneratedTintMapWritesCount}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"TintMaps générées : {state.GeneratedTintMapWritesCount}"));
             foreach (var lod in state.GeneratedTintMapsByLod.OrderBy(kv => kv.Key))
             {
                 sb.AppendLine($"  tintmaps LOD {lod.Key} : {lod.Value}");
@@ -731,7 +732,7 @@ public sealed class LocalTerrainDerivativeRegenerator
             pageInputs.AddRange(BuildMissingActiveNormalMapInputs(project, workingMap)
                 .Where(input => TouchesGutter(input.Page)));
 
-        return GenerateInterpretedNormalMapWritesFromInputs(project, workingMap, state, pageInputs, "Régénération normalmaps affectées");
+        return GenerateInterpretedNormalMapWritesFromInputs(project, workingMap, state, pageInputs, Anno1800IslandTool.Core.Localization.TextCatalog.T("Régénération normalmaps affectées"));
     }
 
     public IReadOnlyList<RegeneratedNormalMapWrite> GenerateAllInterpretedNormalMapWrites(
@@ -763,7 +764,7 @@ public sealed class LocalTerrainDerivativeRegenerator
         // Il faut donc écrire toutes les pages nouvellement déclarées. On génère les normalmaps
         // manquantes depuis la heightmap autoritaire, mais on ne touche pas à la géométrie LOD0/LOD1.
         if (includeMissingPages) pageInputs.AddRange(BuildMissingActiveNormalMapInputs(project, workingMap));
-        return GenerateInterpretedNormalMapWritesFromInputs(project, workingMap, state, pageInputs, "Régénération normalmaps existantes + pages manquantes v42.7");
+        return GenerateInterpretedNormalMapWritesFromInputs(project, workingMap, state, pageInputs, Anno1800IslandTool.Core.Localization.TextCatalog.T("Régénération normalmaps existantes + pages manquantes v42.7"));
     }
 
     private static List<(NormalMapPage Page, RectI Bounds, bool ForcedFullRebuild)> BuildMissingActiveNormalMapInputs(IslandProject project, CoarseHeightMap workingMap)
@@ -1017,7 +1018,7 @@ public sealed class LocalTerrainDerivativeRegenerator
         var writes = pageInputs
             .AsParallel()
             .AsOrdered()
-            .WithDegreeOfParallelism(Math.Max(1, Environment.ProcessorCount))
+            .WithDegreeOfParallelism(Math.Clamp(Environment.ProcessorCount, 1, 2))
             .Select(input =>
             {
                 var xml = BuildInterpretedNormalMapXml(project, input.Page, workingMap, input.Bounds, heightSampler);
@@ -1045,7 +1046,7 @@ public sealed class LocalTerrainDerivativeRegenerator
             state.Summary += Environment.NewLine + summaryTitle + " :";
             foreach (var lod in state.GeneratedNormalMapsByLod.OrderBy(kv => kv.Key))
             {
-                state.Summary += Environment.NewLine + $"  LOD {lod.Key}: {lod.Value} page(s)";
+                state.Summary += Environment.NewLine + Anno1800IslandTool.Core.Localization.TextCatalog.F($"  LOD {lod.Key}: {lod.Value} page(s)");
             }
         }
 
@@ -1065,8 +1066,8 @@ public sealed class LocalTerrainDerivativeRegenerator
 
         var writer = new NormalMapPageWriter();
         var xml = writer.WritePreserving(encoded, downsampledMap, deltaMaps);
-        var fallback = writer.Write(encoded, downsampledMap, deltaMaps);
-        return PseudoXmlSafety.EnsureSingleRootOrFallback(xml, fallback);
+        return PseudoXmlSafety.EnsureSingleRootOrFallback(xml,
+            () => writer.Write(encoded, downsampledMap, deltaMaps));
     }
 
     public IReadOnlyList<RegeneratedTintMapWrite> GenerateTintMapWrites(
@@ -1086,7 +1087,7 @@ public sealed class LocalTerrainDerivativeRegenerator
             .ThenBy(p => p.Key.Y)
             .AsParallel()
             .AsOrdered()
-            .WithDegreeOfParallelism(Math.Max(1, Environment.ProcessorCount))
+            .WithDegreeOfParallelism(Math.Clamp(Environment.ProcessorCount, 1, 2))
             .Select(affected =>
             {
                 if (!project.TintMapPages.TryGetValue(affected.Key, out var page))
@@ -1165,7 +1166,7 @@ public sealed class LocalTerrainDerivativeRegenerator
                     DdsBytes = pair.Value.ToArray(),
                     Width = width,
                     Height = height,
-                    Summary = $"v42.1 full vanilla-like MaterialMap sync; dds-dxt1={width}x{height}; bytes={pair.Value.Length}; {(isExisting ? "page existante" : "page ajoutée depuis ActiveMapGrid.bits")}"
+                    Summary = $"v42.1 full vanilla-like MaterialMap sync; dds-dxt1={width}x{height}; bytes={pair.Value.Length}; {(isExisting ? Anno1800IslandTool.Core.Localization.TextCatalog.T("page existante") : Anno1800IslandTool.Core.Localization.TextCatalog.T("page ajoutée depuis ActiveMapGrid.bits"))}"
                 };
             })
             .Where(write => write is not null)
@@ -1182,7 +1183,7 @@ public sealed class LocalTerrainDerivativeRegenerator
             .OrderBy(g => g.Key)
             .ToDictionary(g => g.Key, g => g.Count());
         state.Summary = BuildSummary(state) + Environment.NewLine + Environment.NewLine +
-            "Régénération complète des tintmaps v42.1" + Environment.NewLine +
+            Anno1800IslandTool.Core.Localization.TextCatalog.T("Régénération complète des tintmaps v42.1") + Environment.NewLine +
             syncSummary;
         return writes;
     }
@@ -1615,7 +1616,7 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateMeshPageWrites(
     writes = meshPageInputs
         .AsParallel()
         .AsOrdered()
-        .WithDegreeOfParallelism(Math.Max(1, Environment.ProcessorCount))
+        .WithDegreeOfParallelism(Math.Clamp(Environment.ProcessorCount, 1, 2))
         .Select(input => BuildMeshPageWrite(project, input.Page, workingMap, input.Affected.SampleBounds, state.DirtySampleBounds, options, heightSampler))
         .Where(write => write is { HasContent: true })
         .Select(write => write!)
@@ -1719,7 +1720,7 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
     writes = inputs
         .AsParallel()
         .AsOrdered()
-        .WithDegreeOfParallelism(Math.Max(1, Environment.ProcessorCount))
+        .WithDegreeOfParallelism(Math.Clamp(Environment.ProcessorCount, 1, 2))
         .Select(input => BuildExpandedActiveMeshPageWrite(project, input.Page, workingMap, input.Affected.SampleBounds, options, heightSampler, state.DirtySampleBounds))
         .Where(write => write is { HasContent: true })
         .Select(write => write!)
@@ -1738,7 +1739,7 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
         .ToDictionary(g => g.Key, g => g.Count());
     state.BaseLodMeshPagesGenerated = anchorLod >= 0 ? writes.Count(w => w.Key.Lod == anchorLod) : writes.Count;
     state.HigherLodMeshPagesGenerated = anchorLod >= 0 ? writes.Count(w => w.Key.Lod > anchorLod) : 0;
-    state.Summary = BuildSummary(state) + Environment.NewLine + "v42 : extension d'emprise active générée depuis le masque exact ActiveMapGrid.bits ; les LOD mesh éditables conservent la topologie source et injectent les nouveaux triangles uniquement dans les cellules actives hors footprint.";
+    state.Summary = BuildSummary(state) + Environment.NewLine + Anno1800IslandTool.Core.Localization.TextCatalog.T("v42 : extension d'emprise active générée depuis le masque exact ActiveMapGrid.bits ; les LOD mesh éditables conservent la topologie source et injectent les nouveaux triangles uniquement dans les cellules actives hors footprint.");
     return writes;
 }
 
@@ -1767,8 +1768,8 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
 
     var comparison = BuildAdaptiveComparison(project, page, rebuiltPage, map, pageSampleBounds, heightSampler);
     comparison.Notes = generatedExtensionVertices > 0
-        ? "v44.1 : extension active ajoutée SANS remplacer la topologie vanilla, avec page/cluster bounds fixes par LOD vanilla et couverture LOD distante renforcée. Les clusters existants gardent leurs vertices/indices/UV ; Raw1/Y et Raw4..7 sont resynchronisés depuis la heightmap. Les nouveaux triangles reçoivent des UV cluster-local et ne copient plus les Raw shader/skirt du bord vanilla."
-        : "v43.4 : aucune cellule active hors empreinte à générer pour cette page ; topologie source conservée, Raw4..7 resynchronisés si la hauteur a changé.";
+        ? Anno1800IslandTool.Core.Localization.TextCatalog.T("v44.1 : extension active ajoutée SANS remplacer la topologie vanilla, avec page/cluster bounds fixes par LOD vanilla et couverture LOD distante renforcée. Les clusters existants gardent leurs vertices/indices/UV ; Raw1/Y et Raw4..7 sont resynchronisés depuis la heightmap. Les nouveaux triangles reçoivent des UV cluster-local et ne copient plus les Raw shader/skirt du bord vanilla.")
+        : Anno1800IslandTool.Core.Localization.TextCatalog.T("v43.4 : aucune cellule active hors empreinte à générer pour cette page ; topologie source conservée, Raw4..7 resynchronisés si la hauteur a changé.");
 
     var xml = BuildMeshPageXmlFromModel(rebuiltPage);
     if (string.IsNullOrWhiteSpace(xml))
@@ -1786,7 +1787,7 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
         TargetPath = page.OriginalRelativePath,
         XmlText = xml,
         Comparison = comparison,
-        Summary = $"extension active v44.1 fixed-page LOD + far coverage : clusters={rebuiltPage.Clusters.Count}/{Math.Max(1, rebuiltPage.DeclaredClusterCount)}, vtx {originalVertexCount}->{generatedVertexCount} (+{generatedExtensionVertices}), tris {originalTriangleCount}->{generatedTriangleCount} (+{generatedExtensionTriangles}), topologie source préservée, extension injectée par cluster hors footprint, UV cluster-local + Raw4..7 reconstruits, UsedMaterialBits resynchronisés"
+        Summary = Anno1800IslandTool.Core.Localization.TextCatalog.F($"extension active v44.1 fixed-page LOD + far coverage : clusters={rebuiltPage.Clusters.Count}/{Math.Max(1, rebuiltPage.DeclaredClusterCount)}, vtx {originalVertexCount}->{generatedVertexCount} (+{generatedExtensionVertices}), tris {originalTriangleCount}->{generatedTriangleCount} (+{generatedExtensionTriangles}), topologie source préservée, extension injectée par cluster hors footprint, UV cluster-local + Raw4..7 reconstruits, UsedMaterialBits resynchronisés")
     };
 }
 
@@ -1842,12 +1843,6 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
     var clusterGridWidth = Math.Max(1, page.DeclaredWidth > 0 ? page.DeclaredWidth : InferClusterGridWidth(page));
     var clusterGridHeight = Math.Max(1, page.DeclaredHeight > 0 ? page.DeclaredHeight : InferClusterGridHeight(page, clusterGridWidth));
     var expectedClusterCount = Math.Max(page.Clusters.Count, Math.Max(1, clusterGridWidth * clusterGridHeight));
-    var sourceVerticesForAttributes = page.Clusters.SelectMany(c => c.Vertices).ToList();
-    if (sourceVerticesForAttributes.Count == 0)
-    {
-        sourceVerticesForAttributes = project.MeshPages.Values.SelectMany(p => p.Clusters).SelectMany(c => c.Vertices).ToList();
-    }
-
     var clusterWidth = nominalPageWorldSize / (double)Math.Max(1, clusterGridWidth);
     var clusterHeight = nominalPageWorldSize / (double)Math.Max(1, clusterGridHeight);
     if (!double.IsFinite(clusterWidth) || clusterWidth <= 0 || !double.IsFinite(clusterHeight) || clusterHeight <= 0)
@@ -1929,7 +1924,7 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
                 // grille uniquement pour un cluster côtier reconstruit ou réellement vide.
                 if (coastal || sourceCluster.Vertices.Count == 0 || sourceCluster.Indices.Count == 0)
                 {
-                    AppendExtensionGeometryToCluster(project, rebuiltCluster, coverageCluster, sourceVerticesForAttributes, clusterMinX, clusterMaxX, clusterMinZ, clusterMaxZ, page.Key.Lod, map, options, heightSampler, activeWorldPredicate, out var addedVertices, out var addedTriangles, coastal);
+                    AppendExtensionGeometryToCluster(project, rebuiltCluster, coverageCluster, clusterMinX, clusterMaxX, clusterMinZ, clusterMaxZ, page.Key.Lod, map, options, heightSampler, activeWorldPredicate, out var addedVertices, out var addedTriangles, coastal);
                     generatedExtensionVertices += addedVertices;
                     generatedExtensionTriangles += addedTriangles;
                 }
@@ -1944,7 +1939,7 @@ public IReadOnlyList<RegeneratedMeshPageWrite> GenerateExpandedActiveMeshPageWri
     rebuilt.DeclaredWidth = clusterGridWidth;
     rebuilt.DeclaredHeight = clusterGridHeight;
     rebuilt.DeclaredClusterCount = Math.Max(page.DeclaredClusterCount, rebuilt.Clusters.Count);
-    rebuilt.DecodeNotes = (rebuilt.DecodeNotes + " v42 : extension injectée par cluster depuis ActiveMapGrid.bits, topologie source conservée.").Trim();
+    rebuilt.DecodeNotes = (rebuilt.DecodeNotes + Anno1800IslandTool.Core.Localization.TextCatalog.T(" v42 : extension injectée par cluster depuis ActiveMapGrid.bits, topologie source conservée.")).Trim();
     return rebuilt;
 }
 
@@ -2071,7 +2066,6 @@ private static void FilterClusterToActiveFootprint(MeshCluster cluster, Func<dou
     IslandProject project,
     MeshCluster rebuiltCluster,
     MeshCluster sourceCluster,
-    IReadOnlyList<MeshVertex> sourceVerticesForAttributes,
     double minX,
     double maxX,
     double minZ,
@@ -2386,7 +2380,7 @@ private static int ToSignedUInt16Storage(int value)
         TargetPath = page.OriginalRelativePath,
         XmlText = xml,
         Comparison = comparison,
-        Summary = $"topologie adaptative budgetée v34.8 DÉSACTIVÉE LOD2+ bitmask : clusters={rebuiltPage.Clusters.Count}, vtx {originalVertexCount}->{generatedVertexCount}, tris={generatedTriangleCount}, budget proche source, footprint conservé, Δavg={comparison.AverageAbsoluteDelta.ToString("0.###", CultureInfo.InvariantCulture)}, Raw3..7 préservés depuis vertex nearest, aucune régénération shader/raw, UsedMaterialBits resynchronisés MaterialMap"
+        Summary = Anno1800IslandTool.Core.Localization.TextCatalog.F($"topologie adaptative budgetée v34.8 DÉSACTIVÉE LOD2+ bitmask : clusters={rebuiltPage.Clusters.Count}, vtx {originalVertexCount}->{generatedVertexCount}, tris={generatedTriangleCount}, budget proche source, footprint conservé, Δavg={comparison.AverageAbsoluteDelta.ToString("0.###", CultureInfo.InvariantCulture)}, Raw3..7 préservés depuis vertex nearest, aucune régénération shader/raw, UsedMaterialBits resynchronisés MaterialMap")
     };
 }
 
@@ -2448,7 +2442,7 @@ private static int ToSignedUInt16Storage(int value)
         TargetPath = page.OriginalRelativePath,
         XmlText = xml,
         Comparison = comparison,
-        Summary = $"topologie SOURCE conservée v46.4 LOD2+ bitmask + tintmaps : clusters={rebuiltPage.Clusters.Count}, vtx {originalVertexCount}->{generatedVertexCount}, tris={generatedTriangleCount}, X/Z et indices conservés, Raw1 hauteur synchronisé, Raw3..Raw7 {(effectiveOptions.RebuildSurfaceAttributes ? "reconstruits sur demande" : "préservés à l'identique")}, Δavg={comparison.AverageAbsoluteDelta.ToString("0.###", CultureInfo.InvariantCulture)}, UsedMaterialBits resynchronisés MaterialMap"
+        Summary = Anno1800IslandTool.Core.Localization.TextCatalog.F($"topologie SOURCE conservée v46.4 LOD2+ bitmask + tintmaps : clusters={rebuiltPage.Clusters.Count}, vtx {originalVertexCount}->{generatedVertexCount}, tris={generatedTriangleCount}, X/Z et indices conservés, Raw1 hauteur synchronisé, Raw3..Raw7 {(effectiveOptions.RebuildSurfaceAttributes ? Anno1800IslandTool.Core.Localization.TextCatalog.T("reconstruits sur demande") : Anno1800IslandTool.Core.Localization.TextCatalog.T("préservés à l'identique"))}, Δavg={comparison.AverageAbsoluteDelta.ToString("0.###", CultureInfo.InvariantCulture)}, UsedMaterialBits resynchronisés MaterialMap")
     };
 }
 
@@ -2506,7 +2500,7 @@ private static MeshPageComparison BuildAdaptiveComparison(IslandProject project,
     }
 
     comparison.AverageAbsoluteDelta = sampleCount > 0 ? (float)(sumDelta / sampleCount) : 0f;
-    comparison.Notes = "v34.8 : comparaison hauteur après synchronisation. Mode topologie source : X/Z, indices, nombre et ordre des vertices, UV Raw3/V et ground objects restent issus du mesh courant/importé/édité ; Y/Raw1, Raw4..7 et UsedMaterialBits sont mis à jour. Les tintmaps sont régénérées hors mesh pour suivre la MaterialMap.";
+    comparison.Notes = Anno1800IslandTool.Core.Localization.TextCatalog.T("v34.8 : comparaison hauteur après synchronisation. Mode topologie source : X/Z, indices, nombre et ordre des vertices, UV Raw3/V et ground objects restent issus du mesh courant/importé/édité ; Y/Raw1, Raw4..7 et UsedMaterialBits sont mis à jour. Les tintmaps sont régénérées hors mesh pour suivre la MaterialMap.");
     return comparison;
 }
 
@@ -2535,7 +2529,7 @@ private static MeshPage BuildAdaptiveMeshPage(IslandProject project, MeshPage pa
     var rebuiltClusters = page.Clusters
         .AsParallel()
         .AsOrdered()
-        .WithDegreeOfParallelism(Math.Max(1, Environment.ProcessorCount))
+        .WithDegreeOfParallelism(Math.Clamp(Environment.ProcessorCount, 1, 2))
         .Select(cluster => BuildAdaptiveCluster(project, cluster, map, options, page.Key.Lod, heightSampler))
         .ToList();
     foreach (var cluster in rebuiltClusters)
@@ -3362,14 +3356,9 @@ private static string BuildMeshPageXml(MeshPage page, List<List<float>> targetVa
 }
 
 private static string BuildMeshPageXmlFromModel(MeshPage page)
-{
-    var targetValues = page.Clusters
-        .Select(cluster => cluster.Vertices.SelectMany(v => v.RawValues).Select(value => (float)value).ToList())
-        .ToList();
-    return BuildMeshPageXmlFromModel(page, targetValues);
-}
+    => BuildMeshPageXmlFromModel(page, null);
 
-private static string BuildMeshPageXmlFromModel(MeshPage page, List<List<float>> targetValues)
+private static string BuildMeshPageXmlFromModel(MeshPage page, List<List<float>>? targetValues)
 {
     var sb = new StringBuilder();
     sb.AppendLine("<Content>");
@@ -3383,7 +3372,23 @@ private static string BuildMeshPageXmlFromModel(MeshPage page, List<List<float>>
         var cluster = page.Clusters[i];
         sb.AppendLine("      <None>");
         sb.AppendLine($"        <Indices>{string.Join(" ", cluster.Indices)}</Indices>");
-        sb.AppendLine($"        <Vertices>{string.Join(" ", targetValues[i].Select((value, index) => MeshInt16Text.Format(value)))}</Vertices>");
+        sb.Append("        <Vertices>");
+        var firstValue = true;
+        void AppendValue(float value)
+        {
+            if (!firstValue) sb.Append(' ');
+            firstValue = false;
+            sb.Append(MeshInt16Text.Format(value));
+        }
+        if (targetValues is not null)
+            foreach (var value in targetValues[i]) AppendValue(value);
+        else
+            foreach (var v in cluster.Vertices)
+            {
+                AppendValue(v.Raw0); AppendValue(v.Raw1); AppendValue(v.Raw2); AppendValue(v.Raw3);
+                AppendValue(v.Raw4); AppendValue(v.Raw5); AppendValue(v.Raw6); AppendValue(v.Raw7);
+            }
+        sb.AppendLine("</Vertices>");
         sb.AppendLine($"        <UsedMaterialBits>{cluster.UsedMaterialBits}</UsedMaterialBits>");
         if (cluster.GroundObjects.Count == 0)
         {
@@ -3531,10 +3536,10 @@ private static (List<List<float>> valuesByCluster, MeshPageComparison comparison
         ? (float)(sumDelta / comparison.VertexCount)
         : 0f;
     comparison.Notes = comparison.ChangedVertexCount == 0
-        ? "Aucun vertex n'a été modifié. Vérifie la coarse heightmap, la zone de régénération ou le statut éditable de la page."
+        ? Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun vertex n'a été modifié. Vérifie la coarse heightmap, la zone de régénération ou le statut éditable de la page.")
         : (options?.RebuildSurfaceAttributes == true
-            ? $"Réécriture locale v31 : hauteur brute index {Math.Clamp(page.ProbableHeightComponentIndex ?? 1, 0, 7)} synchronisée ; Raw4..Raw7 recalculés explicitement. Indices, topologie, UsedMaterialBits et ground objects conservés."
-            : $"Réécriture locale SAFE v31 : seule la hauteur brute index {Math.Clamp(page.ProbableHeightComponentIndex ?? 1, 0, 7)} est synchronisée. Raw3..Raw7 shader, indices, topologie, UsedMaterialBits et ground objects sont conservés pour éviter la casse du rendu.");
+            ? Anno1800IslandTool.Core.Localization.TextCatalog.F($"Réécriture locale v31 : hauteur brute index {Math.Clamp(page.ProbableHeightComponentIndex ?? 1, 0, 7)} synchronisée ; Raw4..Raw7 recalculés explicitement. Indices, topologie, UsedMaterialBits et ground objects conservés.")
+            : Anno1800IslandTool.Core.Localization.TextCatalog.F($"Réécriture locale SAFE v31 : seule la hauteur brute index {Math.Clamp(page.ProbableHeightComponentIndex ?? 1, 0, 7)} est synchronisée. Raw3..Raw7 shader, indices, topologie, UsedMaterialBits et ground objects sont conservés pour éviter la casse du rendu."));
 
     return (result, comparison);
 }

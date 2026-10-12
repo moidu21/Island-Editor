@@ -1,4 +1,4 @@
-﻿using System.Xml.Linq;
+using System.Xml.Linq;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;
 using Anno1800IslandTool.Formats.Readers;
@@ -20,16 +20,32 @@ public class Gameplay46113Tests
     }
     static GameplayGrid Grid(IslandProject p)=>GameplayGridCodec.Read(XDocument.Parse(p.RawContent.GameDataText!).Descendants("AreaIDs").Single(),2);
     [Theory][InlineData(true)][InlineData(false)]
-    public void TerrainRecalculationRejectsMountainsAndWaterAndRestoresFlatLand(bool sparse)
+    public void TerrainRecalculationAllowsElevatedPlateausButRejectsWaterAndSteepSlopes(bool sparse)
     {
         var p=Project(sparse); var editor=new ProjectTextRegenerator();
         var original=Grid(p).Data;
         editor.RegenerateGameDataText(p); Assert.Equal(original,Grid(p).Data);
         p.GameData.TerrainHeightMap=Flat(30);editor.RegenerateGameDataText(p);
+        Assert.Equal(original, Grid(p).Data);
+        var steep = Flat(30);
+        for (int y=0;y<9;y++) for(int x=0;x<9;x++) steep.Samples[y*9+x]=TerrainHeightEncoding.WorldHeightToGameDataRaw(30+x*4);
+        p.GameData.TerrainHeightMap=steep;editor.RegenerateGameDataText(p);
         Assert.All(Grid(p).Data.Where((_,i)=>i%2==1),v=>Assert.Equal((byte)0,v));
         p.GameData.TerrainHeightMap=Flat(-8);editor.RegenerateGameDataText(p);
         Assert.All(Grid(p).Data.Where((_,i)=>i%2==1),v=>Assert.Equal((byte)0,v));
         p.GameData.TerrainHeightMap=Flat(1);editor.RegenerateGameDataText(p);
+        Assert.All(Grid(p).Data.Where((_,i)=>i%2==1),v=>Assert.Equal((byte)32,v));
+    }
+    [Fact] public void FullValidationRebuildsStaleGridEvenWithoutHeightChanges()
+    {
+        var p=Project(false); var editor=new ProjectTextRegenerator();
+        p.GameData.TerrainHeightMap=Flat(30); editor.RegenerateGameDataText(p);
+        var doc=XDocument.Parse(p.RawContent.GameDataText!);
+        doc.Descendants("AreaIDs").Single().ReplaceWith(GameplayGridCodec.Write("AreaIDs",new(8,8,2,Enumerable.Range(0,64).SelectMany(_=>new byte[]{1,0}).ToArray(),false)));
+        p.RawContent.GameDataText=doc.ToString();
+        editor.RegenerateGameDataText(p); // Ordinary save preserves unedited custom blockers.
+        Assert.All(Grid(p).Data.Where((_,i)=>i%2==1),v=>Assert.Equal((byte)0,v));
+        editor.RegenerateGameDataText(p,rebuildAllTerrainAreas:true);
         Assert.All(Grid(p).Data.Where((_,i)=>i%2==1),v=>Assert.Equal((byte)32,v));
     }
     [Fact] public void LocalEditKeepsOtherOwnershipAndReassignsNearestRegisteredArea()

@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using Anno1800IslandTool.Core.Terrain;
 namespace Anno1800IslandTool.Pipeline.Services;
 
@@ -13,7 +13,7 @@ public static class GamePreviewTextureBaker
         if (size is < 64 or > 4096 || map.Width <= 0 || map.Height <= 0 || map.MaterialIdBlockSize <= 0
             || map.PackedMaterialIds.Length != map.ExpectedPackedMaterialIdCount
             || map.PackedMaterialAlphas.Length != map.ExpectedPackedAlphaCount)
-            throw new ArgumentException("Invalid preview dimensions or material map.");
+            throw new ArgumentException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Invalid preview dimensions or material map."));
         var output = new byte[checked(size * size * 4)];
         var palette = new PreviewTexture?[32];
         foreach (var pair in textures)

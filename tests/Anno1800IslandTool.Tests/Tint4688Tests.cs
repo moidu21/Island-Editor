@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Pipeline.Services;
+using Anno1800IslandTool.Pipeline.Services;
 using Anno1800IslandTool.Pipeline.Editing;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Common;

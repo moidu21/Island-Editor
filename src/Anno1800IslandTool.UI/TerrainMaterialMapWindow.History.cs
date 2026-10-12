@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Core.Terrain;
+using Anno1800IslandTool.Core.Terrain;
 
 namespace Anno1800IslandTool.UI;
 
@@ -70,7 +70,7 @@ public partial class TerrainMaterialMapWindow
         _coastTransitionBaseMap = snapshot.CoastTransitionBaseMap?.Clone();
         _isShowingCoastPreview = false;
         RefreshMaterialMapDisplay(refreshTables: true);
-        PaintStatusTextBlock.Text = "Modification de matériaux restaurée depuis l’historique.";
+        PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Modification de matériaux restaurée depuis l’historique.");
         CellDetailsTextBox.Text = PaintStatusTextBlock.Text;
         _largeWindow?.RefreshFromParentData(refreshPalette: false);
     }

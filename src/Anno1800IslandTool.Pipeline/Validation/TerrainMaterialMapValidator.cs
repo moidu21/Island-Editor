@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;
 using Anno1800IslandTool.Core.Validation;
@@ -24,7 +24,7 @@ public sealed class TerrainMaterialMapValidator : IValidator<IslandProject>
 
         if (project.Rd3d.MaterialMapWidth <= 0 || project.Rd3d.MaterialMapHeight <= 0)
         {
-            report.Add(ValidationSeverity.Info, ValidationCode.MaterialMapEncoding, "MaterialMap v30 : dimensions RD3D absentes, diagnostic MaterialIDs2/MaterialAlphas2 ignoré.", relatedFile);
+            report.Add(ValidationSeverity.Info, ValidationCode.MaterialMapEncoding, Anno1800IslandTool.Core.Localization.TextCatalog.T("MaterialMap v30 : dimensions RD3D absentes, diagnostic MaterialIDs2/MaterialAlphas2 ignoré."), relatedFile);
             return report;
         }
 
@@ -36,14 +36,14 @@ public sealed class TerrainMaterialMapValidator : IValidator<IslandProject>
 
         if (map.MaterialIdBlockSize <= 0)
         {
-            report.Add(ValidationSeverity.Warning, ValidationCode.MaterialMapEncoding, $"MaterialMap v30 : MaterialIDBlockSize invalide ({map.MaterialIdBlockSize}). La valeur attendue observée est 2.", relatedFile);
+            report.Add(ValidationSeverity.Warning, ValidationCode.MaterialMapEncoding, Anno1800IslandTool.Core.Localization.TextCatalog.F($"MaterialMap v30 : MaterialIDBlockSize invalide ({map.MaterialIdBlockSize}). La valeur attendue observée est 2."), relatedFile);
             return report;
         }
 
         report.Add(
             ValidationSeverity.Info,
             ValidationCode.MaterialMapEncoding,
-            $"MaterialMap v30 : {map.Width}x{map.Height}, block size {map.MaterialIdBlockSize}, packing {TerrainMaterialPackEncoding.SlotCount} slots x {TerrainMaterialPackEncoding.BitsPerSlot} bits. Les sommes MaterialAlphas2 >31 sont acceptées et préservées.",
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"MaterialMap v30 : {map.Width}x{map.Height}, block size {map.MaterialIdBlockSize}, packing {TerrainMaterialPackEncoding.SlotCount} slots x {TerrainMaterialPackEncoding.BitsPerSlot} bits. Les sommes MaterialAlphas2 >31 sont acceptées et préservées."),
             relatedFile);
 
         ValidateBlockShape(report, map, relatedFile);
@@ -64,7 +64,7 @@ public sealed class TerrainMaterialMapValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.MaterialMapEncoding,
-                $"MaterialMap v30 : {map.Width}x{map.Height} n'est pas divisible proprement par MaterialIDBlockSize={map.MaterialIdBlockSize}. Le validateur utilisera une grille de blocs arrondie, mais ce cas est atypique pour les îles vanilla.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"MaterialMap v30 : {map.Width}x{map.Height} n'est pas divisible proprement par MaterialIDBlockSize={map.MaterialIdBlockSize}. Le validateur utilisera une grille de blocs arrondie, mais ce cas est atypique pour les îles vanilla."),
                 relatedFile);
             return;
         }
@@ -72,7 +72,7 @@ public sealed class TerrainMaterialMapValidator : IValidator<IslandProject>
         report.Add(
             ValidationSeverity.Info,
             ValidationCode.MaterialMapEncoding,
-            $"[OK] MaterialMap v30 : grille MaterialIDs2 attendue {map.BlockWidth}x{map.BlockHeight} bloc(s).",
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"[OK] MaterialMap v30 : grille MaterialIDs2 attendue {map.BlockWidth}x{map.BlockHeight} bloc(s)."),
             relatedFile);
     }
 
@@ -80,26 +80,26 @@ public sealed class TerrainMaterialMapValidator : IValidator<IslandProject>
     {
         if (map.PackedMaterialIds.Length == 0 && map.PackedMaterialAlphas.Length == 0)
         {
-            report.Add(ValidationSeverity.Info, ValidationCode.MaterialMapEncoding, "MaterialMap v30 : MaterialIDs2 et MaterialAlphas2 absents ou non lus dans rd3d.xml.", relatedFile);
+            report.Add(ValidationSeverity.Info, ValidationCode.MaterialMapEncoding, Anno1800IslandTool.Core.Localization.TextCatalog.T("MaterialMap v30 : MaterialIDs2 et MaterialAlphas2 absents ou non lus dans rd3d.xml."), relatedFile);
             return;
         }
 
         if (map.PackedMaterialIds.Length == map.ExpectedPackedMaterialIdCount)
         {
-            report.Add(ValidationSeverity.Info, ValidationCode.MaterialMapEncoding, $"[OK] MaterialIDs2 : {map.PackedMaterialIds.Length} bloc(s) packés, attendu {map.ExpectedPackedMaterialIdCount}.", relatedFile);
+            report.Add(ValidationSeverity.Info, ValidationCode.MaterialMapEncoding, Anno1800IslandTool.Core.Localization.TextCatalog.F($"[OK] MaterialIDs2 : {map.PackedMaterialIds.Length} bloc(s) packés, attendu {map.ExpectedPackedMaterialIdCount}."), relatedFile);
         }
         else
         {
-            report.Add(ValidationSeverity.Warning, ValidationCode.MaterialMapEncoding, $"MaterialIDs2 : {map.PackedMaterialIds.Length} bloc(s) lus, attendu {map.ExpectedPackedMaterialIdCount} pour {map.Width}x{map.Height} avec block size {map.MaterialIdBlockSize}.", relatedFile);
+            report.Add(ValidationSeverity.Warning, ValidationCode.MaterialMapEncoding, Anno1800IslandTool.Core.Localization.TextCatalog.F($"MaterialIDs2 : {map.PackedMaterialIds.Length} bloc(s) lus, attendu {map.ExpectedPackedMaterialIdCount} pour {map.Width}x{map.Height} avec block size {map.MaterialIdBlockSize}."), relatedFile);
         }
 
         if (map.PackedMaterialAlphas.Length == map.ExpectedPackedAlphaCount)
         {
-            report.Add(ValidationSeverity.Info, ValidationCode.MaterialMapEncoding, $"[OK] MaterialAlphas2 : {map.PackedMaterialAlphas.Length} texel(s) packés, attendu {map.ExpectedPackedAlphaCount}.", relatedFile);
+            report.Add(ValidationSeverity.Info, ValidationCode.MaterialMapEncoding, Anno1800IslandTool.Core.Localization.TextCatalog.F($"[OK] MaterialAlphas2 : {map.PackedMaterialAlphas.Length} texel(s) packés, attendu {map.ExpectedPackedAlphaCount}."), relatedFile);
         }
         else
         {
-            report.Add(ValidationSeverity.Warning, ValidationCode.MaterialMapEncoding, $"MaterialAlphas2 : {map.PackedMaterialAlphas.Length} texel(s) lus, attendu {map.ExpectedPackedAlphaCount} pour {map.Width}x{map.Height}.", relatedFile);
+            report.Add(ValidationSeverity.Warning, ValidationCode.MaterialMapEncoding, Anno1800IslandTool.Core.Localization.TextCatalog.F($"MaterialAlphas2 : {map.PackedMaterialAlphas.Length} texel(s) lus, attendu {map.ExpectedPackedAlphaCount} pour {map.Width}x{map.Height}."), relatedFile);
         }
     }
 
@@ -113,14 +113,14 @@ public sealed class TerrainMaterialMapValidator : IValidator<IslandProject>
         var bad = values.Select((value, index) => new { value, index }).Where(x => !TerrainMaterialPackEncoding.IsValidPackedSix5Bit(x.value)).Take(8).ToList();
         if (bad.Count == 0)
         {
-            report.Add(ValidationSeverity.Info, ValidationCode.MaterialMapEncoding, $"[OK] {label} : bits inutilisés 30..31 à zéro sur les valeurs lues.", relatedFile);
+            report.Add(ValidationSeverity.Info, ValidationCode.MaterialMapEncoding, Anno1800IslandTool.Core.Localization.TextCatalog.F($"[OK] {label} : bits inutilisés 30..31 à zéro sur les valeurs lues."), relatedFile);
             return;
         }
 
         report.Add(
             ValidationSeverity.Warning,
             ValidationCode.MaterialMapEncoding,
-            $"{label} : certaines valeurs utilisent les bits 30..31, atypique pour un packing 6x5 bits. Exemples index=valeur : {string.Join(", ", bad.Select(x => $"{x.index}={x.value}"))}.",
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"{label} : certaines valeurs utilisent les bits 30..31, atypique pour un packing 6x5 bits. Exemples index=valeur : {string.Join(", ", bad.Select(x => $"{x.index}={x.value}"))}."),
             relatedFile);
     }
 
@@ -178,7 +178,7 @@ public sealed class TerrainMaterialMapValidator : IValidator<IslandProject>
         report.Add(
             ValidationSeverity.Info,
             ValidationCode.MaterialMapEncoding,
-            $"MaterialAlphas2 v30 : somme slots min/avg/max {minSum}/{avg.ToString("0.##", CultureInfo.InvariantCulture)}/{maxSum}, texels zéro={zeroTexels}, histogramme actifs [{histogram}].",
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"MaterialAlphas2 v30 : somme slots min/avg/max {minSum}/{avg.ToString("0.##", CultureInfo.InvariantCulture)}/{maxSum}, texels zéro={zeroTexels}, histogramme actifs [{histogram}]."),
             relatedFile);
 
         if (zeroTexels > 0)
@@ -186,7 +186,7 @@ public sealed class TerrainMaterialMapValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.MaterialMapEncoding,
-                $"MaterialAlphas2 : {zeroTexels} texel(s) ont une somme de coverage égale à zéro. Cela peut provoquer des dalles blanches/grises dans le shader terrain. La v43.7 corrige ces texels avant export/peinture.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"MaterialAlphas2 : {zeroTexels} texel(s) ont une somme de coverage égale à zéro. Cela peut provoquer des dalles blanches/grises dans le shader terrain. La v43.7 corrige ces texels avant export/peinture."),
                 relatedFile);
         }
 
@@ -195,7 +195,7 @@ public sealed class TerrainMaterialMapValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.MaterialMapEncoding,
-                $"[OK] MaterialAlphas2 v30 : {over31Texels} texel(s) ont une somme >31. C'est accepté : la v30 ne normalise pas destructivement ces coverages. Exemples : {string.Join(", ", examples)}.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"[OK] MaterialAlphas2 v30 : {over31Texels} texel(s) ont une somme >31. C'est accepté : la v30 ne normalise pas destructivement ces coverages. Exemples : {string.Join(", ", examples)}."),
                 relatedFile);
         }
     }
@@ -212,7 +212,7 @@ public sealed class TerrainMaterialMapValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.MaterialMapEncoding,
-                "MaterialIDs2 : materialset effectif absent/non chargé ; vérification des IDs inconnus ignorée.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.T("MaterialIDs2 : materialset effectif absent/non chargé ; vérification des IDs inconnus ignorée."),
                 relatedFile);
             return;
         }
@@ -236,7 +236,7 @@ public sealed class TerrainMaterialMapValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.MaterialMapEncoding,
-                $"[OK] MaterialIDs2 : {usedSlots.Count} ID(s) présents dans les slots, aucun ID inconnu avec alpha >0. IDs réservés 0/31 tolérés.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"[OK] MaterialIDs2 : {usedSlots.Count} ID(s) présents dans les slots, aucun ID inconnu avec alpha >0. IDs réservés 0/31 tolérés."),
                 relatedFile);
         }
         else
@@ -244,7 +244,7 @@ public sealed class TerrainMaterialMapValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.MaterialMapEncoding,
-                $"MaterialIDs2 v30 : ID(s) absents du materialset effectif mais utilisés avec alpha >0 : {FormatIdUsage(unknownCovered, coveredUsage)}. Warning seulement : les îles vanilla peuvent contenir des slots réservés/fallback, l'export n'est pas bloqué.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"MaterialIDs2 v30 : ID(s) absents du materialset effectif mais utilisés avec alpha >0 : {FormatIdUsage(unknownCovered, coveredUsage)}. Warning seulement : les îles vanilla peuvent contenir des slots réservés/fallback, l'export n'est pas bloqué."),
                 relatedFile);
         }
 
@@ -253,7 +253,7 @@ public sealed class TerrainMaterialMapValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.MaterialMapEncoding,
-                $"MaterialIDs2 : ID(s) absents du materialset mais sans coverage alpha détecté : {string.Join(", ", unknownDormant.Take(24))}{(unknownDormant.Count > 24 ? "..." : string.Empty)}. Signalé en info car ces slots semblent dormants.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"MaterialIDs2 : ID(s) absents du materialset mais sans coverage alpha détecté : {string.Join(", ", unknownDormant.Take(24))}{(unknownDormant.Count > 24 ? "..." : string.Empty)}. Signalé en info car ces slots semblent dormants."),
                 relatedFile);
         }
     }
@@ -329,7 +329,7 @@ public sealed class TerrainMaterialMapValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.MaterialMapEncoding,
-                $"MaterialMap v30 : matériaux dominants échantillonnés ({top.Count} principaux) : {string.Join(", ", top)}.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"MaterialMap v30 : matériaux dominants échantillonnés ({top.Count} principaux) : {string.Join(", ", top)}."),
                 relatedFile);
         }
     }

@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using System.Windows;
 using Anno1800IslandTool.Core.Common;
 using Anno1800IslandTool.Core.Terrain;
@@ -19,11 +19,11 @@ public partial class Terrain3DGpuWindow
                 TerrainHeightEncoding.LegacyFineHeightToWorldHeight(SceneYToDecodedHeight(hit.Y)),
                 MathF.Floor((float)(hit.Z/height*size))+.5f);
             if (!float.IsFinite(point.Y) || point.Y <= 0 || point.X < 0 || point.Z < 0 || point.X >= size || point.Z >= size)
-                throw new InvalidOperationException("Placez le puits sur un terrain émergé dans les limites de l’île.");
+                throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Placez le puits sur un terrain émergé dans les limites de l’île."));
             var occupied = _pendingDeposits.Select(p=>p.Position).Concat(_project.Root.SlotObjects
                 .Where(s=>DepositSlotService.IsDepositGuid(s.ObjectGuid)).Select(s=>s.Position));
             if (occupied.Any(p=>MathF.Abs(p.X-point.X)<1 && MathF.Abs(p.Z-point.Z)<1))
-                throw new InvalidOperationException("Un emplacement de ressource existe déjà à cet endroit.");
+                throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Un emplacement de ressource existe déjà à cet endroit."));
             _pendingDeposits.Add(new(kind,point));
             RefreshMinePreview();
         }

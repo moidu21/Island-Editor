@@ -90,13 +90,18 @@ public partial class TerrainMaterialMapLargeWindow
 
     private async void LoadSavedGameDataPath()
     {
-        if (RdaGameResources.SavedGameFolder() is not null) await PrepareArchiveMaterialsAsync(false);
+        if (UseGameTexturesCheckBox.IsChecked == true && RdaGameResources.SavedGameFolder() is not null) await PrepareArchiveMaterialsAsync(false);
     }
     private async void SelectGameDataPathButton_Click(object sender, RoutedEventArgs e)
         => await PrepareArchiveMaterialsAsync(true);
-    private async Task PrepareArchiveMaterialsAsync(bool choose)
+    private Task? _archivePreparationTask;
+    private Task PrepareArchiveMaterialsAsync(bool choose)
     {
-        if (_preparingArchiveMaterials) return;
+        if (_archivePreparationTask is { IsCompleted: false }) return _archivePreparationTask;
+        return _archivePreparationTask = PrepareArchiveMaterialsCoreAsync(choose);
+    }
+    private async Task PrepareArchiveMaterialsCoreAsync(bool choose)
+    {
         _preparingArchiveMaterials = true;
         try
         {
@@ -147,6 +152,26 @@ public partial class TerrainMaterialMapLargeWindow
         if (_material3DInitialized) RefreshMaterial3DFromCurrentBitmap();
     }
 
+    private void ShowGamePreviewButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (BusyWork.IsBusy) return;
+        try
+        {
+            var project = _ownerWindow.GetProjectForLargeWindow();
+            var lod = project.MeshPages.Keys.Where(k => k.Lod >= 2).Select(k => k.Lod).DefaultIfEmpty(2).Min();
+            var preview = new Terrain3DGpuWindow(project, lod, previewMaterialMap: _ownerWindow.WorkingMaterialMap)
+            {
+                Owner = this,
+                Title = UiLocalizationManager.T("Aperçu en jeu — peinture en cours")
+            };
+            preview.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, UiLocalizationManager.T("Aperçu en jeu"), MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     private void Show3DViewButton_Click(object sender, RoutedEventArgs e) => SetMaterialView3D(true);
     private void Show2DViewButton_Click(object sender, RoutedEventArgs e) => SetMaterialView3D(false);
     private void FrameMaterial3DButton_Click(object sender, RoutedEventArgs e) => FrameMaterial3DCamera();
@@ -158,14 +183,27 @@ public partial class TerrainMaterialMapLargeWindow
         Material2DHost.Visibility = use3D ? Visibility.Collapsed : Visibility.Visible;
         Show3DViewButton.FontWeight = use3D ? FontWeights.Bold : FontWeights.Normal;
         Show2DViewButton.FontWeight = use3D ? FontWeights.Normal : FontWeights.Bold;
-        if (use3D) RefreshMaterial3DFromCurrentBitmap();
+        RefreshWorkingMapFromProjectIfClean();
+        RefreshMapImage();
+    }
+
+    internal async Task CompletePendingRefreshAsync()
+    {
+        _material3DRefreshTimer?.Stop();
+        if (_archivePreparationTask is { IsCompleted: false }) await _archivePreparationTask;
+        if (!_material3DInitialized || !_showMaterial3D) return;
+        if (UseGameTexturesCheckBox.IsChecked == true && _gameDataRoot is null && RdaGameResources.SavedGameFolder() is not null)
+            await PrepareArchiveMaterialsAsync(false);
+        _material3DRefreshTimer?.Stop();
+        if (MaterialMapImage.Source is BitmapSource bitmap) BuildMaterial3DModels(bitmap);
+        await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Render);
     }
 
     private void RefreshMaterial3DFromCurrentBitmap()
     {
         if (!_material3DInitialized || !_showMaterial3D || MaterialMapImage.Source is not BitmapSource bitmap) return;
         if (UseGameTexturesCheckBox.IsChecked == true && _gameDataRoot is null && RdaGameResources.SavedGameFolder() is not null && !_resourceLifetime.IsCancellationRequested)
-        { _ = PrepareArchiveMaterialsAsync(false); return; }
+        { if (!BusyWork.OwnsOperation) _ = PrepareArchiveMaterialsAsync(false); return; }
         try
         {
             _material3DRefreshTimer?.Stop();
@@ -179,6 +217,7 @@ public partial class TerrainMaterialMapLargeWindow
 
     private void BuildMaterial3DModels(BitmapSource bitmap)
     {
+        if (BusyWork.IsBusy && !BusyWork.OwnsOperation) return;
         var map = _ownerWindow.WorkingMaterialMap;
         if (map.Width <= 1 || map.Height <= 1) return;
         var useTextures = CurrentViewMode == LargeViewMode.PaintMap && UseGameTexturesCheckBox.IsChecked == true && _gameDataRoot is not null;
@@ -282,14 +321,19 @@ public partial class TerrainMaterialMapLargeWindow
         pages = pages.Where(page => page.Key.Lod == selectedLod).OrderBy(page => page.Key.X).ThenBy(page => page.Key.Y).ToList();
         if (selectedLod < 0 || pages.Count == 0) return false;
 
-        var vertices = pages.SelectMany(page => page.Clusters).SelectMany(cluster => cluster.Vertices).ToList();
-        if (vertices.Count == 0) return false;
-        var minHeight = vertices.Min(vertex => vertex.WorldHeight);
-        var maxHeight = vertices.Max(vertex => vertex.WorldHeight);
-        var minX = vertices.Min(vertex => vertex.X);
-        var maxX = vertices.Max(vertex => vertex.X);
-        var minZ = vertices.Min(vertex => vertex.Z);
-        var maxZ = vertices.Max(vertex => vertex.Z);
+        // Scan once without retaining another list of every vertex at each repaint.
+        float minHeight = float.PositiveInfinity, maxHeight = float.NegativeInfinity;
+        float minX = float.PositiveInfinity, maxX = float.NegativeInfinity;
+        float minZ = float.PositiveInfinity, maxZ = float.NegativeInfinity;
+        foreach (var page in pages)
+        foreach (var cluster in page.Clusters)
+        foreach (var vertex in cluster.Vertices)
+        {
+            minHeight = Math.Min(minHeight, vertex.WorldHeight); maxHeight = Math.Max(maxHeight, vertex.WorldHeight);
+            minX = Math.Min(minX, vertex.X); maxX = Math.Max(maxX, vertex.X);
+            minZ = Math.Min(minZ, vertex.Z); maxZ = Math.Max(maxZ, vertex.Z);
+        }
+        if (float.IsPositiveInfinity(minHeight)) return false;
         var span = Math.Max(128f, Math.Max(maxX - minX, maxZ - minZ));
         _materialSceneMinHeight = minHeight;
         _materialSceneHeightScale = span * .22f / Math.Max(.0001f, maxHeight - minHeight);

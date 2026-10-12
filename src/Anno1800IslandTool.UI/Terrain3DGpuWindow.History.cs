@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -42,7 +42,7 @@ public partial class Terrain3DGpuWindow
 
     private void Terrain3DGpuWindow_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (Keyboard.FocusedElement is TextBox)
+        if (_previewOnly || Keyboard.FocusedElement is TextBox)
         {
             return;
         }
@@ -54,11 +54,13 @@ public partial class Terrain3DGpuWindow
 
         if (e.Key == Key.Z)
         {
+            if (_isPainting) FinishBrushStroke();
             UndoToolAction();
             e.Handled = true;
         }
         else if (e.Key == Key.Y)
         {
+            if (_isPainting) FinishBrushStroke();
             RedoToolAction();
             e.Handled = true;
         }
@@ -74,7 +76,7 @@ public partial class Terrain3DGpuWindow
 
         PushLimited(_redoHistory, CaptureToolSnapshot());
         RestoreToolSnapshot(_undoHistory.Pop());
-        UpdateUndoHistoryUi("Dernière action annulée.");
+        UpdateUndoHistoryUi(Anno1800IslandTool.Core.Localization.TextCatalog.T("Dernière action annulée."));
     }
 
     private void RedoToolAction()
@@ -87,7 +89,7 @@ public partial class Terrain3DGpuWindow
 
         PushLimited(_undoHistory, CaptureToolSnapshot());
         RestoreToolSnapshot(_redoHistory.Pop());
-        UpdateUndoHistoryUi("Action rétablie.");
+        UpdateUndoHistoryUi(Anno1800IslandTool.Core.Localization.TextCatalog.T("Action rétablie."));
     }
 
     private void ResetUndoHistory()
@@ -225,8 +227,8 @@ public partial class Terrain3DGpuWindow
         RefreshTreePreview();
         RefreshRiverPreview();
         TreeStatusTextBlock.Text = _pendingTreeInstances.Count == 0
-            ? "Aucun arbre en attente."
-            : $"{_pendingTreeInstances.Count:N0} arbres en attente.";
+            ? Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun arbre en attente.")
+            : Anno1800IslandTool.Core.Localization.TextCatalog.F($"{_pendingTreeInstances.Count:N0} arbres en attente.");
         UpdatePickedHeightDisplay();
         UpdateBeachPreview();
         RefreshActiveToolUi();
@@ -271,8 +273,8 @@ public partial class Terrain3DGpuWindow
         UndoButton.IsEnabled = _undoHistory.Count > 0;
         RedoButton.IsEnabled = _redoHistory.Count > 0;
         UndoStatusTextBlock.Text = message ?? (_undoHistory.Count == 0
-            ? "Aucune modification à annuler."
-            : $"{_undoHistory.Count} action(s) annulable(s), {_redoHistory.Count} rétablissable(s).");
+            ? Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune modification à annuler.")
+            : Anno1800IslandTool.Core.Localization.TextCatalog.F($"{_undoHistory.Count} action(s) annulable(s), {_redoHistory.Count} rétablissable(s)."));
     }
 
     private static bool ToolSnapshotsEqual(GpuToolSnapshot left, GpuToolSnapshot right)

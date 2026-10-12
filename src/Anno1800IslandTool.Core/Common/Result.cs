@@ -1,4 +1,4 @@
-﻿namespace Anno1800IslandTool.Core.Common;
+namespace Anno1800IslandTool.Core.Common;
 
 public sealed class Result
 {

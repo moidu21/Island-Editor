@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.Text.RegularExpressions;
@@ -51,6 +51,13 @@ public partial class Map2DEditorWindow : Window
         LoadFromProject();
         UpdateModeText();
         Activated += (_, _) => { if (_isUiReady) RefreshView(); };
+        IslandPreviewImages.Refreshed += OnIslandPreviewRefreshed;
+        Closed += (_, _) => IslandPreviewImages.Refreshed -= OnIslandPreviewRefreshed;
+    }
+
+    private void OnIslandPreviewRefreshed(IslandProject project)
+    {
+        Dispatcher.InvokeAsync(() => { if (_isUiReady && ReferenceEquals(project, _project)) RefreshView(); });
     }
 
     private void LoadFromProject()
@@ -107,7 +114,7 @@ public partial class Map2DEditorWindow : Window
     private void RebuildCanvas()
     {
         MapCanvas.Children.Clear();
-        var background = _previewBitmap ?? _heightBitmap;
+        var background = Map2DOrientation.OrientBitmap(_previewBitmap ?? _heightBitmap);
         var width = Math.Max(512d, background?.PixelWidth ?? _heightBitmap?.PixelWidth ?? 1024d);
         var height = Math.Max(512d, background?.PixelHeight ?? _heightBitmap?.PixelHeight ?? 1024d);
         MapCanvas.Width = width;
@@ -144,7 +151,7 @@ public partial class Map2DEditorWindow : Window
         {
             foreach (var slot in EnumerateSlots())
             {
-                var pt = UiProjectHelpers.WorldToCanvas(slot.X, slot.Z, width, height, extent);
+                var pt = Map2DOrientation.WorldToCanvas(slot.X, slot.Z, width, height, extent);
                 DrawPoint(pt, slot.IsSelected, Brushes.DeepSkyBlue, Brushes.White, 4.5, slot.Label, false);
             }
         }
@@ -153,7 +160,7 @@ public partial class Map2DEditorWindow : Window
         {
             foreach (var spawn in EnumerateSpawns())
             {
-                var pt = UiProjectHelpers.WorldToCanvas(spawn.X, spawn.Z, width, height, extent);
+                var pt = Map2DOrientation.WorldToCanvas(spawn.X, spawn.Z, width, height, extent);
                 DrawPoint(pt, spawn.IsSelected, Brushes.Orange, Brushes.Black, 4.5, spawn.Label, true);
             }
         }
@@ -162,7 +169,7 @@ public partial class Map2DEditorWindow : Window
         {
             foreach (var obj in EnumerateGameDataObjects())
             {
-                var pt = UiProjectHelpers.WorldToCanvas(obj.X, obj.Z, width, height, extent);
+                var pt = Map2DOrientation.WorldToCanvas(obj.X, obj.Z, width, height, extent);
                 DrawPoint(pt, obj.IsSelected, Brushes.MediumOrchid, Brushes.White, 5.5, obj.Label, true);
             }
         }
@@ -170,8 +177,8 @@ public partial class Map2DEditorWindow : Window
 
     private void DrawRect(RectI rect, Brush stroke, DoubleCollection dash, string label, double width, double height, double extent)
     {
-        var a = UiProjectHelpers.WorldToCanvas(rect.Left, rect.Top, width, height, extent);
-        var b = UiProjectHelpers.WorldToCanvas(rect.Right, rect.Bottom, width, height, extent);
+        var a = Map2DOrientation.WorldToCanvas(rect.Left, rect.Top, width, height, extent);
+        var b = Map2DOrientation.WorldToCanvas(rect.Right, rect.Bottom, width, height, extent);
         var x = Math.Min(a.X, b.X);
         var y = Math.Min(a.Y, b.Y);
         var w = Math.Max(1, Math.Abs(b.X - a.X));
@@ -255,15 +262,15 @@ public partial class Map2DEditorWindow : Window
     {
         ModeTextBlock.Text = _mode switch
         {
-            MapEditMode.Select => "Mode : sélection",
-            MapEditMode.MoveSlot => "Mode : déplacer le slot sélectionné",
-            MapEditMode.MoveSpawn => "Mode : déplacer le spawn sélectionné",
-            MapEditMode.MoveGameDataObject => "Mode : déplacer l'objet GameData sélectionné",
-            MapEditMode.AddSlot => "Mode : ajouter un slot",
-            MapEditMode.AddSpawn => "Mode : ajouter un spawn",
-            MapEditMode.SetPlayableTopLeft => "Mode : définir le coin HG de la zone",
-            MapEditMode.SetPlayableBottomRight => "Mode : définir le coin BD de la zone",
-            _ => "Mode : sélection"
+            MapEditMode.Select => Anno1800IslandTool.Core.Localization.TextCatalog.T("Mode : sélection"),
+            MapEditMode.MoveSlot => Anno1800IslandTool.Core.Localization.TextCatalog.T("Mode : déplacer le slot sélectionné"),
+            MapEditMode.MoveSpawn => Anno1800IslandTool.Core.Localization.TextCatalog.T("Mode : déplacer le spawn sélectionné"),
+            MapEditMode.MoveGameDataObject => Anno1800IslandTool.Core.Localization.TextCatalog.T("Mode : déplacer l'objet GameData sélectionné"),
+            MapEditMode.AddSlot => Anno1800IslandTool.Core.Localization.TextCatalog.T("Mode : ajouter un slot"),
+            MapEditMode.AddSpawn => Anno1800IslandTool.Core.Localization.TextCatalog.T("Mode : ajouter un spawn"),
+            MapEditMode.SetPlayableTopLeft => Anno1800IslandTool.Core.Localization.TextCatalog.T("Mode : définir le coin HG de la zone"),
+            MapEditMode.SetPlayableBottomRight => Anno1800IslandTool.Core.Localization.TextCatalog.T("Mode : définir le coin BD de la zone"),
+            _ => Anno1800IslandTool.Core.Localization.TextCatalog.T("Mode : sélection")
         };
     }
 
@@ -290,7 +297,7 @@ public partial class Map2DEditorWindow : Window
         }
 
         var extent = UiProjectHelpers.GetMapExtent(_project);
-        var mapPoint = UiProjectHelpers.CanvasToWorld(point, MapCanvas.Width, MapCanvas.Height, extent);
+        var mapPoint = Map2DOrientation.CanvasToWorld(point, MapCanvas.Width, MapCanvas.Height, extent);
         switch (_mode)
         {
             case MapEditMode.MoveSlot:
@@ -339,6 +346,8 @@ public partial class Map2DEditorWindow : Window
 
     private void MapCanvas_MouseMove(object sender, MouseEventArgs e)
     {
+        var world = Map2DOrientation.CanvasToWorld(e.GetPosition(MapCanvas), MapCanvas.Width, MapCanvas.Height, UiProjectHelpers.GetMapExtent(_project));
+        CoordinatesTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"X = {world.X:0.##}   Z = {world.Y:0.##}   |   Z → droite · X ↓ bas");
         if (!_isPanning || e.RightButton != MouseButtonState.Pressed)
         {
             return;
@@ -407,17 +416,17 @@ public partial class Map2DEditorWindow : Window
         IEnumerable<Hit> candidates = Enumerable.Empty<Hit>();
         if (ShowSlotsCheckBox?.IsChecked == true)
         {
-            candidates = candidates.Concat(EnumerateSlots().Select(s => new Hit("slot", s.Row, canvasPoint.DistanceTo(UiProjectHelpers.WorldToCanvas(s.X, s.Z, MapCanvas.Width, MapCanvas.Height, extent)))));
+            candidates = candidates.Concat(EnumerateSlots().Select(s => new Hit("slot", s.Row, canvasPoint.DistanceTo(Map2DOrientation.WorldToCanvas(s.X, s.Z, MapCanvas.Width, MapCanvas.Height, extent)))));
         }
 
         if (ShowSpawnsCheckBox?.IsChecked == true)
         {
-            candidates = candidates.Concat(EnumerateSpawns().Select(s => new Hit("spawn", s.Row, canvasPoint.DistanceTo(UiProjectHelpers.WorldToCanvas(s.X, s.Z, MapCanvas.Width, MapCanvas.Height, extent)))));
+            candidates = candidates.Concat(EnumerateSpawns().Select(s => new Hit("spawn", s.Row, canvasPoint.DistanceTo(Map2DOrientation.WorldToCanvas(s.X, s.Z, MapCanvas.Width, MapCanvas.Height, extent)))));
         }
 
         if (ShowGameDataObjectsCheckBox?.IsChecked == true)
         {
-            candidates = candidates.Concat(EnumerateGameDataObjects().Select(o => new Hit("gd", o.Row, canvasPoint.DistanceTo(UiProjectHelpers.WorldToCanvas(o.X, o.Z, MapCanvas.Width, MapCanvas.Height, extent)))));
+            candidates = candidates.Concat(EnumerateGameDataObjects().Select(o => new Hit("gd", o.Row, canvasPoint.DistanceTo(Map2DOrientation.WorldToCanvas(o.X, o.Z, MapCanvas.Width, MapCanvas.Height, extent)))));
         }
 
         var ordered = candidates.OrderBy(h => h.Distance).ToList();
@@ -510,16 +519,18 @@ public partial class Map2DEditorWindow : Window
     {
         try
         {
-            _editor.ReplaceSlotObjects(_project, _slots.Select(s => s.ToDefinition()).ToList());
-            _editor.ReplaceZones(_project, ReadPlayableArea(), _project.GameData.Areas, _spawns.Select(s => s.ToDefinition()).ToList());
+            BusyWork.RunOnUi(this, () => {
+            BusyWork.RunOnUi(this, () => _editor.ReplaceSlotObjects(_project, _slots.Select(s => s.ToDefinition()).ToList()));
+            BusyWork.RunOnUi(this, () => _editor.ReplaceZones(_project, ReadPlayableArea(), _project.GameData.Areas, _spawns.Select(s => s.ToDefinition()).ToList()));
             ApplyGameDataObjectsToProject(showMessage: false);
+            });
             ProjectApplied?.Invoke(this, EventArgs.Empty);
             UpdateInfo();
-            MessageBox.Show(this, "Vue 2D appliquée au projet.", "Vue 2D", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Vue 2D appliquée au projet."), Anno1800IslandTool.Core.Localization.TextCatalog.T("Vue 2D"), MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Vue 2D", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.Message, Anno1800IslandTool.Core.Localization.TextCatalog.T("Vue 2D"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -583,7 +594,7 @@ public partial class Map2DEditorWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "GameData objects", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.Message, Anno1800IslandTool.Core.Localization.TextCatalog.T("GameData objects"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -602,7 +613,7 @@ public partial class Map2DEditorWindow : Window
 
         var edits = _gameDataObjects.Select(o => o.ToObjectEdit()).ToList();
         var updated = GameDataAreaObjectsXmlEditor.ReplaceObjects(_project.RawContent.GameDataText!, snapshot, edits);
-        var result = _editor.ApplyRawText(_project, "GameData", updated);
+        var result = BusyWork.RunOnUi(this, () => _editor.ApplyRawText(_project, "GameData", updated));
         if (!result.Succeeded)
         {
             throw new InvalidOperationException(result.Message);
@@ -610,7 +621,7 @@ public partial class Map2DEditorWindow : Window
 
         if (showMessage)
         {
-            MessageBox.Show(this, $"GameData appliqué : {edits.Count} objet(s) AreaObjectManager.", "GameData objects", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.F($"GameData appliqué : {edits.Count} objet(s) AreaObjectManager."), Anno1800IslandTool.Core.Localization.TextCatalog.T("GameData objects"), MessageBoxButton.OK, MessageBoxImage.Information);
         }
     }
 

@@ -1,4 +1,4 @@
-﻿namespace Anno1800IslandTool.Core.Terrain;
+namespace Anno1800IslandTool.Core.Terrain;
 
 public readonly record struct TerrainPageKey(int Lod, int X, int Y)
 {

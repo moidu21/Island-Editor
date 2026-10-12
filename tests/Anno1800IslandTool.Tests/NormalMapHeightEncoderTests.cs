@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Core.Terrain;
+using Anno1800IslandTool.Core.Terrain;
 using Anno1800IslandTool.Formats.Readers;
 using Anno1800IslandTool.Formats.Writers;
 using Xunit;
@@ -10,6 +10,16 @@ namespace Anno1800IslandTool.Tests;
 
 public class NormalMapHeightEncoderTests
 {
+    [Fact]
+    public void PreservingWriterKeepsMapClosingTagsAndUnknownFields()
+    {
+        const string original="<Content><HeightMap><Unknown>keep</Unknown><Downsampled><width>1</width><height>1</height><map>32768</map></Downsampled><Deltas/></HeightMap></Content>";
+        var page=new NormalMapPageReader().Read("page.xml",new(0,0,0),original);
+        var xml=new NormalMapPageWriter().WritePreserving(page,"40000",Array.Empty<string>());
+        var doc=System.Xml.Linq.XDocument.Parse(xml);
+        Assert.Equal("40000",doc.Descendants("map").Single().Value);
+        Assert.Equal("keep",doc.Descendants("Unknown").Single().Value);
+    }
     [Theory]
     [InlineData(0)] [InlineData(1)] [InlineData(4)]
     public void NeighbouringPagesShareTheSameTexelLattice(int lod)
@@ -27,9 +37,9 @@ public class NormalMapHeightEncoderTests
     public void HeightPagesKeepTheirFullExtentAtNonPowerOfTwoIslandBoundary()
     {
         // A 384-tile island ends at 12288, halfway through the last LOD4 page.
-        Assert.Equal(16320, NormalMapHeightEncoder.TexelCoordinate(1, 4, 66, 64));
-        Assert.Equal(-4, NormalMapHeightEncoder.TexelCoordinate(0, 0, 66, 0));
-        Assert.Equal(516, NormalMapHeightEncoder.TexelCoordinate(0, 0, 66, 65));
+        Assert.Equal(16312, NormalMapHeightEncoder.TexelCoordinate(1, 4, 66, 64));
+        Assert.Equal(-4.5, NormalMapHeightEncoder.TexelCoordinate(0, 0, 66, 0));
+        Assert.Equal(515.5, NormalMapHeightEncoder.TexelCoordinate(0, 0, 66, 65));
     }
 
     [Fact]
@@ -91,7 +101,7 @@ public class NormalMapHeightEncoderTests
     }
 
     [Fact]
-    public void RepairPreservesMeshesAndExistingWritesAndDoesNotAddPages()
+    public void RepairPreservesMeshesAndExistingWritesAndIncludesExpandedPages()
     {
         var project = new IslandProject();
         project.GameData.TerrainHeightMap = new CoarseHeightMap
@@ -107,7 +117,7 @@ public class NormalMapHeightEncoderTests
         var meshWrite = new RegeneratedMeshPageWrite { XmlText = "unchanged" };
         project.LocalRegeneration.GeneratedMeshPageWrites.Add(meshWrite);
         var raw = vertices.SelectMany(v => v.RawValues).ToArray();
-        Assert.Equal(1, TerrainHeightPageRepair.Repair(project));
+        Assert.Equal(4, TerrainHeightPageRepair.Repair(project));
         Assert.Single(project.NormalMapPages);
         Assert.Same(meshWrite, Assert.Single(project.LocalRegeneration.GeneratedMeshPageWrites));
         Assert.Equal(raw, vertices.SelectMany(v => v.RawValues));
@@ -146,11 +156,66 @@ public class NormalMapHeightEncoderTests
             for (var y = 0; y < level.Height; y++) for (var x = 0; x < level.Width; x++)
             {
                 var i = y * level.Width + x;
-                next[i] = NormalMapHeightEncoder.SampleParent(values, width, height, (x + .5) * width / level.Width - .5, (y + .5) * height / level.Height - .5)
+                next[i] = GameShaderPredictor(values, width, height, (x + .5) * width / level.Width - .5, (y + .5) * height / level.Height - .5)
                     + (level.QuantizedSamples[i] - half) * 65535d / (level.ScaleFactor!.Value * (double)half);
             }
             values = next; width = level.Width; height = level.Height;
         }
         return values;
     }
+    // Independent separable Catmull-Rom polynomial matching the game's Hermite kernel.
+    private static double GameShaderPredictor(double[] a, int w, int h, double x, double y)
+    {
+        int Mirror(int i, int n) { i=Math.Abs(i); return i>=n ? 2*(n-1)-i : i; }
+        double Cubic(double a0,double a1,double a2,double a3,double t)
+            => a1+.5*t*(a2-a0+t*(2*a0-5*a1+4*a2-a3+t*(3*(a1-a2)+a3-a0)));
+        int ix=(int)Math.Floor(x), iy=(int)Math.Floor(y);
+        var rows=new double[4];
+        for(int j=0;j<4;j++) {
+            int row=Mirror(iy+j-1,h)*w;
+            rows[j]=Cubic(a[row+Mirror(ix-1,w)],a[row+Mirror(ix,w)],a[row+Mirror(ix+1,w)],a[row+Mirror(ix+2,w)],x-ix);
+        }
+        return Cubic(rows[0],rows[1],rows[2],rows[3],y-iy);
+    }
+
+    [Fact]
+    public void FullRebuildReplacesPendingExpansionPagesNotLoadedInPageDictionary()
+    {
+        var p=new IslandProject();p.Root.MapSize=p.Metadata.MapSize=32;
+        p.Rd3d.GridWidth=p.Rd3d.GridHeight=1024;
+        p.Root.ActiveMapRect=new RectI(0,0,32,32);
+        p.GameData.TerrainHeightMap=new CoarseHeightMap { Width=65,Height=65,
+            Samples=Enumerable.Repeat(30f,65*65).ToArray(),SampleEncoding=TerrainHeightSampleEncoding.WorldUnits };
+        var template=Template(0);template.DeltaLevels.Clear();p.NormalMapPages[template.Key]=template;
+        p.LocalRegeneration=new TerrainLocalRegenerationState();
+        p.LocalRegeneration.GeneratedNormalMapWrites.Add(new RegeneratedNormalMapWrite {
+            Key=new(0,1,1),TargetPath="normalmaps/0/1x1.xml",XmlText="<OldFlatPage/>" });
+        var state=new TerrainLocalRegenerationState {UseCoarseHeightMap=true};
+        var writes=new LocalTerrainDerivativeRegenerator().GenerateAllInterpretedNormalMapWrites(
+            p,p.GameData.TerrainHeightMap,state,includeMissingPages:true,includeInactivePages:true);
+        var replacement=Assert.Single(writes.Where(w=>w.Key==new TerrainPageKey(0,1,1)));
+        var page=new NormalMapPageReader().Read(replacement.TargetPath,replacement.Key,replacement.XmlText);
+        Assert.All(page.DownsampledSamples,v=>Assert.Equal(TerrainHeightEncoding.WorldHeightToNormalPageRaw(30),v));
+        Assert.Equal(4,writes.Count);
+    }
+
+    [Fact]
+    public void PredictorUsesGameHermiteKernelAndMirroredBorders()
+    {
+        double[] a={0,0,1,0,0};
+        Assert.Equal(.8671875, NormalMapHeightEncoder.SampleParent(a,5,1,2.25,0),10);
+        Assert.Equal(-.0703125, NormalMapHeightEncoder.SampleParent(a,5,1,.75,0),10);
+        double[] border={1,0,0,0};
+        Assert.Equal(NormalMapHeightEncoder.SampleParent(border,4,1,.25,0),
+            NormalMapHeightEncoder.SampleParent(border,4,1,-.25,0),10);
+    }
+
+    [Fact]
+    public void FinestPagePixelEightLiesExactlyOnPageOrigin()
+    {
+        Assert.Equal(512d, NormalMapHeightEncoder.TexelCoordinate(1,0,528,8));
+        Assert.Equal(1024d, NormalMapHeightEncoder.TexelCoordinate(1,0,528,520));
+    }
+
 }
+

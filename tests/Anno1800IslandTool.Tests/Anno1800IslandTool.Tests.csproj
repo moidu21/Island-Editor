@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -31,4 +31,5 @@
   <ItemGroup><None Update="TestData/world-machine.obj" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
   <ItemGroup><None Update="TestData/world-machine-y-up.obj" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
   <ItemGroup><None Update="TestData/world-machine-sea.obj" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
+<ItemGroup><Compile Include="../../src/Anno1800IslandTool.UI/GameDataAreaObjectsXmlEditor.cs" Link="GameDataAreaObjectsXmlEditor.cs" /></ItemGroup>
 </Project>

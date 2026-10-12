@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Numerics;
 using System.Windows;
 using System.Windows.Controls;
@@ -83,11 +83,12 @@ public partial class Terrain3DGpuWindow
             var prepared = await GameResourcesUi.PrepareAsync(this, null, _resourceLifetime.Token);
             root = _previewDataRoot = prepared.Root;
             await prepared.Cache.EnsureAsync(prepared.Folder, root, pending.Select(p => p.File), null, _resourceLifetime.Token);
+            bool enhanceColors=PreviewColor.ShouldEnhance(_project);
             var scene=await Task.Run(()=>{
                 var names=pending.Select(p=>p.File).Distinct().ToArray();
                 var instances=pending.Select(p=>SceneryPlacementService.Serialize(p,Array.IndexOf(names,p.File))).ToArray();
                 using var decoder=new GamePreviewDdsReader();
-                return ReadPreviewScenery(root,names,instances,null,new(),decoder,_resourceLifetime.Token);
+                return ReadPreviewScenery(root,names,instances,null,new(),decoder,_resourceLifetime.Token,enhanceColors);
             });
             if(revision!=_pendingSceneryRevision||_previewClosed)return;
             AddSceneryBatches(scene.Batches,PendingSceneryGroup);
@@ -99,7 +100,7 @@ public partial class Terrain3DGpuWindow
     private void CommitPendingScenery()
     {
         if(_pendingScenery.Count==0)return;
-        SceneryPlacementService.Add(_project,_pendingScenery.Select(p=>p with{Position=MineSlotService.TerrainPoint(_project,p.Position.X,p.Position.Z)}).ToArray());
+        ProtectedScenery.Add(_project,_pendingScenery.Select(p=>p with{Position=MineSlotService.TerrainPoint(_project,p.Position.X,p.Position.Z)}).ToArray(), _previewDataRoot ?? throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Ressources des decors absentes.")));
         _pendingScenery.Clear();++_pendingSceneryRevision;PendingSceneryGroup.Children.Clear();
         SceneryPlacementStatus.Text=UiLocalizationManager.T("Décors enregistrés dans l’île.");
     }

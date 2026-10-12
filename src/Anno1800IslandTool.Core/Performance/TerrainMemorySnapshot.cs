@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Globalization;
 
 namespace Anno1800IslandTool.Core.Performance;
@@ -14,7 +14,7 @@ public sealed class TerrainMemorySnapshot
     public int Gen2Collections { get; init; }
 
     public string ToShortDisplay()
-        => $"RAM : managed {FormatBytes(ManagedBytes)}, privé {FormatBytes(PrivateBytes)}, process {FormatBytes(WorkingSetBytes)}";
+        => Anno1800IslandTool.Core.Localization.TextCatalog.F($"RAM : managed {FormatBytes(ManagedBytes)}, privé {FormatBytes(PrivateBytes)}, process {FormatBytes(WorkingSetBytes)}");
 
     public string ToDetailedDisplay()
         => $"{ToShortDisplay()} | heap GC {FormatBytes(GcHeapBytes)} | GC {Gen0Collections}/{Gen1Collections}/{Gen2Collections}";

@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 
 namespace Anno1800IslandTool.Pipeline.Services;
 
@@ -13,7 +13,7 @@ public sealed class IslandToolProcess(IslandTools tools, string? fileDbHost = nu
         var start = new ProcessStartInfo(Path.GetFullPath(executable)) { WorkingDirectory = Path.GetFullPath(working), UseShellExecute = false,
             CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true };
         foreach (var arg in args) start.ArgumentList.Add(arg);
-        using var process = Process.Start(start) ?? throw new IOException("Impossible de lancer " + executable);
+        using var process = Process.Start(start) ?? throw new IOException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Impossible de lancer ") + executable);
         process.StandardInput.Close();
         var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
         try { await process.WaitForExitAsync(token); }

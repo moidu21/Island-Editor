@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Numerics;
 using System.Xml.Linq;
 using Anno1800IslandTool.Core.Models;
@@ -81,7 +81,7 @@ public static class GeneratedRiverService
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(river);
-        if (river.Points.Count < 2) throw new ArgumentException("Une rivière nécessite au moins deux points.", nameof(river));
+        if (river.Points.Count < 2) throw new ArgumentException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Une rivière nécessite au moins deux points."), nameof(river));
 
         var gameData = Parse(project.RawContent.GameDataText, "GameData");
         var rd3d = Parse(project.RawContent.Rd3dText, "RD3D");
@@ -106,7 +106,7 @@ public static class GeneratedRiverService
     {
         var objects = document.Descendants("EditorObject").Elements("objects").FirstOrDefault()
                       ?? document.Descendants("objects").FirstOrDefault()
-                      ?? throw new InvalidOperationException("Le conteneur GameData des points d’accroche est introuvable.");
+                      ?? throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Le conteneur GameData des points d’accroche est introuvable."));
         var usedIds = document.Descendants("ID")
             .Select(node => long.TryParse(node.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : 0)
             .Concat(project.Root.SlotObjects.Select(slot => slot.ObjectId))
@@ -117,12 +117,12 @@ public static class GeneratedRiverService
         {
             while (nextId < LastGeneratedRiverSlotId && usedIds.Contains(nextId)) nextId++;
             if (nextId >= LastGeneratedRiverSlotId)
-                throw new InvalidOperationException("La plage d’identifiants réservée aux points d’accroche de rivière est pleine.");
+                throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("La plage d’identifiants réservée aux points d’accroche de rivière est pleine."));
             var slotId = nextId++;
             usedIds.Add(slotId);
             while (nextId < LastGeneratedRiverSlotId && usedIds.Contains(nextId)) nextId++;
             if (nextId >= LastGeneratedRiverSlotId)
-                throw new InvalidOperationException("La plage d’identifiants réservée aux points d’accroche de rivière est pleine.");
+                throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("La plage d’identifiants réservée aux points d’accroche de rivière est pleine."));
             var workAreaId = nextId++;
             usedIds.Add(workAreaId);
 
@@ -215,6 +215,20 @@ public static class GeneratedRiverService
         }
         catch (System.Xml.XmlException) { return rd3dText; }
 
+        return ReapplyWaterFlow(rd3d, gameData) ? rd3d.ToString(SaveOptions.DisableFormatting) : rd3dText;
+    }
+
+    internal static bool ReapplyWaterFlow(XDocument rd3d, string? gameDataText)
+    {
+        if (string.IsNullOrWhiteSpace(gameDataText)) return false;
+        XDocument gameData;
+        try { gameData = XDocument.Parse(gameDataText, LoadOptions.PreserveWhitespace); }
+        catch (System.Xml.XmlException) { return false; }
+        return ReapplyWaterFlow(rd3d, gameData);
+    }
+
+    private static bool ReapplyWaterFlow(XDocument rd3d, XDocument gameData)
+    {
         var changed = false;
         var gameMapSize = int.TryParse(gameData.Descendants("RiverGrid").Elements("x").FirstOrDefault()?.Value, out var parsedSize)
             ? Math.Max(1, parsedSize)
@@ -232,7 +246,7 @@ public static class GeneratedRiverService
             var inferredSize = gameMapSize > 0 ? gameMapSize : Math.Max(1f, points.Max(p => Math.Max(p.X, p.Z)));
             changed |= ApplyWaterFlow(rd3d, points, widths.Length == 0 ? 4f : widths.Average(), 1f, inferredSize);
         }
-        return changed ? rd3d.ToString(SaveOptions.DisableFormatting) : rd3dText;
+        return changed;
     }
 
     /// <summary>
@@ -254,7 +268,7 @@ public static class GeneratedRiverService
         {
             grid.SetElementValue("x", mapSize);
             grid.SetElementValue("y", mapSize);
-            grid.SetElementValue("bits", string.Join(" ", new byte[((mapSize + 7) / 8) * mapSize]));
+            grid.SetElementValue("bits", string.Join(" ", new byte[checked(WaterMaskEncoding.Stride(mapSize) * mapSize)]));
         }
         var irrigation = document.Descendants("GameSessionManager").Elements("IrrigationManager").FirstOrDefault();
         if (!irrigatedBiome) irrigation?.Remove();
@@ -380,9 +394,9 @@ public static class GeneratedRiverService
 
     private static XDocument Parse(string? text, string name)
     {
-        if (string.IsNullOrWhiteSpace(text)) throw new InvalidOperationException($"Le document {name} est absent.");
+        if (string.IsNullOrWhiteSpace(text)) throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Le document {name} est absent."));
         try { return XDocument.Parse(text, LoadOptions.PreserveWhitespace); }
-        catch (System.Xml.XmlException ex) { throw new InvalidOperationException($"Le document {name} n’est pas lisible : {ex.Message}", ex); }
+        catch (System.Xml.XmlException ex) { throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Le document {name} n’est pas lisible : {ex.Message}"), ex); }
     }
 
     private static long NextGeneratedId(XDocument document)
@@ -391,7 +405,7 @@ public static class GeneratedRiverService
             .Select(node => long.TryParse(node.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : 0)
             .ToHashSet();
         for (var id = FirstGeneratedRiverId; id < LastGeneratedRiverId; id++) if (!used.Contains(id)) return id;
-        throw new InvalidOperationException("La plage d’identifiants réservée aux rivières est pleine.");
+        throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("La plage d’identifiants réservée aux rivières est pleine."));
     }
 
     private static void AddRiverObject(XDocument document, IReadOnlyList<GeneratedRiverPoint> points, float width,
@@ -399,7 +413,7 @@ public static class GeneratedRiverService
     {
         var objects = document.Descendants("EditorObject").Elements("objects").FirstOrDefault()
                       ?? document.Descendants("objects").FirstOrDefault();
-        if (objects is null) throw new InvalidOperationException("Le conteneur GameData des objets de rivière est introuvable.");
+        if (objects is null) throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Le conteneur GameData des objets de rivière est introuvable."));
         var min = new GeneratedRiverPoint(points.Min(p => p.X), points.Min(p => p.Height), points.Min(p => p.Z));
         var max = new GeneratedRiverPoint(points.Max(p => p.X), points.Max(p => p.Height), points.Max(p => p.Z));
         var curve = new XElement("BezierCurve");
@@ -442,15 +456,16 @@ public static class GeneratedRiverService
     private static void UpdateRiverGrid(XDocument document, int mapSize, IReadOnlyList<GeneratedRiverPoint> points, float width)
     {
         var world = document.Descendants("WorldManager").FirstOrDefault();
-        if (world is null) throw new InvalidOperationException("WorldManager est introuvable dans GameData.");
+        if (world is null) throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("WorldManager est introuvable dans GameData."));
         var grid = world.Element("RiverGrid");
-        var rowBytes = (mapSize + 7) / 8;
+        var rowBytes = WaterMaskEncoding.Stride(mapSize);
         var bytes = new byte[rowBytes * mapSize];
         if (grid is not null && int.TryParse(grid.Element("x")?.Value, out var oldWidth) && oldWidth == mapSize &&
             int.TryParse(grid.Element("y")?.Value, out var oldHeight) && oldHeight == mapSize)
         {
             var old = Tokens(grid.Element("bits")?.Value).Select(value => (byte)Math.Clamp(value, 0, 255)).ToArray();
-            Array.Copy(old, bytes, Math.Min(old.Length, bytes.Length));
+            var normalized = WaterMaskEncoding.Pack(WaterMaskEncoding.Unpack(old, mapSize, mapSize), mapSize, mapSize);
+            Array.Copy(normalized, bytes, bytes.Length);
         }
         grid ??= new XElement("RiverGrid");
         if (grid.Parent is null) world.Add(grid);
@@ -469,7 +484,7 @@ public static class GeneratedRiverService
         if (session is null)
         {
             session = new XElement("GameSessionManager");
-            (document.Root ?? throw new InvalidOperationException("GameData est vide.")).Add(session);
+            (document.Root ?? throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("GameData est vide."))).Add(session);
         }
         var manager = session.Element("IrrigationManager");
         var tileGrid = manager?.Element("m_StaticTileGrid");

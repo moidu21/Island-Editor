@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Core.Terrain;
+using Anno1800IslandTool.Core.Terrain;
 using System.Xml.Linq;
 using Anno1800IslandTool.Core.Models;
 
@@ -42,7 +42,7 @@ public static class TerrainAreaGridSync
         ushort nonBuild=owners.Where(n=>(n&8192)==0).Order().FirstOrDefault();
         if(nonBuild==0)nonBuild=old.Where(n=>n!=0&&(n&8192)==0).Order().FirstOrDefault();
         if(fallback==0||nonBuild==0)
-            throw new InvalidDataException("AreaIDs : aucune zone de construction/terrain reconnue. Les zones existantes ne peuvent pas être reconstruites automatiquement.");
+            throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("AreaIDs : aucune zone de construction/terrain reconnue. Les zones existantes ne peuvent pas être reconstruites automatiquement."));
         var nearest=new ushort[old.Length];var queue=new Queue<int>();
         for(int i=0;i<old.Length;i++)if(knownBuild.Contains(old[i])){nearest[i]=old[i];queue.Enqueue(i);}
         while(queue.TryDequeue(out int i))

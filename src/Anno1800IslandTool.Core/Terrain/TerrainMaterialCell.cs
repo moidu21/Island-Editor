@@ -1,11 +1,22 @@
-﻿namespace Anno1800IslandTool.Core.Terrain;
+namespace Anno1800IslandTool.Core.Terrain;
 
 public sealed class TerrainMaterialCell
 {
+    public TerrainMaterialCell()
+    {
+        MaterialIds = new int[TerrainMaterialPackEncoding.SlotCount];
+        AlphaWeights = new int[TerrainMaterialPackEncoding.SlotCount];
+    }
+
+    internal TerrainMaterialCell(int x, int y, int[] ids, int[] alphas)
+    {
+        X = x; Y = y; MaterialIds = ids; AlphaWeights = alphas;
+    }
+
     public int X { get; init; }
     public int Y { get; init; }
-    public int[] MaterialIds { get; init; } = new int[TerrainMaterialPackEncoding.SlotCount];
-    public int[] AlphaWeights { get; init; } = new int[TerrainMaterialPackEncoding.SlotCount];
+    public int[] MaterialIds { get; init; }
+    public int[] AlphaWeights { get; init; }
 
     public int DominantSlot
     {

@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;
 using Anno1800IslandTool.Core.Validation;
@@ -24,7 +24,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
 
         if (project is null)
         {
-            report.Add(ValidationSeverity.Error, ValidationCode.TerrainDiagnostic, "Projet nul : impossible de lancer le diagnostic terrain v30.");
+            report.Add(ValidationSeverity.Error, ValidationCode.TerrainDiagnostic, Anno1800IslandTool.Core.Localization.TextCatalog.T("Projet nul : impossible de lancer le diagnostic terrain v30."));
             return report;
         }
 
@@ -47,7 +47,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
         report.Add(
             ValidationSeverity.Info,
             ValidationCode.TerrainDiagnostic,
-            $"Diagnostic terrain v30 : projet '{project.Metadata.ProjectName}', île '{project.Metadata.IslandInternalName}', source '{project.Metadata.SourceArchivePath}'.");
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"Diagnostic terrain v30 : projet '{project.Metadata.ProjectName}', île '{project.Metadata.IslandInternalName}', source '{project.Metadata.SourceArchivePath}'."));
     }
 
     private static void ValidatePageKeys(ValidationReport report, IslandProject project)
@@ -59,7 +59,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
                 report.Add(
                     ValidationSeverity.Warning,
                     ValidationCode.InvalidPageKey,
-                    $"Clé de page mesh invalide : {pair.Key}.",
+                    Anno1800IslandTool.Core.Localization.TextCatalog.F($"Clé de page mesh invalide : {pair.Key}."),
                     pair.Value.OriginalRelativePath);
             }
         }
@@ -71,7 +71,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
                 report.Add(
                     ValidationSeverity.Warning,
                     ValidationCode.InvalidPageKey,
-                    $"Clé de page normalmap invalide : {pair.Key}.",
+                    Anno1800IslandTool.Core.Localization.TextCatalog.F($"Clé de page normalmap invalide : {pair.Key}."),
                     pair.Value.OriginalRelativePath);
             }
         }
@@ -83,7 +83,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
                 report.Add(
                     ValidationSeverity.Warning,
                     ValidationCode.InvalidPageKey,
-                    $"Clé de page tintmap invalide : {pair.Key}.",
+                    Anno1800IslandTool.Core.Localization.TextCatalog.F($"Clé de page tintmap invalide : {pair.Key}."),
                     pair.Value.OriginalRelativePath);
             }
         }
@@ -94,7 +94,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
         var mapSize = project.Root.MapSize;
         if (mapSize <= 0)
         {
-            report.Add(ValidationSeverity.Warning, ValidationCode.TerrainDiagnostic, "MapSize non lu ou invalide : le diagnostic dimensionnel détaillé est limité.", project.RootFilePath ?? project.Metadata.RootIslandFileName);
+            report.Add(ValidationSeverity.Warning, ValidationCode.TerrainDiagnostic, Anno1800IslandTool.Core.Localization.TextCatalog.T("MapSize non lu ou invalide : le diagnostic dimensionnel détaillé est limité."), project.RootFilePath ?? project.Metadata.RootIslandFileName);
             return;
         }
 
@@ -127,7 +127,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.TerrainDiagnostic,
-                $"{label} non lu. Valeur attendue : {expected}.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"{label} non lu. Valeur attendue : {expected}."),
                 relatedFile);
             return;
         }
@@ -145,7 +145,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
         report.Add(
             ValidationSeverity.Warning,
             ValidationCode.InconsistentDimensions,
-            $"{label} incohérent dans le diagnostic terrain. Attendu {expected}, obtenu {actual}.",
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"{label} incohérent dans le diagnostic terrain. Attendu {expected}, obtenu {actual}."),
             relatedFile);
     }
 
@@ -153,7 +153,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
     {
         if (left == 0 && top == 0 && right == 0 && bottom == 0)
         {
-            report.Add(ValidationSeverity.Info, ValidationCode.TerrainDiagnostic, $"{label} absent ou nul.", relatedFile);
+            report.Add(ValidationSeverity.Info, ValidationCode.TerrainDiagnostic, Anno1800IslandTool.Core.Localization.TextCatalog.F($"{label} absent ou nul."), relatedFile);
             return;
         }
 
@@ -161,17 +161,17 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
         var height = bottom - top;
         if (width <= 0 || height <= 0)
         {
-            report.Add(ValidationSeverity.Warning, ValidationCode.UnexpectedPlayableArea, $"{label} invalide : [{left}, {top}, {right}, {bottom}].", relatedFile);
+            report.Add(ValidationSeverity.Warning, ValidationCode.UnexpectedPlayableArea, Anno1800IslandTool.Core.Localization.TextCatalog.F($"{label} invalide : [{left}, {top}, {right}, {bottom}]."), relatedFile);
             return;
         }
 
         if (left < 0 || top < 0 || right > mapSize || bottom > mapSize)
         {
-            report.Add(ValidationSeverity.Warning, ValidationCode.UnexpectedPlayableArea, $"{label} sort de la MapSize {mapSize} : [{left}, {top}, {right}, {bottom}].", relatedFile);
+            report.Add(ValidationSeverity.Warning, ValidationCode.UnexpectedPlayableArea, Anno1800IslandTool.Core.Localization.TextCatalog.F($"{label} sort de la MapSize {mapSize} : [{left}, {top}, {right}, {bottom}]."), relatedFile);
             return;
         }
 
-        report.Add(ValidationSeverity.Info, ValidationCode.TerrainDiagnostic, $"[OK] {label} : [{left}, {top}, {right}, {bottom}], taille utile {width}x{height}.", relatedFile);
+        report.Add(ValidationSeverity.Info, ValidationCode.TerrainDiagnostic, Anno1800IslandTool.Core.Localization.TextCatalog.F($"[OK] {label} : [{left}, {top}, {right}, {bottom}], taille utile {width}x{height}."), relatedFile);
     }
 
     private static void AddHeightMapDiagnostics(ValidationReport report, IslandProject project)
@@ -179,7 +179,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
         var heightMap = project.GameData.TerrainHeightMap;
         if (heightMap.Width <= 0 || heightMap.Height <= 0)
         {
-            report.Add(ValidationSeverity.Warning, ValidationCode.TerrainHeightEncoding, "HeightMap GameData absente ou dimensions non lues.", project.GameDataFilePath ?? "gamedata.xml");
+            report.Add(ValidationSeverity.Warning, ValidationCode.TerrainHeightEncoding, Anno1800IslandTool.Core.Localization.TextCatalog.T("HeightMap GameData absente ou dimensions non lues."), project.GameDataFilePath ?? "gamedata.xml");
             return;
         }
 
@@ -189,7 +189,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.TerrainHeightEncoding,
-                $"HeightMap GameData : {heightMap.Samples.Length} samples lus, {expectedCount} attendus pour {heightMap.Width}x{heightMap.Height}.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"HeightMap GameData : {heightMap.Samples.Length} samples lus, {expectedCount} attendus pour {heightMap.Width}x{heightMap.Height}."),
                 project.GameDataFilePath ?? "gamedata.xml");
             return;
         }
@@ -197,7 +197,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
         report.Add(
             ValidationSeverity.Info,
             ValidationCode.TerrainHeightEncoding,
-            $"[OK] HeightMap GameData : {heightMap.Width}x{heightMap.Height}, {heightMap.Samples.Length} samples, encodage {heightMap.SampleEncoding}.",
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"[OK] HeightMap GameData : {heightMap.Width}x{heightMap.Height}, {heightMap.Samples.Length} samples, encodage {heightMap.SampleEncoding}."),
             project.GameDataFilePath ?? "gamedata.xml");
 
         if (heightMap.Samples.Length == 0)
@@ -227,7 +227,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
         report.Add(
             ValidationSeverity.Info,
             ValidationCode.TerrainHeightEncoding,
-            $"HeightMap GameData : raw min/max {minRaw}/{maxRaw}, hauteur monde approx. {minWorld.ToString("0.###", CultureInfo.InvariantCulture)} à {maxWorld.ToString("0.###", CultureInfo.InvariantCulture)}.",
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"HeightMap GameData : raw min/max {minRaw}/{maxRaw}, hauteur monde approx. {minWorld.ToString("0.###", CultureInfo.InvariantCulture)} à {maxWorld.ToString("0.###", CultureInfo.InvariantCulture)}."),
             project.GameDataFilePath ?? "gamedata.xml");
     }
 
@@ -248,21 +248,21 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
         var keyList = keys.ToList();
         if (count == 0 || keyList.Count == 0)
         {
-            report.Add(ValidationSeverity.Info, code, $"{label} : aucune page importée.");
+            report.Add(ValidationSeverity.Info, code, Anno1800IslandTool.Core.Localization.TextCatalog.F($"{label} : aucune page importée."));
             return;
         }
 
         report.Add(
             ValidationSeverity.Info,
             code,
-            $"{label} : {count} page(s), LOD {BuildLodSummary(keyList)}, bornes X {keyList.Min(k => k.X)}..{keyList.Max(k => k.X)}, Y {keyList.Min(k => k.Y)}..{keyList.Max(k => k.Y)}.");
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"{label} : {count} page(s), LOD {BuildLodSummary(keyList)}, bornes X {keyList.Min(k => k.X)}..{keyList.Max(k => k.X)}, Y {keyList.Min(k => k.Y)}..{keyList.Max(k => k.Y)}."));
     }
 
     private static void AddMeshPayloadDiagnostics(ValidationReport report, IslandProject project)
     {
         if (project.MeshPages.Count == 0)
         {
-            report.Add(ValidationSeverity.Warning, ValidationCode.MissingMeshPages, "Aucune page mesh n'a été importée.");
+            report.Add(ValidationSeverity.Warning, ValidationCode.MissingMeshPages, Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune page mesh n'a été importée."));
             return;
         }
 
@@ -275,14 +275,14 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.TerrainDiagnostic,
-                "Mesh : inventaire chemins chargé, mais payloads non lus. Active 'Lire le détail des pages' pour diagnostiquer vertices/LOD éditables.");
+                Anno1800IslandTool.Core.Localization.TextCatalog.T("Mesh : inventaire chemins chargé, mais payloads non lus. Active 'Lire le détail des pages' pour diagnostiquer vertices/LOD éditables."));
         }
         else
         {
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.TerrainDiagnostic,
-                $"Mesh : {payloadLoadedPages.Count}/{pages.Count} page(s) avec payload analysé, {editablePages.Count} page(s) éditable(s). LOD éditables : {BuildLodSummary(editablePages.Select(p => p.Key))}.");
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"Mesh : {payloadLoadedPages.Count}/{pages.Count} page(s) avec payload analysé, {editablePages.Count} page(s) éditable(s). LOD éditables : {BuildLodSummary(editablePages.Select(p => p.Key))}."));
         }
 
         var lowLodPages = pages.Where(p => MeshPageClassifier.IsProtectedMetadataLod(p.Key)).ToList();
@@ -293,7 +293,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.TerrainDiagnostic,
-                $"[OK] Mesh : {lowLodPages.Count} page(s) LOD0/LOD1 protégées, traitées comme métadonnées/coverage/ground objects et jamais comme mesh éditable. Ground objects={withGroundObjects}, vertices ignorés={withVertices}. Seules les opérations explicitement supportées sur les GroundObjects peuvent réécrire ces pages.");
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"[OK] Mesh : {lowLodPages.Count} page(s) LOD0/LOD1 protégées, traitées comme métadonnées/coverage/ground objects et jamais comme mesh éditable. Ground objects={withGroundObjects}, vertices ignorés={withVertices}. Seules les opérations explicitement supportées sur les GroundObjects peuvent réécrire ces pages."));
         }
 
         var editableMin = editablePages.Count == 0 ? (int?)null : editablePages.Min(p => p.Key.Lod);
@@ -303,7 +303,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.TerrainDiagnostic,
-                $"[OK] Mesh : plage LOD éditable détectée LOD{editableMin.Value}..LOD{editableMax.Value}.");
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"[OK] Mesh : plage LOD éditable détectée LOD{editableMin.Value}..LOD{editableMax.Value}."));
         }
     }
 
@@ -314,7 +314,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
     {
         if (project.NormalMapPages.Count == 0)
         {
-            report.Add(ValidationSeverity.Warning, ValidationCode.MissingNormalMapPages, "Aucune page normalmap/heightpage n'a été importée.");
+            report.Add(ValidationSeverity.Warning, ValidationCode.MissingNormalMapPages, Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune page normalmap/heightpage n'a été importée."));
             return;
         }
 
@@ -326,14 +326,14 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
         report.Add(
             ValidationSeverity.Info,
             ValidationCode.TerrainDiagnostic,
-            $"NormalMap : {withSamples}/{pages.Count} page(s) avec Downsampled numérique, {withDeltas}/{pages.Count} page(s) avec niveaux Deltas.");
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"NormalMap : {withSamples}/{pages.Count} page(s) avec Downsampled numérique, {withDeltas}/{pages.Count} page(s) avec niveaux Deltas."));
 
         if (invalidDimensions.Count > 0)
         {
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.TerrainDiagnostic,
-                $"NormalMap : dimensions Downsampled absentes ou nulles sur {invalidDimensions.Count} page(s) exemple : {string.Join(", ", invalidDimensions.Select(p => p.Key.ToString()))}.");
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"NormalMap : dimensions Downsampled absentes ou nulles sur {invalidDimensions.Count} page(s) exemple : {string.Join(", ", invalidDimensions.Select(p => p.Key.ToString()))}."));
         }
 
         var dimensions = pages
@@ -347,7 +347,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
 
         if (dimensions.Count > 0)
         {
-            report.Add(ValidationSeverity.Info, ValidationCode.TerrainDiagnostic, $"NormalMap : tailles Downsampled observées {string.Join(", ", dimensions)}.");
+            report.Add(ValidationSeverity.Info, ValidationCode.TerrainDiagnostic, Anno1800IslandTool.Core.Localization.TextCatalog.F($"NormalMap : tailles Downsampled observées {string.Join(", ", dimensions)}."));
         }
     }
 
@@ -355,7 +355,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
     {
         if (project.TintMapPages.Count == 0)
         {
-            report.Add(ValidationSeverity.Info, ValidationCode.MissingTintMaps, "Aucune tintmap DDS n'a été importée.");
+            report.Add(ValidationSeverity.Info, ValidationCode.MissingTintMaps, Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune tintmap DDS n'a été importée."));
             return;
         }
 
@@ -368,21 +368,21 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
             .Take(8)
             .ToList();
 
-        report.Add(ValidationSeverity.Info, ValidationCode.TerrainDiagnostic, $"TintMap : tailles DDS observées {string.Join(", ", dimensions)}.");
+        report.Add(ValidationSeverity.Info, ValidationCode.TerrainDiagnostic, Anno1800IslandTool.Core.Localization.TextCatalog.F($"TintMap : tailles DDS observées {string.Join(", ", dimensions)}."));
 
         if (project.Rd3d.TintPageSize > 0)
         {
             var unexpected = pages.Where(p => p.Width != project.Rd3d.TintPageSize || p.Height != project.Rd3d.TintPageSize).Take(12).ToList();
             if (unexpected.Count == 0)
             {
-                report.Add(ValidationSeverity.Info, ValidationCode.TerrainDiagnostic, $"[OK] TintMap : pages DDS conformes au TintPageSize {project.Rd3d.TintPageSize}.");
+                report.Add(ValidationSeverity.Info, ValidationCode.TerrainDiagnostic, Anno1800IslandTool.Core.Localization.TextCatalog.F($"[OK] TintMap : pages DDS conformes au TintPageSize {project.Rd3d.TintPageSize}."));
             }
             else
             {
                 report.Add(
                     ValidationSeverity.Warning,
                     ValidationCode.TerrainDiagnostic,
-                    $"TintMap : dimensions différentes du TintPageSize {project.Rd3d.TintPageSize} sur exemples {string.Join(", ", unexpected.Select(p => p.Key.ToString()))}.");
+                    Anno1800IslandTool.Core.Localization.TextCatalog.F($"TintMap : dimensions différentes du TintPageSize {project.Rd3d.TintPageSize} sur exemples {string.Join(", ", unexpected.Select(p => p.Key.ToString()))}."));
             }
         }
     }
@@ -408,14 +408,14 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.TerrainCoverageDiagnostic,
-                $"NormalMap : aucun LOD normalmap trouvé pour les LOD mesh éditables/probables {string.Join(", ", normalMissingForMesh.Select(l => "L" + l.ToString(CultureInfo.InvariantCulture)))}.");
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"NormalMap : aucun LOD normalmap trouvé pour les LOD mesh éditables/probables {string.Join(", ", normalMissingForMesh.Select(l => "L" + l.ToString(CultureInfo.InvariantCulture)))}."));
         }
         else if (meshEditableLods.Count > 0 && normalLods.Count > 0)
         {
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.TerrainCoverageDiagnostic,
-                $"[OK] NormalMap : LOD présents pour les niveaux mesh concernés jusqu'à L5 ({string.Join(", ", normalMeshLods.Select(l => "L" + l.ToString(CultureInfo.InvariantCulture)))}). Les mesh L6 et suivants ne nécessitent pas de normalmap de même numéro.");
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"[OK] NormalMap : LOD présents pour les niveaux mesh concernés jusqu'à L5 ({string.Join(", ", normalMeshLods.Select(l => "L" + l.ToString(CultureInfo.InvariantCulture)))}). Les mesh L6 et suivants ne nécessitent pas de normalmap de même numéro."));
         }
 
         var normalWithoutMeshLod = normalLods.Where(l => !meshAllLods.Contains(l)).ToList();
@@ -424,7 +424,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.TerrainCoverageDiagnostic,
-                $"NormalMap : LOD sans page mesh importée au même niveau ({string.Join(", ", normalWithoutMeshLod.Select(l => "L" + l.ToString(CultureInfo.InvariantCulture)))}). Cela peut être normal selon le découpage heightpage.");
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"NormalMap : LOD sans page mesh importée au même niveau ({string.Join(", ", normalWithoutMeshLod.Select(l => "L" + l.ToString(CultureInfo.InvariantCulture)))}). Cela peut être normal selon le découpage heightpage."));
         }
 
         if (tintLods.Count > 0)
@@ -432,7 +432,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.TerrainCoverageDiagnostic,
-                $"TintMap : LOD disponibles {string.Join(", ", tintLods.Select(l => "L" + l.ToString(CultureInfo.InvariantCulture)))}.");
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"TintMap : LOD disponibles {string.Join(", ", tintLods.Select(l => "L" + l.ToString(CultureInfo.InvariantCulture)))}."));
         }
     }
 
@@ -443,7 +443,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.TerrainDiagnostic,
-                $"[OK] MaterialSet implicite : {project.EffectiveMaterialSetName}. Aucun <MaterialSetFileName> explicite dans rd3d.xml : comportement vanilla attendu, terra_01.xml est le fallback implicite et aucun tag vide ne doit être écrit à l'export.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"[OK] MaterialSet implicite : {project.EffectiveMaterialSetName}. Aucun <MaterialSetFileName> explicite dans rd3d.xml : comportement vanilla attendu, terra_01.xml est le fallback implicite et aucun tag vide ne doit être écrit à l'export."),
                 project.Rd3dFilePath ?? "rd3d.xml");
         }
         else
@@ -451,13 +451,13 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.TerrainDiagnostic,
-                $"MaterialSet explicite dans rd3d.xml : {project.Rd3d.MaterialSetFileName}. MaterialSet effectif : {project.EffectiveMaterialSetName}.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"MaterialSet explicite dans rd3d.xml : {project.Rd3d.MaterialSetFileName}. MaterialSet effectif : {project.EffectiveMaterialSetName}."),
                 project.Rd3dFilePath ?? "rd3d.xml");
         }
 
         if (project.MaterialSet is null)
         {
-            report.Add(ValidationSeverity.Warning, ValidationCode.MissingMaterialSet, $"MaterialSet '{project.EffectiveMaterialSetName}' non chargé.", project.MaterialSetFilePath);
+            report.Add(ValidationSeverity.Warning, ValidationCode.MissingMaterialSet, Anno1800IslandTool.Core.Localization.TextCatalog.F($"MaterialSet '{project.EffectiveMaterialSetName}' non chargé."), project.MaterialSetFilePath);
             return;
         }
 
@@ -471,7 +471,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
         report.Add(
             ValidationSeverity.Info,
             ValidationCode.TerrainDiagnostic,
-            $"[OK] MaterialSet chargé : {project.MaterialSet.FileName}, {total} matériau(x), IDs {minId}..{maxId}, Type0 terrain={type0}, Type1 végétation/props={type1}, autres={unknown}.",
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"[OK] MaterialSet chargé : {project.MaterialSet.FileName}, {total} matériau(x), IDs {minId}..{maxId}, Type0 terrain={type0}, Type1 végétation/props={type1}, autres={unknown}."),
             project.MaterialSetFilePath ?? project.MaterialSet.FileName);
     }
 
@@ -491,7 +491,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
         report.Add(
             ValidationSeverity.Info,
             ValidationCode.MaterialMapEncoding,
-            $"MaterialMap : {map.Width}x{map.Height}, blocs MaterialIDs2={blocks}, MaterialIDs2 uniques={idUnique}, MaterialAlphas2 uniques={alphaUnique}.",
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"MaterialMap : {map.Width}x{map.Height}, blocs MaterialIDs2={blocks}, MaterialIDs2 uniques={idUnique}, MaterialAlphas2 uniques={alphaUnique}."),
             project.Rd3dFilePath ?? "rd3d.xml");
 
         if (cells >= 65536 && (idUnique <= 8 || alphaUnique <= 16))
@@ -499,7 +499,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.MaterialMapEncoding,
-                $"MaterialMap très simplifiée pour une grande île : MaterialIDs2 uniques={idUnique}, MaterialAlphas2 uniques={alphaUnique}. C'est un warning critique car cela peut produire des dalles blanches/grises, mais l'export n'est plus bloqué : une île volontairement flatten peut avoir une MaterialMap peu variée pendant les essais.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"MaterialMap très simplifiée pour une grande île : MaterialIDs2 uniques={idUnique}, MaterialAlphas2 uniques={alphaUnique}. C'est un warning critique car cela peut produire des dalles blanches/grises, mais l'export n'est plus bloqué : une île volontairement flatten peut avoir une MaterialMap peu variée pendant les essais."),
                 project.Rd3dFilePath ?? "rd3d.xml");
         }
         else if (cells >= 65536 && (idUnique < 64 || alphaUnique < 256))
@@ -507,7 +507,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.MaterialMapEncoding,
-                $"MaterialMap peu variée : MaterialIDs2 uniques={idUnique}, MaterialAlphas2 uniques={alphaUnique}. Sur une île flatten large, vérifie que la peinture ne vient pas d'un pattern unique répété.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"MaterialMap peu variée : MaterialIDs2 uniques={idUnique}, MaterialAlphas2 uniques={alphaUnique}. Sur une île flatten large, vérifie que la peinture ne vient pas d'un pattern unique répété."),
                 project.Rd3dFilePath ?? "rd3d.xml");
         }
     }
@@ -540,7 +540,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.TerrainCoverageDiagnostic,
-                $"[OK] Écritures LOD0/LOD1 : {supportedMetadataWrites.Count} page(s) protégée(s) ne réécrivent que les métadonnées supportées GroundObjects/UsedMaterialBits ; aucune géométrie n'est injectée.");
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"[OK] Écritures LOD0/LOD1 : {supportedMetadataWrites.Count} page(s) protégée(s) ne réécrivent que les métadonnées supportées GroundObjects/UsedMaterialBits ; aucune géométrie n'est injectée."));
         }
 
         if (unsupported.Count > 0)
@@ -548,7 +548,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Error,
                 ValidationCode.TerrainCoverageDiagnostic,
-                $"Écritures LOD0/LOD1 non supportées détectées : {string.Join(", ", unsupported.Take(12).Select(w => w.Key.ToString()))}. v30 bloque les réécritures de vertices sur LOD0/LOD1 ; seules les opérations GroundObjects/UsedMaterialBits sans géométrie sont autorisées.");
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"Écritures LOD0/LOD1 non supportées détectées : {string.Join(", ", unsupported.Take(12).Select(w => w.Key.ToString()))}. v30 bloque les réécritures de vertices sur LOD0/LOD1 ; seules les opérations GroundObjects/UsedMaterialBits sans géométrie sont autorisées."));
         }
 
         var farUnsupported = writes
@@ -559,7 +559,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Error,
                 ValidationCode.TerrainCoverageDiagnostic,
-                $"Écritures LOD9+ non supportées détectées : {string.Join(", ", farUnsupported.Take(12).Select(w => w.Key.ToString()))}. v42.9 conserve LOD9+ vanilla pour éviter les incohérences de zoom/dézoom.");
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"Écritures LOD9+ non supportées détectées : {string.Join(", ", farUnsupported.Take(12).Select(w => w.Key.ToString()))}. v42.9 conserve LOD9+ vanilla pour éviter les incohérences de zoom/dézoom."));
         }
     }
 
@@ -590,7 +590,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
                 continue;
             }
 
-            var generatedVertices = CountGeneratedVertices(write.XmlText);
+            var generatedVertices = write.GeneratedVertexCount;
             if (generatedVertices > originalVertices * 3 / 2)
             {
                 suspicious.Add($"{write.Key}: {originalVertices}->{generatedVertices}");
@@ -602,25 +602,8 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.TerrainCoverageDiagnostic,
-                $"Mesh : croissance anormale vertices détectée dans {suspicious.Count} write(s), exemples : {string.Join(", ", suspicious.Take(8))}. Pour un aplatissement, préférer le mode SAFE v31 height-only ; le rebuild topologique adaptatif est expérimental.");
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"Mesh : croissance anormale vertices détectée dans {suspicious.Count} write(s), exemples : {string.Join(", ", suspicious.Take(8))}. Pour un aplatissement, préférer le mode SAFE v31 height-only ; le rebuild topologique adaptatif est expérimental."));
         }
-    }
-
-    private static int CountGeneratedVertices(string? xmlText)
-    {
-        if (string.IsNullOrWhiteSpace(xmlText))
-        {
-            return 0;
-        }
-
-        var count = 0;
-        foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(xmlText, @"<Vertices>\s*(?<v>.*?)\s*</Vertices>", System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase))
-        {
-            var numbers = System.Text.RegularExpressions.Regex.Matches(match.Groups["v"].Value, @"-?\d+(?:[.,]\d+)?").Count;
-            count += numbers / 8;
-        }
-
-        return count;
     }
 
     private static void AddPathDiagnostics(ValidationReport report, IslandProject project)
@@ -639,7 +622,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
                 report.Add(
                     ValidationSeverity.Info,
                     ValidationCode.TerrainDiagnostic,
-                    $"TintMap : {shared} fichier(s) détectés dans le chemin partagé '_gamedata/tintmaps'. Ce cas est accepté par le diagnostic v30.");
+                    Anno1800IslandTool.Core.Localization.TextCatalog.F($"TintMap : {shared} fichier(s) détectés dans le chemin partagé '_gamedata/tintmaps'. Ce cas est accepté par le diagnostic v30."));
             }
 
             if (islandSpecific > 0)
@@ -647,7 +630,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
                 report.Add(
                     ValidationSeverity.Info,
                     ValidationCode.TerrainDiagnostic,
-                    $"TintMap : {islandSpecific} fichier(s) détectés dans le chemin spécifique de l'île '_gamedata/{islandName}/tintmaps'.");
+                    Anno1800IslandTool.Core.Localization.TextCatalog.F($"TintMap : {islandSpecific} fichier(s) détectés dans le chemin spécifique de l'île '_gamedata/{islandName}/tintmaps'."));
             }
         }
 
@@ -656,7 +639,7 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.TerrainDiagnostic,
-                $"Archive : {project.SourceFiles.Count} fichier(s) référencés. Root='{project.RootFilePath}', RD3D='{project.Rd3dFilePath}', GameData='{project.GameDataFilePath}', MaterialSet='{project.MaterialSetFilePath ?? "<externe/absent>"}'.");
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"Archive : {project.SourceFiles.Count} fichier(s) référencés. Root='{project.RootFilePath}', RD3D='{project.Rd3dFilePath}', GameData='{project.GameDataFilePath}', MaterialSet='{project.MaterialSetFilePath ?? "<externe/absent>"}'."));
         }
     }
 
@@ -672,6 +655,6 @@ public sealed class TerrainConsistencyValidator : IValidator<IslandProject>
     private static string BuildLodSummary(IEnumerable<TerrainPageKey> keys)
     {
         var groups = keys.GroupBy(k => k.Lod).OrderBy(g => g.Key).Select(g => $"L{g.Key}={g.Count()}").ToList();
-        return groups.Count == 0 ? "aucun" : string.Join(", ", groups);
+        return groups.Count == 0 ? Anno1800IslandTool.Core.Localization.TextCatalog.T("aucun") : string.Join(", ", groups);
     }
 }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -8,6 +8,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
+using System.Windows.Documents;
+using Anno1800IslandTool.Core.Localization;
 
 namespace Anno1800IslandTool.UI;
 
@@ -92,16 +94,7 @@ public static partial class UiLocalizationManager
         LanguageChanged?.Invoke(null, EventArgs.Empty);
     }
 
-    public static string T(string source)
-    {
-        if (string.IsNullOrEmpty(source) || CurrentLanguage == UiLanguage.French)
-        {
-            return source;
-        }
-
-        var dictionary = CurrentLanguage == UiLanguage.German ? German : English;
-        return dictionary.TryGetValue(source, out var translated) ? translated : source;
-    }
+    public static string T(string source) => TextCatalog.Display(source);
 
     public static void ApplyToOpenWindows()
     {
@@ -165,6 +158,7 @@ public static partial class UiLocalizationManager
             _ => "en-US"
         };
 
+        Anno1800IslandTool.Core.Localization.TextCatalog.Language = cultureName[..2];
         var culture = CultureInfo.GetCultureInfo(cultureName);
         CultureInfo.DefaultThreadCurrentCulture = culture;
         CultureInfo.DefaultThreadCurrentUICulture = culture;
@@ -199,17 +193,35 @@ public static partial class UiLocalizationManager
             ApplyTextBlock(textBlock);
         }
 
+        if (obj is TextBox report && report.IsReadOnly && !report.Name.Contains("Raw", StringComparison.OrdinalIgnoreCase))
+            report.SetCurrentValue(TextBox.TextProperty, TextCatalog.DisplayLines(report.Text));
+
+        if (obj is Run run && !BindingOperations.IsDataBound(run, Run.TextProperty))
+            run.Text = TextCatalog.Display(run.Text);
+
+        if (obj is ComboBox mineChoices && mineChoices.Name == "MineAssetComboBox")
+            mineChoices.Items.Refresh();
+
         if (obj is DataGrid dataGrid)
         {
             foreach (var column in dataGrid.Columns)
             {
                 ApplyDataGridColumn(column);
+                if (column is DataGridTextColumn textColumn && textColumn.Binding is Binding binding && binding.Converter == null &&
+                    binding.Path?.Path is "Status" or "DecodeStatus" or "Summary" or "Details" or "Message" or "Description" or "DisplayName")
+                {
+                    // These columns are presentation only; never convert editable coordinates, XML or IDs.
+                    var translatedBinding = new Binding(binding.Path.Path) { Mode = BindingMode.OneWay, Converter = DisplayTextConverter.Instance };
+                    textColumn.Binding = translatedBinding;
+                }
             }
+            if (!dataGrid.IsKeyboardFocusWithin) dataGrid.Items.Refresh();
         }
 
         if (obj is FrameworkElement element)
         {
             ApplyToolTip(element);
+            if (element.ContextMenu != null) ApplyTo(element.ContextMenu);
         }
     }
 
@@ -305,12 +317,13 @@ public static partial class UiLocalizationManager
             // A status label or recycled item may now represent different content.
             // Only retain the source while the current text is one of its translations.
             if (currentValue == original ||
-                (English.TryGetValue(original, out var en) && currentValue == en) ||
-                (German.TryGetValue(original, out var de) && currentValue == de)) return original;
+                (currentValue == Anno1800IslandTool.Core.Localization.TextCatalog.Translate(original, "en")) ||
+                (currentValue == Anno1800IslandTool.Core.Localization.TextCatalog.Translate(original, "de"))) return original;
         }
 
-        obj.SetValue(property, currentValue);
-        return currentValue;
+        var source = Anno1800IslandTool.Core.Localization.TextCatalog.SourceOf(currentValue);
+        obj.SetValue(property, source);
+        return source;
     }
 
     private static void TraverseLogicalChildren(DependencyObject root)

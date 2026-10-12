@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
@@ -15,6 +15,20 @@ internal static class Program
   foreach(var lang in new[]{UiLanguage.French,UiLanguage.English,UiLanguage.German})
   {
    UiLocalizationManager.SetStartupPreference(lang,save:false);
+   var heightWindow = new TerrainHeightmapWindow(new Anno1800IslandTool.Core.Models.IslandProject(), new Anno1800IslandTool.Pipeline.Editing.IslandProjectEditor());
+   UiLocalizationManager.ApplyTo(heightWindow);
+   var brush = (ComboBox)heightWindow.FindName("BrushModeComboBox");
+   var readBrush = typeof(TerrainHeightmapWindow).GetMethod("GetBrushMode", System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic)!;
+   foreach (var mode in new[]{"Raise","Lower","Smooth","Flatten"})
+   {
+    brush.SelectedItem = brush.Items.Cast<ComboBoxItem>().Single(item => (string)item.Tag == mode);
+    Check(readBrush.Invoke(heightWindow,null)!.ToString()==mode,"Translated brush keeps its operation: "+mode);
+    Check(((ComboBoxItem)brush.SelectedItem).Content.ToString()==UiLocalizationManager.T(mode),"Brush label translated");
+   }
+   heightWindow.Close();
+   var status = new TextBlock{Text=Anno1800IslandTool.Core.Localization.TextCatalog.F($"Hauteur cible : {12.5:0.00}")};
+   UiLocalizationManager.ApplyTo(status);
+   Check(status.Text==Anno1800IslandTool.Core.Localization.TextCatalog.F($"Hauteur cible : {12.5:0.00}"),"Dynamic formatted status translated");
    var combo=new ComboBox{ItemsSource=new[]{"First","Second","Third"},SelectedIndex=0};
    combo.Template=(ControlTemplate)System.Windows.Markup.XamlReader.Parse("<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='ComboBox'><ContentPresenter Content='{TemplateBinding SelectionBoxItem}' /></ControlTemplate>");
    combo.ApplyTemplate();Layout(combo);
@@ -76,6 +90,18 @@ internal static class Program
   render.Invoke(null,new object[]{project});
   Check(!before.SequenceEqual(project.GeneratedBinaryFileReplacements[key]),"2D image changes after terrain height changes");
   Check(project.GeneratedBinaryFileReplacements.Keys.Count(k=>k.EndsWith(".dds"))==3,"All three DDS previews regenerated");
+  var mainWindow = new MainWindow();
+  UiLocalizationManager.ApplyTo(mainWindow);
+  Check(mainWindow.Title=="Anno1800IslandTool v46.156","Window title ends at version");
+  var switchLabel = new TextBlock{Text="Outil actif"};
+  var dynamicLabel = new TextBlock{Text=Anno1800IslandTool.Core.Localization.TextCatalog.F($"Hauteur cible : {123.5:0.00}")};
+  foreach(var lang in new[]{UiLanguage.English,UiLanguage.German,UiLanguage.French})
+  {
+   UiLocalizationManager.SetStartupPreference(lang,save:false);
+   UiLocalizationManager.ApplyTo(switchLabel);UiLocalizationManager.ApplyTo(dynamicLabel);
+   Check(switchLabel.Text==UiLocalizationManager.T("Outil actif"),"Static label switches repeatedly");
+   Check(dynamicLabel.Text.StartsWith(lang==UiLanguage.English?"Target height":lang==UiLanguage.German?"Zielhöhe":"Hauteur cible"),"Dynamic label switches repeatedly");
+  }
   Console.WriteLine($"PASS: {checks} WPF selection/localization checks (FR/EN/DE), no window opened.");
  }
 }

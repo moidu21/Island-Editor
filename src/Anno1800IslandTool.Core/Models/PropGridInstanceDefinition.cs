@@ -1,4 +1,4 @@
-﻿namespace Anno1800IslandTool.Core.Models;
+namespace Anno1800IslandTool.Core.Models;
 
 public sealed class PropGridInstanceDefinition
 {
@@ -13,7 +13,7 @@ public sealed class PropGridInstanceDefinition
             {
                 compact = compact.Substring(0, 100) + "…";
             }
-            return string.IsNullOrWhiteSpace(compact) ? "(vide)" : compact;
+            return string.IsNullOrWhiteSpace(compact) ? Anno1800IslandTool.Core.Localization.TextCatalog.T("(vide)") : compact;
         }
     }
 }

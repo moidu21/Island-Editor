@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Xml.Linq;
 
 namespace Anno1800IslandTool.Pipeline.Services;
@@ -34,11 +34,17 @@ internal static class IslandCanvasXmlResizer
             else
             {
                 var tokens = data.Value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-                if (grid.Name.LocalName == "HasMeshArray")
+                if (WaterMaskEncoding.IsNativeMask(grid))
+                {
+                    var old = WaterMaskEncoding.Unpack(tokens.Select(v => byte.Parse(v, CultureInfo.InvariantCulture)).ToArray(), width, height);
+                    var next = IslandCanvasResizer.CopyRows(old, width, height, newWidth, newHeight, false);
+                    data.Value = string.Join(" ", WaterMaskEncoding.Pack(next, newWidth, newHeight));
+                }
+                else if (grid.Name.LocalName is "HasMeshArray" or "ActiveMap")
                 {
                     var stride = ((width + 7) / 8 + 3) & ~3;
                     if (tokens.Length != stride * height)
-                        throw new InvalidOperationException("HasMeshArray invalide avant redimensionnement.");
+                        throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Masque align� invalide avant redimensionnement."));
                     var old = tokens.Select(v => (byte)(int.Parse(v, CultureInfo.InvariantCulture) & 255)).ToArray();
                     var nextStride = ((newWidth + 7) / 8 + 3) & ~3;
                     var next = new byte[checked(nextStride * newHeight)];
@@ -87,6 +93,8 @@ internal static class IslandCanvasXmlResizer
             if (grid.Element("x") is { } x && grid.Element("y") is { } y)
             { x.Value = size.ToString(CultureInfo.InvariantCulture); y.Value = x.Value; }
         }
+        IslandGridSynchronization.SynchronizeSpawnPoints(document, size);
+        GlobalTintPaddingRepair.Apply(document);
         return document.ToString(SaveOptions.DisableFormatting);
     }
 }

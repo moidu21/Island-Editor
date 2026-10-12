@@ -1,4 +1,4 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
 using System.Xml.Linq;
 using Anno1800IslandTool.Pipeline.Import;
 using Anno1800IslandTool.Pipeline.Export;

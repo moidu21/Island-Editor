@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 
 namespace Anno1800IslandTool.Core.Validation;
 
@@ -39,11 +39,11 @@ public sealed class ValidationReport
     {
         if (Messages.Count == 0)
         {
-            return "Aucun message de validation.";
+            return Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun message de validation.");
         }
 
         var sb = new StringBuilder();
-        sb.AppendLine($"Erreurs : {ErrorCount} | Warnings : {WarningCount} | Infos : {InfoCount}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Erreurs : {ErrorCount} | Warnings : {WarningCount} | Infos : {InfoCount}"));
         sb.AppendLine(new string('-', 72));
 
         foreach (var message in Messages

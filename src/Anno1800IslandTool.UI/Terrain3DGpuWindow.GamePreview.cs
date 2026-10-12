@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Numerics;
 using System.Windows;
 using System.Windows.Media;
@@ -55,6 +55,7 @@ public partial class Terrain3DGpuWindow
     }
     private async Task BuildGamePreviewAsync()
     {
+        if (BusyWork.IsBusy && !BusyWork.OwnsOperation) return;
         if(_previewClosed || GamePreviewCheck.IsChecked!=true || _geometry is null)return;
         _previewCancellation?.Cancel();
         var cancellation=new CancellationTokenSource();_previewCancellation=cancellation;
@@ -71,16 +72,17 @@ public partial class Terrain3DGpuWindow
                 token.ThrowIfCancellationRequested();
                 var root = _previewDataRoot = prepared.Root;
                 GamePreviewPath.Text = prepared.Folder;
-                var original=_project.Rd3d.MaterialMap;
+                var original=_previewMaterialMap ?? _project.Rd3d.MaterialMap;
                 var map=new TerrainMaterialMap{Width=original.Width,Height=original.Height,MaterialIdBlockSize=original.MaterialIdBlockSize,
                     PackedMaterialIds=(uint[])original.PackedMaterialIds.Clone(),PackedMaterialAlphas=(uint[])original.PackedMaterialAlphas.Clone()};
                 var materialSet=_project.MaterialSet;
                 if(materialSet is null && _embeddedMaterialSets.TryRead(_project.EffectiveMaterialSetName,out var setText))
                     materialSet=new Anno1800IslandTool.Formats.Readers.MaterialSetReader().Read(_project.EffectiveMaterialSetName,setText);
+                bool enhanceColors=PreviewColor.ShouldEnhance(_project);
                 var definitions=materialSet?.Materials.ToArray() ?? [];
                 int size=GamePreviewQuality.SelectedIndex switch{0=>1024,2=>4096,_=>2048};
                 float worldWidth=Math.Max(1,_project.Root.MapSize),worldHeight=worldWidth*Math.Max(1,_project.Rd3d.GridHeight)/Math.Max(1,_project.Rd3d.GridWidth);
-                var propFiles=_project.Rd3d.PropGrid.FileNames.ToArray();
+                var propFiles=_project.Rd3d.PropGrid.FileNames.Select(ProtectedScenery.PreviewResource).ToArray();
                 var propInstances=_project.Rd3d.PropGrid.Instances.Select(p=>p.RawNoneXml).ToArray();
                 var gameDataText=_project.RawContent.GameDataText;
                 var slotGuids=_project.Root.SlotObjects.Select(s=>s.ObjectGuid).ToHashSet();
@@ -104,7 +106,7 @@ public partial class Terrain3DGpuWindow
                     if(map.Width<=0 || map.Height<=0 || map.MaterialIdBlockSize<=0
                         || map.PackedMaterialIds.Length!=map.ExpectedPackedMaterialIdCount
                         || map.PackedMaterialAlphas.Length!=map.ExpectedPackedAlphaCount)
-                        throw new InvalidDataException("Invalid material map.");
+                        throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Invalid material map."));
                     for(int y=0;y<map.Height;y++)
                     {
                         token.ThrowIfCancellationRequested();
@@ -128,8 +130,8 @@ public partial class Terrain3DGpuWindow
                     token.ThrowIfCancellationRequested();
                     var pixels=GamePreviewTextureBaker.Bake(map,textures,size,worldWidth,worldHeight,token,definitions.Select(d=>new PreviewLayer(d.Id,d.AlphaSharpness ?? 5)).ToArray());
                     GamePreviewTint.Apply(pixels,size,tintPages,rawWidth,rawHeight,token);
-                    PreviewColor.Enhance(pixels,true);
-                    var scenery=ReadPreviewScenery(root,propFiles,propInstances,gameDataText,slotGuids,decoder,token);
+                    if(enhanceColors) PreviewColor.Enhance(pixels,true);
+                    var scenery=ReadPreviewScenery(root,propFiles,propInstances,gameDataText,slotGuids,decoder,token,enhanceColors);
                     return (pixels,scenery,loaded:textures.Count,missing:string.Join(", ",missing));
                 },token);
                 if(token.IsCancellationRequested || _previewClosed)return;

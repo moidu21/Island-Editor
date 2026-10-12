@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Formats.Archive;
+using Anno1800IslandTool.Formats.Archive;
 
 namespace Anno1800IslandTool.Formats.Discovery;
 

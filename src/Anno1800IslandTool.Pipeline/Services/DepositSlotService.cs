@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Xml.Linq;
 using Anno1800IslandTool.Core.Common;
 using Anno1800IslandTool.Core.Models;
@@ -29,7 +29,7 @@ public static class DepositSlotService
             _ = GuidFor(p.Kind);
             var point = MineSlotService.TerrainPoint(project,p.Position.X,p.Position.Z);
             if (!float.IsFinite(point.Y) || point.Y <= 0)
-                throw new ArgumentException("Placez les puits sur un terrain émergé.");
+                throw new ArgumentException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Placez les puits sur un terrain émergé."));
             return p with { Position = point };
         }).ToArray();
         var occupied = project.Root.SlotObjects.Where(s => IsDepositGuid(s.ObjectGuid))
@@ -37,12 +37,12 @@ public static class DepositSlotService
         foreach (var p in resolved)
         {
             if (occupied.Any(o => MathF.Abs(o.X-p.Position.X)<1 && MathF.Abs(o.Z-p.Position.Z)<1))
-                throw new ArgumentException("Un emplacement de ressource existe déjà à cet endroit.");
+                throw new ArgumentException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Un emplacement de ressource existe déjà à cet endroit."));
             occupied.Add(p.Position);
         }
-        var document = XDocument.Parse(project.RawContent.GameDataText ?? throw new InvalidOperationException("GameData absent."));
+        var document = XDocument.Parse(project.RawContent.GameDataText ?? throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("GameData absent.")));
         var container = document.Descendants("GameObject").Elements("objects").FirstOrDefault()
-            ?? throw new InvalidOperationException("Le conteneur GameObject/objects est absent du GameData.");
+            ?? throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Le conteneur GameObject/objects est absent du GameData."));
         var used = document.Descendants("ID").Select(e => long.TryParse(e.Value,out var id) ? id : 0)
             .Concat(project.Root.SlotObjects.Select(s=>s.ObjectId)).ToHashSet();
         long next = long.MinValue+9_000_000;
@@ -53,7 +53,7 @@ public static class DepositSlotService
             var id = next++; used.Add(id);
             var file = p.Kind == DepositKind.Clay ? "Clay.xml" : "Oil.xml";
             using var stream = typeof(DepositSlotService).Assembly.GetManifestResourceStream("Anno1800IslandTool.Pipeline.Resources.Mines."+file)
-                ?? throw new InvalidOperationException("Modèle de puits absent.");
+                ?? throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Modèle de puits absent."));
             var obj = XElement.Load(stream);
             string F(float f) => f.ToString("R",CultureInfo.InvariantCulture).Replace('.',',');
             obj.SetElementValue("ID",id.ToString(CultureInfo.InvariantCulture));

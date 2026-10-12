@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Pipeline.Services;
+using Anno1800IslandTool.Pipeline.Services;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -70,7 +70,7 @@ public partial class GlobalTintBaseMapWindow : Window
 
         var displayName = item.Content?.ToString() ?? string.Empty;
 
-        ActiveToolTextBlock.Text = $"Outil actif : {displayName}";
+        ActiveToolTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Outil actif : {displayName}");
         ToolComboBox.InvalidateVisual();
     }
 
@@ -81,7 +81,9 @@ public partial class GlobalTintBaseMapWindow : Window
             return;
         }
 
-        var changed = 0;
+        var changed = BusyWork.Run(this, () =>
+        {
+        var count = 0;
         for (var i = 0; i + 2 < _values.Length; i += _channelCount)
         {
             var pixelIndex = i / _channelCount;
@@ -96,30 +98,37 @@ public partial class GlobalTintBaseMapWindow : Window
             ClampRedToOrange(_values, i, _channelCount, 1f);
             if (_values[i + 2] != before)
             {
-                changed++;
+                count++;
             }
         }
 
+            return count;
+        });
+
         RenderPreview();
-        UpdateStatus($"Anti-rouge global appliqué : {changed:N0} pixel(s) ajustés.");
+        UpdateStatus(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Anti-rouge global appliqué : {changed:N0} pixel(s) ajustés."));
     }
 
     private void ApplyToProjectButton_Click(object sender, RoutedEventArgs e)
     {
         if (_values.Length == 0 || _width <= 0 || _height <= 0 || _channelCount <= 0)
         {
-            MessageBox.Show(this, "Aucune BaseTextureData valide n'est chargée.", "BaseTextureData", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune BaseTextureData valide n'est chargée."), "BaseTextureData", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
         var rd3dText = _project.RawContent.Rd3dText;
         if (string.IsNullOrWhiteSpace(rd3dText))
         {
-            MessageBox.Show(this, "Le texte brut rd3d.xml n'est pas disponible.", "BaseTextureData", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Le texte brut rd3d.xml n'est pas disponible."), "BaseTextureData", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
-        if (!TryReplaceBaseTextureDataMap(rd3dText!, _width / 4, _height / 4, GlobalTintBlockCodec.Encode(_width, _height, _values, _originalWords), out var updated, out var error))
+        var (succeeded, updated, error) = BusyWork.Run(this, () => {
+            var ok = TryReplaceBaseTextureDataMap(rd3dText!, _width / 4, _height / 4, GlobalTintBlockCodec.Encode(_width, _height, _values, _originalWords), out var text, out var message);
+            return (ok, text, message);
+        });
+        if (!succeeded)
         {
             MessageBox.Show(this, error, "BaseTextureData", MessageBoxButton.OK, MessageBoxImage.Error);
             return;
@@ -130,7 +139,7 @@ public partial class GlobalTintBaseMapWindow : Window
         _project.IsModified = true;
         _project.ModifiedSections.Add("RD3D");
         ProjectApplied?.Invoke(this, EventArgs.Empty);
-        UpdateStatus("BaseTextureData appliquée au projet. L'export préservera cette version manuelle.");
+        UpdateStatus(Anno1800IslandTool.Core.Localization.TextCatalog.T("BaseTextureData appliquée au projet. L'export préservera cette version manuelle."));
     }
 
     private void TintPreviewImage_MouseDown(object sender, MouseButtonEventArgs e)
@@ -283,7 +292,7 @@ public partial class GlobalTintBaseMapWindow : Window
     {
         if (string.IsNullOrWhiteSpace(_project.RawContent.Rd3dText))
         {
-            UpdateStatus("rd3d.xml brut indisponible.");
+            UpdateStatus(Anno1800IslandTool.Core.Localization.TextCatalog.T("rd3d.xml brut indisponible."));
             return;
         }
 
@@ -297,7 +306,7 @@ public partial class GlobalTintBaseMapWindow : Window
         _values = GlobalTintBlockCodec.Decode(_width, _height, values);
         _width *= 4; _height *= 4; _channelCount = 4;
         RenderPreview();
-        UpdateStatus("BaseTextureData chargée depuis le projet.");
+        UpdateStatus(Anno1800IslandTool.Core.Localization.TextCatalog.T("BaseTextureData chargée depuis le projet."));
     }
 
     private void RenderPreview()
@@ -418,10 +427,10 @@ public partial class GlobalTintBaseMapWindow : Window
         }
 
         StatusTextBlock.Text = $"{prefix}\n" +
-                              $"Dimensions : {_width} x {_height}, canaux : {_channelCount}\n" +
-                              $"Pixels rouge risqué : {redRisk:N0}\n" +
-                              $"Pixels rouge/orange fort : {redSoftRisk:N0}\n" +
-                              $"Préservation manuelle export : {(_project.PreserveManualGlobalTintBaseTextureData ? "oui" : "non")}";
+                              Anno1800IslandTool.Core.Localization.TextCatalog.F($"Dimensions : {_width} x {_height}, canaux : {_channelCount}\n") +
+                              Anno1800IslandTool.Core.Localization.TextCatalog.F($"Pixels rouge risqué : {redRisk:N0}\n") +
+                              Anno1800IslandTool.Core.Localization.TextCatalog.F($"Pixels rouge/orange fort : {redSoftRisk:N0}\n") +
+                              Anno1800IslandTool.Core.Localization.TextCatalog.F($"Préservation manuelle export : {(_project.PreserveManualGlobalTintBaseTextureData ? Anno1800IslandTool.Core.Localization.TextCatalog.T("oui") : Anno1800IslandTool.Core.Localization.TextCatalog.T("non"))}");
     }
 
     private void RadiusSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -554,14 +563,14 @@ public partial class GlobalTintBaseMapWindow : Window
         var tintMapLevels = ReadBalancedBlock(rd3dText, "TintMapLevels");
         if (string.IsNullOrWhiteSpace(tintMapLevels))
         {
-            error = "Bloc TintMapLevels introuvable.";
+            error = Anno1800IslandTool.Core.Localization.TextCatalog.T("Bloc TintMapLevels introuvable.");
             return false;
         }
 
         var baseTextureData = ReadBalancedBlock(tintMapLevels!, "BaseTextureData");
         if (string.IsNullOrWhiteSpace(baseTextureData))
         {
-            error = "Bloc TintMapLevels/BaseTextureData introuvable.";
+            error = Anno1800IslandTool.Core.Localization.TextCatalog.T("Bloc TintMapLevels/BaseTextureData introuvable.");
             return false;
         }
 
@@ -569,14 +578,14 @@ public partial class GlobalTintBaseMapWindow : Window
         height = ReadIntTag(baseTextureData!, "height") ?? 0;
         if (width <= 0 || height <= 0)
         {
-            error = "Dimensions BaseTextureData invalides.";
+            error = Anno1800IslandTool.Core.Localization.TextCatalog.T("Dimensions BaseTextureData invalides.");
             return false;
         }
 
         var map = ReadTagValue(baseTextureData!, "map");
         if (string.IsNullOrWhiteSpace(map))
         {
-            error = "BaseTextureData/map vide ou introuvable.";
+            error = Anno1800IslandTool.Core.Localization.TextCatalog.T("BaseTextureData/map vide ou introuvable.");
             return false;
         }
 
@@ -586,7 +595,7 @@ public partial class GlobalTintBaseMapWindow : Window
         channelCount = values.Length / Math.Max(1, width * height);
         if (values.Length != (long)width * height * 4)
         {
-            error = $"BaseTextureData/map incohérente : {values.Length:N0} valeurs pour {width}x{height}.";
+            error = Anno1800IslandTool.Core.Localization.TextCatalog.F($"BaseTextureData/map incohérente : {values.Length:N0} valeurs pour {width}x{height}.");
             return false;
         }
 
@@ -601,7 +610,7 @@ public partial class GlobalTintBaseMapWindow : Window
         var tintRange = FindBalancedTagRange(rd3dText, "TintMapLevels");
         if (tintRange is null)
         {
-            error = "Bloc TintMapLevels introuvable.";
+            error = Anno1800IslandTool.Core.Localization.TextCatalog.T("Bloc TintMapLevels introuvable.");
             return false;
         }
 
@@ -609,7 +618,7 @@ public partial class GlobalTintBaseMapWindow : Window
         var baseRange = FindBalancedTagRange(tintBody, "BaseTextureData");
         if (baseRange is null)
         {
-            error = "Bloc BaseTextureData introuvable.";
+            error = Anno1800IslandTool.Core.Localization.TextCatalog.T("Bloc BaseTextureData introuvable.");
             return false;
         }
 

@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Numerics;
 using System.Text.RegularExpressions;
 using System.Xml;
@@ -36,7 +36,7 @@ public static class PreviewSceneReader
     {
         var stack=new Stack<string>();
         var xml=Regex.Replace(text,@"</>|</?[A-Za-z_][^>]*>",m=>{
-            if(m.Value=="</>")return "</"+(stack.Count>0?stack.Pop():throw new InvalidDataException("Unbalanced config."))+">";
+            if(m.Value=="</>")return "</"+(stack.Count>0?stack.Pop():throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Unbalanced config.")))+">";
             if(m.Value.StartsWith("</")){if(stack.Count>0)stack.Pop();return m.Value;}
             if(!m.Value.EndsWith("/>"))stack.Push(Regex.Match(m.Value,@"^<([^\s>]+)").Groups[1].Value);
             return m.Value;});

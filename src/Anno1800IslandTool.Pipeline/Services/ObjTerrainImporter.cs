@@ -10,8 +10,9 @@ public sealed record ObjTerrainImportOptions(
     int Lod,
     bool FitToActiveFootprint = true,
     int GridStepRaw = 32,
-    int SmoothingPasses = 2,
-    float? SourceSeaLevel = null);
+    int SmoothingPasses = 0,
+    float? SourceSeaLevel = null,
+    bool PreserveSourceMesh = true);
 
 public sealed record ObjTerrainImportResult(
     int SourceVertices,
@@ -41,17 +42,18 @@ public static class ObjTerrainImporter
     {
         ArgumentNullException.ThrowIfNull(project);
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-            throw new FileNotFoundException("Le fichier OBJ est introuvable.", path);
+            throw new FileNotFoundException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Le fichier OBJ est introuvable."), path);
 
-        var parsed = ParseDetailed(File.ReadLines(path));
+        var parsed = Path.GetExtension(path).ToLowerInvariant() is ".gltf" or ".glb"
+            ? ParseGltf(path) : ParseDetailed(File.ReadLines(path));
         var sourceSeaLevel = options.SourceSeaLevel ?? parsed.SourceSeaLevel;
         if (sourceSeaLevel.HasValue && !float.IsFinite(sourceSeaLevel.Value))
-            throw new InvalidDataException("Le niveau marin source doit être un nombre fini.");
+            throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Le niveau marin source doit être un nombre fini."));
         if (parsed.Vertices.Count < 3 || parsed.Triangles.Count == 0)
-            throw new InvalidDataException("Le fichier OBJ ne contient aucun triangle exploitable.");
+            throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Le fichier OBJ ne contient aucun triangle exploitable."));
         var selected = SelectUsableTerrainTriangles(parsed.Triangles);
         if (selected.Count == 0)
-            throw new InvalidDataException("Aucun élément de l'OBJ ne peut être converti automatiquement en terrain.");
+            throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun élément de l'OBJ ne peut être converti automatiquement en terrain."));
         var selectedTriangles = selected.Select(triangle => (triangle.A, triangle.B, triangle.C)).ToList();
         var usedNames = selected.Select(triangle => triangle.ObjectName).Where(name => !string.IsNullOrWhiteSpace(name))
             .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
@@ -60,23 +62,23 @@ public static class ObjTerrainImporter
             .OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
 
         var pages = project.MeshPages.Values
-            .Where(page => page.Key.Lod == options.Lod && MeshPageClassifier.CanEditGeometry(page))
+            .Where(page => page.Key.Lod == options.Lod && MeshPageClassifier.IsGeometryCandidateLod(page.Key) && page.HasEditablePayload)
             .OrderBy(page => page.Key.X).ThenBy(page => page.Key.Y).ToList();
         if (pages.Count == 0)
-            throw new InvalidOperationException($"Aucune page de maillage éditable n'existe au LOD {options.Lod}.");
+            throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Aucune page de maillage éditable n'existe au LOD {options.Lod}."));
 
         var worldWidth = Math.Max(1d, project.Rd3d.GridWidth > 0 ? project.Rd3d.GridWidth : project.Root.MapSize * 32d);
         var worldHeight = Math.Max(1d, project.Rd3d.GridHeight > 0 ? project.Rd3d.GridHeight : project.Root.MapSize * 32d);
-        var target = ResolveTargetBounds(project, options.FitToActiveFootprint, worldWidth, worldHeight);
+        var target = ResolveTargetBounds(project, options.FitToActiveFootprint, worldWidth, worldHeight, options.PreserveSourceMesh ? 0 : 32);
         // Les exports SketchUp contiennent souvent des murs, dessous et objets verticaux.
         // Ils ne doivent pas élargir la plage de hauteur ni déplacer le cadrage du terrain.
         var surfaceVertexIndices = selectedTriangles
-            .Where(triangle => Math.Abs(ProjectedCross(parsed.Vertices[triangle.A], parsed.Vertices[triangle.B], parsed.Vertices[triangle.C])) > 0.000001f)
+            .Where(triangle => options.PreserveSourceMesh || Math.Abs(ProjectedCross(parsed.Vertices[triangle.A], parsed.Vertices[triangle.B], parsed.Vertices[triangle.C])) > 0.000001f)
             .SelectMany(triangle => new[] { triangle.A, triangle.B, triangle.C })
             .Distinct()
             .ToArray();
         if (surfaceVertexIndices.Length < 3)
-            throw new InvalidDataException("L'OBJ ne contient aucune surface projetable comme terrain.");
+            throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("L'OBJ ne contient aucune surface projetable comme terrain."));
         var surfaceSource = surfaceVertexIndices.Select(index => parsed.Vertices[index]).ToArray();
         var sourceMin = new Vector3(surfaceSource.Min(v => v.X), surfaceSource.Min(v => v.Y), surfaceSource.Min(v => v.Z));
         var sourceMax = new Vector3(surfaceSource.Max(v => v.X), surfaceSource.Max(v => v.Y), surfaceSource.Max(v => v.Z));
@@ -93,14 +95,16 @@ public static class ObjTerrainImporter
 
         var transformed = parsed.Vertices.Select(v => new Vector3(
             (float)(offsetX + ((v.X - sourceMin.X) * fitScale)),
-            Math.Abs(sourceY) < 0.000001f ? minHeight : minHeight + ((Math.Clamp(v.Y, sourceLow, sourceHigh) - sourceLow) / sourceY * (maxHeight - minHeight)),
+            Math.Abs(sourceY) < 0.000001f ? minHeight : minHeight + ((v.Y - sourceLow) / sourceY * (maxHeight - minHeight)),
             (float)(offsetZ + ((v.Z - sourceMin.Z) * fitScale)))).ToArray();
         var gridStep = Math.Clamp(options.GridStepRaw, 16, 128);
-        var heightField = BuildHeightField(transformed, selectedTriangles, target, minHeight,
-            gridStep, Math.Clamp(options.SmoothingPasses, 0, 8));
+        var heightField = options.PreserveSourceMesh
+            ? new HeightFieldMesh(transformed, selectedTriangles, 0)
+            : BuildHeightField(transformed, selectedTriangles, target, minHeight,
+                gridStep, Math.Clamp(options.SmoothingPasses, 0, 8));
         var terrainPositions = heightField.Positions;
         IReadOnlyList<(int A, int B, int C)> terrainTriangles = heightField.Triangles;
-        if (options.FitToActiveFootprint && project.Root.ActiveMapGrid is { X: > 0, Y: > 0 } activeGrid)
+        if (!options.PreserveSourceMesh && options.FitToActiveFootprint && project.Root.ActiveMapGrid is { X: > 0, Y: > 0 } activeGrid)
         {
             var activeMask = ActiveMapGridMaskCodec.Decode(activeGrid, project.Root.ActiveMapGridBits, project.Root.ActiveMapRect);
             bool Active(int index) => ActiveMapGridMaskCodec.IsWorldPointActive(activeMask, activeGrid,
@@ -108,10 +112,18 @@ public static class ObjTerrainImporter
             terrainTriangles = terrainTriangles.Where(triangle => Active(triangle.A) && Active(triangle.B) && Active(triangle.C)).ToList();
         }
         if (terrainTriangles.Count == 0)
-            throw new InvalidDataException("La surface OBJ ne recoupe pas la zone terrain choisie.");
-        var normals = BuildNormals(terrainPositions, terrainTriangles);
-
+            throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("La surface OBJ ne recoupe pas la zone terrain choisie."));
         var pageSize = Math.Max(1, TerrainPageCoverage.ResolvePageWorldSize(TerrainPageCoverage.MeshFamily, options.Lod));
+        foreach (var page in pages)
+        {
+            page.DeclaredWidth = Math.Max(1, page.DeclaredWidth > 0 ? page.DeclaredWidth : (int)Math.Round(Math.Sqrt(Math.Max(1, page.Clusters.Count))));
+            page.DeclaredHeight = Math.Max(1, page.DeclaredHeight > 0 ? page.DeclaredHeight : (int)Math.Ceiling(Math.Max(1, page.Clusters.Count) / (double)page.DeclaredWidth));
+        }
+        var split = TerrainMeshPartitioner.Split(terrainPositions, terrainTriangles,
+            pageSize / (float)pages.Max(p => p.DeclaredWidth), pageSize / (float)pages.Max(p => p.DeclaredHeight));
+        terrainPositions = split.Positions;
+        terrainTriangles = split.Triangles;
+        var normals = BuildNormals(terrainPositions, terrainTriangles);
         var pageByKey = pages.ToDictionary(page => page.Key);
         var pageStates = pages.ToDictionary(page => page.Key, page => CreatePageState(page));
 
@@ -140,9 +152,19 @@ public static class ObjTerrainImporter
         foreach (var page in pages)
         {
             var state = pageStates[page.Key];
+            for (var c=0; c<state.Buckets.Length; c++)
+            {
+                var stepX=pageSize/(double)page.DeclaredWidth;
+                var stepZ=pageSize/(double)page.DeclaredHeight;
+                var left=page.Key.X*pageSize+(c%page.DeclaredWidth)*stepX;
+                var top=page.Key.Y*pageSize+(c/page.DeclaredWidth)*stepZ;
+                ImportedTerrainSkirts.Add(state.Buckets[c].Cluster, options.Lod,
+                    (int)Math.Round(left),(int)Math.Round(top),(int)Math.Round(left+stepX),(int)Math.Round(top+stepZ));
+            }
             var pageTriangles = state.Buckets.Sum(bucket => bucket.Cluster.Indices.Count / 3);
             if (pageTriangles > 0) pagesChanged++;
             page.Clusters = state.Buckets.Select(bucket => bucket.Cluster).ToList();
+            page.RawUnknownFields.Remove("__raw"); // Never restore pre-import vertices when editing vegetation.
             page.ParsedClusterCount = page.Clusters.Count;
             page.DeclaredClusterCount = Math.Max(page.DeclaredClusterCount, page.Clusters.Count);
             page.ContainsStructuredMeshPayload = true;
@@ -150,9 +172,9 @@ public static class ObjTerrainImporter
             page.HasEditablePayload = true;
             page.VertexStride = 8;
             page.ProbableHeightComponentIndex = 1;
-            page.VertexLayoutHypothesis = "OBJ importé : X, hauteur, Z, UV, normale et tangente terrain";
+            page.VertexLayoutHypothesis = Anno1800IslandTool.Core.Localization.TextCatalog.T("OBJ importé : X, hauteur, Z, UV, normale et tangente terrain");
             page.DecodeStatus = "Décodée";
-            page.DecodeNotes = "Import OBJ v46.37 : terrain prioritaire, surface supérieure et contour raccordé ; Raw3..Raw7 reconstruits.";
+            page.DecodeNotes = Anno1800IslandTool.Core.Localization.TextCatalog.T("Import OBJ v46.37 : terrain prioritaire, surface supérieure et contour raccordé ; Raw3..Raw7 reconstruits.");
             importedVertices += page.Clusters.Sum(cluster => cluster.Vertices.Count);
             importedTriangles += pageTriangles;
         }
@@ -161,7 +183,7 @@ public static class ObjTerrainImporter
         project.ModifiedSections.Add("TerrainMeshObjImport");
         return new ObjTerrainImportResult(parsed.Vertices.Count, parsed.Triangles.Count, importedVertices, importedTriangles,
             pagesChanged, heightField.IgnoredVerticalTriangles, selectedTriangles.Count,
-            usedNames.Length == 0 ? "surface OBJ" : string.Join(", ", usedNames),
+            usedNames.Length == 0 ? Anno1800IslandTool.Core.Localization.TextCatalog.T("surface OBJ") : string.Join(", ", usedNames),
             string.Join(", ", ignoredNames), minHeight, maxHeight,
             terrainPositions.Min(v => v.X), terrainPositions.Min(v => v.Z), terrainPositions.Max(v => v.X), terrainPositions.Max(v => v.Z)) { ConvertedWorldMachineAxes = parsed.WorldMachineZUp };
     }
@@ -169,33 +191,22 @@ public static class ObjTerrainImporter
     private static (float SourceLow, float SourceHigh, float MinimumHeight, float MaximumHeight) ResolveAutomaticHeightRange(
         IReadOnlyList<Vector3> surface, double fitScale, double fittedHorizontalSpan, float? sourceSeaLevel)
     {
-        var ordered = surface.Select(point => point.Y).OrderBy(value => value).ToArray();
-        if (ordered.Length == 0) return (0, 0, 0, 0);
-        if (sourceSeaLevel is float sea)
-        {
-            // A known water datum must remain zero in Anno. Do not pin the
-            // bottom to -8 or use vertex percentiles: optimized meshes do not
-            // sample flat areas and mountains with the same density.
-            var sourceMin = ordered[0];
-            var sourceMax = ordered[^1];
-            var span = sourceMax - sourceMin;
-            var usefulRelief = Math.Clamp(fittedHorizontalSpan / 32d * .20d, 16d, 72d);
-            var scale = span > 0 ? Math.Min(fitScale / 32d, usefulRelief / span) : fitScale / 32d;
-            return (sourceMin, sourceMax, (float)((sourceMin - sea) * scale), (float)((sourceMax - sea) * scale));
-        }
-        var low = ordered[Math.Clamp((int)Math.Floor((ordered.Length - 1) * .02), 0, ordered.Length - 1)];
-        var high = ordered[Math.Clamp((int)Math.Ceiling((ordered.Length - 1) * .98), 0, ordered.Length - 1)];
-        if (high - low < .000001f) return (low, high, 0, 0);
+        var low = surface.Min(point => point.Y);
+        var high = surface.Max(point => point.Y);
+        var sea = sourceSeaLevel ?? 0f;
+        var scale = fitScale / 32d;
+        // Scale around sea level, never clip peaks or move the coastline by percentiles.
+        const double maximum = 127.99609375; // largest Raw1 value
+        if (high > sea) scale = Math.Min(scale, maximum / (high - sea));
+        if (low < sea) scale = Math.Min(scale, 128d / (sea - low));
+        return (low, high, (float)((low - sea) * scale), (float)((high - sea) * scale));
+    }
 
-        // X/Z sont exprimés en unités brutes (32 unités = une case). La hauteur
-        // conserve les proportions du modèle, tout en restant dans une amplitude
-        // fiable pour le relief Anno. Les percentiles neutralisent les rares pics.
-        var proportionalRelief = (high - low) * fitScale / 32d;
-        var horizontalWorldSpan = Math.Max(1d, fittedHorizontalSpan / 32d);
-        var maximumUsefulRelief = Math.Clamp(horizontalWorldSpan * .20d, 16d, 72d);
-        var relief = (float)Math.Clamp(proportionalRelief, 8d, maximumUsefulRelief);
-        const float baseHeight = -8f;
-        return (low, high, baseHeight, baseHeight + relief);
+    private static ParsedObj ParseGltf(string path)
+    {
+        var mesh = GltfTerrainReader.Read(path);
+        return new ParsedObj(mesh.Vertices, mesh.Triangles.Select(t =>
+            new ObjSourceTriangle(t.A, t.B, t.C, "TerrainMesh")).ToList(), false, 0f);
     }
 
     private static HeightFieldMesh BuildHeightField(Vector3[] source, IReadOnlyList<(int A, int B, int C)> triangles,
@@ -300,7 +311,7 @@ public static class ObjTerrainImporter
             var a = row * columns + col; var b = a + 1; var c = a + columns; var d = c + 1;
             outputTriangles.Add((a, c, b)); outputTriangles.Add((b, c, d));
         }
-        if (outputTriangles.Count == 0) throw new InvalidDataException("L'OBJ ne contient aucune surface horizontale exploitable comme terrain.");
+        if (outputTriangles.Count == 0) throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("L'OBJ ne contient aucune surface horizontale exploitable comme terrain."));
         return new HeightFieldMesh(positions, outputTriangles, ignoredVertical);
     }
 
@@ -427,7 +438,7 @@ public static class ObjTerrainImporter
             if (line.StartsWith(seaLevelPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 if (!TryFloat(line[seaLevelPrefix.Length..].Trim(), out var sea))
-                    throw new InvalidDataException("Niveau marin OBJ invalide.");
+                    throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Niveau marin OBJ invalide."));
                 sourceSeaLevel = sea;
             }
             if (line.StartsWith("# Mesh Output from World Machine", StringComparison.OrdinalIgnoreCase))
@@ -441,7 +452,7 @@ public static class ObjTerrainImporter
             else if (parts.Length >= 4 && parts[0] == "v")
             {
                 if (!TryFloat(parts[1], out var x) || !TryFloat(parts[2], out var y) || !TryFloat(parts[3], out var z))
-                    throw new InvalidDataException($"Sommet OBJ invalide : {line}");
+                    throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Sommet OBJ invalide : {line}"));
                 vertices.Add(new Vector3(x, y, z));
             }
             else if (parts.Length >= 4 && parts[0] == "f")
@@ -531,9 +542,9 @@ public static class ObjTerrainImporter
     {
         var value = token.Split('/')[0];
         if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) || parsed == 0)
-            throw new InvalidDataException($"Indice de face OBJ invalide : {token}");
+            throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Indice de face OBJ invalide : {token}"));
         var index = parsed > 0 ? parsed - 1 : vertexCount + parsed;
-        if ((uint)index >= vertexCount) throw new InvalidDataException($"Indice OBJ hors limites : {token}");
+        if ((uint)index >= vertexCount) throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Indice OBJ hors limites : {token}"));
         return index;
     }
 
@@ -555,9 +566,8 @@ public static class ObjTerrainImporter
         return normals;
     }
 
-    private static (double MinX, double MinZ, double MaxX, double MaxZ) ResolveTargetBounds(IslandProject project, bool activeOnly, double width, double height)
+    private static (double MinX, double MinZ, double MaxX, double MaxZ) ResolveTargetBounds(IslandProject project, bool activeOnly, double width, double height, double margin)
     {
-        const double margin = 32d;
         if (activeOnly && project.Root.ActiveMapGrid is { X: > 0, Y: > 0 } grid)
         {
             var mask = ActiveMapGridMaskCodec.Decode(grid, project.Root.ActiveMapGridBits, project.Root.ActiveMapRect);
@@ -613,7 +623,7 @@ public static class ObjTerrainImporter
                 continue;
             }
             if (bucket.Cluster.Vertices.Count >= ushort.MaxValue)
-                throw new InvalidDataException("Un cluster OBJ dépasse 65 535 sommets. Simplifiez le maillage avant l'import.");
+                throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Un cluster OBJ dépasse 65 535 sommets. Simplifiez le maillage avant l'import."));
             var p = positions[sourceIndex];
             var vertex = new MeshVertex { Raw0 = (int)MathF.Round(p.X), Raw1 = MeshVertex.EncodeWorldHeight(p.Y), Raw2 = (int)MathF.Round(p.Z) };
             var col = clusterIndex % Math.Max(1, page.DeclaredWidth);

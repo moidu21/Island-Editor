@@ -1,4 +1,4 @@
-﻿namespace Anno1800IslandTool.Core.Terrain;
+namespace Anno1800IslandTool.Core.Terrain;
 
 /// <summary>
 /// Identifie explicitement la convention utilisée par un tableau de hauteurs.

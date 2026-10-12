@@ -1,4 +1,4 @@
-﻿using System.Xml.Linq;
+using System.Xml.Linq;
 using Anno1800IslandTool.Core.Models;
 namespace Anno1800IslandTool.Pipeline.Export;
 
@@ -50,22 +50,22 @@ public static class IslandIntegrationTemplates
                     if(guid is "1000029" or "614" or "116037")
                     {
                         unresolved++;
-                        mapping.Add(new XComment("Choisir un type de mine concret dans l’éditeur puis réexporter. / Select a concrete mine type in the editor and export again."));
+                        mapping.Add(new XComment(Anno1800IslandTool.Core.Localization.TextCatalog.T("Choisir un type de mine concret dans l’éditeur puis réexporter. / Select a concrete mine type in the editor and export again.")));
                         guid="CHANGEME_SLOT_GUID";
                     }
                     mapping.Add(new XElement("None",slot.Element("ObjectId")!.Value),new XElement("None",guid));
                 }
             }
         }
-        var instructions="Remplacez CHANGEME par un GUID unique. addtoasset.xml est un fragment à insérer dans assets.xml. "
-            +"Le GUID 112140 désigne uniquement le conteneur d’insertion, pas la région. La région est celle de la session. "
-            +"Les deux formaptemplate sont au format FileDBReader/a7tinfo ; n’en insérer qu’un pour cette île. "
-            +"formaptemplate.xml : fertilités et gisements aléatoires selon les pools de la session. "
-            +"formaptemplate_filedb.xml : fertilités aléatoires, tous les gisements conservés (mines, argile, pétrole). "
-            +"Une MineSlotMapping non vide désactive le tirage de tous les gisements. Les régions doivent disposer des bâtiments adaptés aux ressources choisies. "
-            +"Le type Normal évite les conditions de libellé propres aux îles Starter d’Enbesa. "
-            +"Les ObjectId sont signés Int64 pour a7tinfo. Testez dans une nouvelle partie.";
-        if(unresolved>0) instructions += $" ATTENTION : {unresolved} mine(s) sans type concret : le modèle de gisements fixes contient CHANGEME_SLOT_GUID et doit être complété avant compilation. Le modèle tout aléatoire reste prêt à utiliser.";
+        var instructions=Anno1800IslandTool.Core.Localization.TextCatalog.T("Remplacez CHANGEME par un GUID unique. addtoasset.xml est un fragment à insérer dans assets.xml. ")
+            +Anno1800IslandTool.Core.Localization.TextCatalog.T("Le GUID 112140 désigne uniquement le conteneur d’insertion, pas la région. La région est celle de la session. ")
+            +Anno1800IslandTool.Core.Localization.TextCatalog.T("Les deux formaptemplate sont au format FileDBReader/a7tinfo ; n’en insérer qu’un pour cette île. ")
+            +Anno1800IslandTool.Core.Localization.TextCatalog.T("formaptemplate.xml : fertilités et gisements aléatoires selon les pools de la session. ")
+            +Anno1800IslandTool.Core.Localization.TextCatalog.T("formaptemplate_filedb.xml : fertilités aléatoires, tous les gisements conservés (mines, argile, pétrole). ")
+            +Anno1800IslandTool.Core.Localization.TextCatalog.T("Une MineSlotMapping non vide désactive le tirage de tous les gisements. Les régions doivent disposer des bâtiments adaptés aux ressources choisies. ")
+            +Anno1800IslandTool.Core.Localization.TextCatalog.T("Le type Normal évite les conditions de libellé propres aux îles Starter d’Enbesa. ")
+            +Anno1800IslandTool.Core.Localization.TextCatalog.T("Les ObjectId sont signés Int64 pour a7tinfo. Testez dans une nouvelle partie.");
+        if(unresolved>0) instructions += Anno1800IslandTool.Core.Localization.TextCatalog.F($" ATTENTION : {unresolved} mine(s) sans type concret : le modèle de gisements fixes contient CHANGEME_SLOT_GUID et doit être complété avant compilation. Le modèle tout aléatoire reste prêt à utiliser.");
         return new Dictionary<string,string>{["addtoasset.xml"]=asset.ToString(),
             ["formaptemplate.xml"]=new XElement("TemplateElement",element).ToString(),
             ["formaptemplate_filedb.xml"]=new XElement("TemplateElement",fixedElement).ToString(),

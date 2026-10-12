@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -41,11 +41,8 @@ public abstract class DirectX11Surface : FrameworkElement
     {
         Loaded += (_, _) =>
         {
-            if (_subscribed) return;
             _failed = false;
             RenderingError = null;
-            _subscribed = true;
-            CompositionTarget.Rendering += RenderFrame;
             RequestRender();
         };
         Unloaded += (_, _) =>
@@ -55,6 +52,7 @@ public abstract class DirectX11Surface : FrameworkElement
             ReleaseResources();
         };
         SizeChanged += (_, _) => RequestRender();
+        IsVisibleChanged += (_, _) => { if (IsVisible) RequestRender(); };
         _image.IsFrontBufferAvailableChanged += (_, _) =>
         {
             if (_image.IsFrontBufferAvailable) { ReleaseTarget(); RequestRender(); }
@@ -64,7 +62,15 @@ public abstract class DirectX11Surface : FrameworkElement
     public string RenderingError { get; private set; }
     public string RendererDescription => _device is null ? "Direct3D 11" : $"Direct3D 11 / Direct2D — {_device.AdapterName}";
 
-    public void RequestRender() { _dirty = true; InvalidateVisual(); }
+    public void RequestRender()
+    {
+        _dirty = true;
+        if (!IsLoaded || !IsVisible || _subscribed || _failed) return;
+        // One callback per changed frame, not a permanent callback per window.
+        _subscribed = true;
+        CompositionTarget.Rendering += RenderFrame;
+        InvalidateVisual();
+    }
 
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
     {
@@ -79,7 +85,7 @@ public abstract class DirectX11Surface : FrameworkElement
         else context.DrawRectangle(Brushes.Transparent, null, new Rect(RenderSize));
         if (RenderingError != null)
         {
-            var text = new FormattedText("Affichage DirectX 11 indisponible\n" + RenderingError,
+            var text = new FormattedText(Anno1800IslandTool.Core.Localization.TextCatalog.T("Affichage DirectX 11 indisponible\n") + RenderingError,
                 System.Globalization.CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
                 new Typeface("Segoe UI"), 12, Brushes.OrangeRed, VisualTreeHelper.GetDpi(this).PixelsPerDip)
                 { MaxTextWidth = Math.Max(1, ActualWidth) };
@@ -89,6 +95,8 @@ public abstract class DirectX11Surface : FrameworkElement
 
     private void RenderFrame(object sender, EventArgs e)
     {
+        CompositionTarget.Rendering -= RenderFrame;
+        _subscribed = false;
         if (!_dirty || _failed || !IsVisible || ActualWidth < 1 || ActualHeight < 1) return;
         try
         {
@@ -256,7 +264,7 @@ public abstract class DirectX11Surface : FrameworkElement
                     AdapterName = adapter.Description1.Description.Trim();
                     break;
                 }
-                if (Device is null) throw new InvalidOperationException("Aucun adaptateur Direct3D 11 compatible avec la présentation WPF.");
+                if (Device is null) throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun adaptateur Direct3D 11 compatible avec la présentation WPF."));
                 using var dxgiDevice = Device.QueryInterface<DXGI.Device>();
                 _d2d = new D2D.Device(dxgiDevice);
                 Context = new D2D.DeviceContext(_d2d, D2D.DeviceContextOptions.None);
@@ -274,7 +282,7 @@ public abstract class DirectX11Surface : FrameworkElement
             // D3D11_QUERY_EVENT returns a four-byte Win32 BOOL, not a CLR bool.
             while (!Device.ImmediateContext.GetData(_completed, out int done) || done == 0)
             {
-                if (timer.ElapsedMilliseconds > 2000) throw new TimeoutException("La carte graphique ne répond plus.");
+                if (timer.ElapsedMilliseconds > 2000) throw new TimeoutException(Anno1800IslandTool.Core.Localization.TextCatalog.T("La carte graphique ne répond plus."));
                 Thread.Yield();
             }
         }

@@ -1,4 +1,4 @@
-﻿<Window x:Class="Anno1800IslandTool.UI.TerrainHeightmapWindow"
+<Window x:Class="Anno1800IslandTool.UI.TerrainHeightmapWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering"
@@ -18,10 +18,10 @@
             <Button Width="120" Height="30" Margin="8,0,0,0" Click="ResetButton_Click">Réinitialiser</Button>
             <TextBlock Text="Mode" VerticalAlignment="Center" Margin="16,0,0,0"/>
             <ComboBox x:Name="BrushModeComboBox" Width="120" Margin="8,0,0,0" SelectedIndex="0">
-                <ComboBoxItem Content="Raise"/>
-                <ComboBoxItem Content="Lower"/>
-                <ComboBoxItem Content="Smooth"/>
-                <ComboBoxItem Content="Flatten"/>
+                <ComboBoxItem Content="Raise" Tag="Raise"/>
+                <ComboBoxItem Content="Lower" Tag="Lower"/>
+                <ComboBoxItem Content="Smooth" Tag="Smooth"/>
+                <ComboBoxItem Content="Flatten" Tag="Flatten"/>
             </ComboBox>
             <TextBlock Text="Rayon" VerticalAlignment="Center" Margin="16,0,0,0"/>
             <Slider x:Name="BrushRadiusSlider" Width="140" Minimum="1" Maximum="30" Value="8" TickFrequency="1" IsSnapToTickEnabled="True"/>

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using Anno1800IslandTool.Core.Common;
 
 namespace Anno1800IslandTool.Core.Terrain;

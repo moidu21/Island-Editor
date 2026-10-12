@@ -1,19 +1,29 @@
-﻿namespace Anno1800IslandTool.Core.Terrain;
+using System.Buffers;
+namespace Anno1800IslandTool.Core.Terrain;
 
 /// <summary>Samples the fixed page lattice at texel centres, including its gutter.
 /// Page bounds must not be rounded to the gameplay grid or shortened at the island edge.</summary>
 public static class NormalMapHeightEncoder
 {
-    public static double TexelCoordinate(int pageIndex, int lod, int size, int texel)
+    public static double TexelCoordinate(int pageIndex, int lod, int size, int texel, int fullSize = 528)
     {
         var span = 512d * (1 << Math.Clamp(lod, 0, 20));
-        return pageIndex * span + ((texel + .5) / Math.Max(1, size) * 66d / 64d - 1d / 64d) * span;
+        return pageIndex * span + ((texel + .5) / Math.Max(1, size) * 66d / 64d - 1d / 64d - .5 / Math.Max(1, fullSize) * 66d / 64d) * span;
     }
 
     public static NormalMapPage Encode(NormalMapPage source, Func<double, double, float> sampleWorldHeight)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(sampleWorldHeight);
+        var scratch = new List<double[]>();
+        double[] Rent(int count)
+        {
+            var buffer = ArrayPool<double>.Shared.Rent(count);
+            scratch.Add(buffer);
+            return buffer;
+        }
+        try
+        {
         var result = new NormalMapPage
         {
             Key = source.Key, OriginalRelativePath = source.OriginalRelativePath,
@@ -22,18 +32,26 @@ public static class NormalMapHeightEncoder
             DeltaLevels = source.DeltaLevels.Select(l => new QuantizedDeltaLevel
             { Width = l.Width, Height = l.Height, ScaleFactor = l.ScaleFactor, QuantBits = l.QuantBits }).ToList()
         };
+        // csFinalHeightMapCompaction maps full-resolution pixel i to
+        // (i-border)/(fullSize-2*border), without a half-pixel offset.
+        var fullWidth = Math.Max(source.DownsampledWidth, source.DeltaLevels.Select(l => l.Width).DefaultIfEmpty(0).Max());
+        var fullHeight = Math.Max(source.DownsampledHeight, source.DeltaLevels.Select(l => l.Height).DefaultIfEmpty(0).Max());
         double[] Sample(int width, int height)
         {
-            var values = new double[checked(width * height)];
+            var values = Rent(checked(width * height));
+            var xs = Rent(Math.Max(0, width));
+            for (var x = 0; x < width; x++) xs[x] = TexelCoordinate(source.Key.X, source.Key.Lod, width, x, fullWidth);
             for (var y = 0; y < height; y++)
-            for (var x = 0; x < width; x++)
-                values[y * width + x] = TerrainHeightEncoding.WorldHeightToNormalPageRaw(sampleWorldHeight(
-                    TexelCoordinate(source.Key.X, source.Key.Lod, width, x),
-                    TexelCoordinate(source.Key.Y, source.Key.Lod, height, y)));
+            {
+                var z = TexelCoordinate(source.Key.Y, source.Key.Lod, height, y, fullHeight);
+                for (var x = 0; x < width; x++)
+                    values[y * width + x] = TerrainHeightEncoding.WorldHeightToNormalPageRaw(sampleWorldHeight(xs[x], z));
+            }
             return values;
         }
         var parent = Sample(source.DownsampledWidth, source.DownsampledHeight);
-        result.DownsampledSamples = parent.Select(v => (int)v).ToArray();
+        result.DownsampledSamples = new int[checked(source.DownsampledWidth * source.DownsampledHeight)];
+        for (int i = 0; i < result.DownsampledSamples.Length; i++) result.DownsampledSamples[i] = (int)parent[i];
         var parentWidth = source.DownsampledWidth;
         var parentHeight = source.DownsampledHeight;
         // Files store finest first. Reconstruction runs in the opposite direction.
@@ -41,7 +59,8 @@ public static class NormalMapHeightEncoder
         {
             if (level.Width <= 0 || level.Height <= 0) continue;
             var desired = Sample(level.Width, level.Height);
-            var predicted = new double[desired.Length];
+            var length = checked(level.Width * level.Height);
+            var predicted = Rent(length);
             var half = 1 << (Math.Clamp(level.QuantBits ?? 8, 1, 16) - 1);
             double positive = 0, negative = 0;
             for (var y = 0; y < level.Height; y++)
@@ -60,8 +79,8 @@ public static class NormalMapHeightEncoder
             while (scale > 1 && (positive * scale * half / 65535d > half - 1 || negative * scale * half / 65535d > half))
                 scale = Math.Max(1, scale / 2);
             level.ScaleFactor = scale;
-            level.QuantizedSamples = new int[desired.Length];
-            for (var i = 0; i < desired.Length; i++)
+            level.QuantizedSamples = new int[length];
+            for (var i = 0; i < length; i++)
             {
                 var q = Math.Clamp((int)Math.Round((desired[i] - predicted[i]) * scale * half / 65535d, MidpointRounding.AwayFromZero), -half, half - 1);
                 level.QuantizedSamples[i] = half + q;
@@ -70,16 +89,43 @@ public static class NormalMapHeightEncoder
             parent = predicted; parentWidth = level.Width; parentHeight = level.Height;
         }
         return result;
+        }
+        finally
+        {
+            // Only scratch arrays are pooled; exported samples always own their arrays.
+            foreach (var buffer in scratch) ArrayPool<double>.Shared.Return(buffer);
+        }
     }
 
     public static double SampleParent(double[] values, int width, int height, double x, double y)
     {
         if (width <= 0 || height <= 0 || values.Length == 0) return 32768;
-        x = Math.Clamp(x, 0, width - 1); y = Math.Clamp(y, 0, height - 1);
+        // terrain_compress.fx: csSynthesize uses a=-0.5 cubic Hermite,
+        // with mirror-once addressing (not clamp or bilinear interpolation).
         var x0 = (int)Math.Floor(x); var y0 = (int)Math.Floor(y);
-        var x1 = Math.Min(x0 + 1, width - 1); var y1 = Math.Min(y0 + 1, height - 1);
-        var a = values[y0 * width + x0] * (1 - (x - x0)) + values[y0 * width + x1] * (x - x0);
-        var b = values[y1 * width + x0] * (1 - (x - x0)) + values[y1 * width + x1] * (x - x0);
-        return a * (1 - (y - y0)) + b * (y - y0);
+        double result = 0, weightSum = 0;
+        for (var j = y0 - 1; j <= y0 + 2; j++)
+        {
+            var wy = HermiteWeight(Math.Abs(j - y));
+            var row = Mirror(j, height) * width;
+            for (var i = x0 - 1; i <= x0 + 2; i++)
+            {
+                var weight = HermiteWeight(Math.Abs(i - x)) * wy;
+                result += values[row + Mirror(i, width)] * weight;
+                weightSum += weight;
+            }
+        }
+        return weightSum > 0 ? result / weightSum : 0;
     }
+
+    private static int Mirror(int value, int size)
+    {
+        value = Math.Abs(value);
+        if (value >= size) value = 2 * (size - 1) - value;
+        return Math.Clamp(value, 0, size - 1);
+    }
+
+    private static double HermiteWeight(double x)
+        => x <= 1 ? 1.5 * x * x * x - 2.5 * x * x + 1
+            : x < 2 ? -.5 * x * x * x + 2.5 * x * x - 4 * x + 2 : 0;
 }

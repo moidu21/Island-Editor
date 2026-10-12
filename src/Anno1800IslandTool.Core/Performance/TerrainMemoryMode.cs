@@ -1,4 +1,4 @@
-﻿namespace Anno1800IslandTool.Core.Performance;
+namespace Anno1800IslandTool.Core.Performance;
 
 /// <summary>
 /// Choix mémoire/performance pour les grosses îles.

@@ -1,4 +1,4 @@
-﻿namespace Anno1800IslandTool.Core.Performance;
+namespace Anno1800IslandTool.Core.Performance;
 
 /// <summary>
 /// Paramètres globaux d'exécution pour les traitements terrain lourds.
@@ -43,7 +43,7 @@ public static class TerrainComputeScheduler
     }
 
     public static string DescribeCpuBackend()
-        => $"CPU parallèle {MaxDegreeOfParallelism}/{LogicalProcessorCount} threads logiques";
+        => Anno1800IslandTool.Core.Localization.TextCatalog.F($"CPU parallèle {MaxDegreeOfParallelism}/{LogicalProcessorCount} threads logiques");
 
     private static int ResolveMaxDegreeOfParallelism()
     {

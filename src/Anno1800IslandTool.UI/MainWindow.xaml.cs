@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.IO;
@@ -54,13 +54,13 @@ public partial class MainWindow : Window
         InitializeComponent();
         var debugVisibility = debugMode ? Visibility.Visible : Visibility.Collapsed;
         foreach (var element in new UIElement[] { FilesTab, TerrainPagesTab, MaterialsTab,
-                     SaveReportButton, VegetationTintButton, LanguageSelectorLabel, LanguageSelectorComboBox,
+                     RevalidateButton, SaveReportButton, VegetationTintButton, LanguageSelectorLabel, LanguageSelectorComboBox,
                      ValidationTab, AdvancedGameplayTab, SelectionTab, TextReportTab, Map2DEditTab })
             element.Visibility = debugVisibility;
         // A collapsed tab can still remain selected in WPF: select a visible one explicitly.
         ProjectTabs.SelectedItem = ProjectTabs.Items.OfType<TabItem>()
             .First(tab => tab.Visibility == Visibility.Visible);
-        Closing += (_, e) => e.Cancel = new QuitConfirmationWindow { Owner = this }.ShowDialog() != true;
+        Closing += (_, e) => e.Cancel = BusyWork.IsBusy || new QuitConfirmationWindow { Owner = this }.ShowDialog() != true;
         _updatingLanguageSelector = true;
         UiLocalizationManager.FillLanguageCombo(LanguageSelectorComboBox);
         _updatingLanguageSelector = false;
@@ -78,6 +78,16 @@ public partial class MainWindow : Window
         RawTextSelector.SelectedIndex = 0;
         UpdateMapModeText();
         Loaded += (_, _) => UiLocalizationManager.ApplyTo(this);
+        IslandPreviewImages.Refreshed += OnIslandPreviewRefreshed;
+        Closed += (_, _) => IslandPreviewImages.Refreshed -= OnIslandPreviewRefreshed;
+    }
+
+    private void OnIslandPreviewRefreshed(IslandProject project)
+    {
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (ReferenceEquals(project, _currentProject)) Refresh2DViews(project);
+        });
     }
 
     private void LanguageSelectorComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -131,7 +141,7 @@ public partial class MainWindow : Window
                     Mouse.OverrideCursor = Cursors.Wait;
                 }
             }
-            _currentProject = await Task.Run(() => _importer.Import(archivePath, importOptions));
+            _currentProject = BusyWork.Run(this, () => _importer.Import(archivePath, importOptions));
 
             RefreshProjectDisplay();
         }
@@ -157,7 +167,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _currentProject.ValidationReport = _validator.Validate(_currentProject);
+        _currentProject.ValidationReport = BusyWork.Run(this, () => _validator.Validate(_currentProject));
         RefreshValidationDisplay(_currentProject.ValidationReport);
         SummaryTextBox.Text = IslandProjectSummary.Build(_currentProject);
     }
@@ -185,7 +195,8 @@ public partial class MainWindow : Window
 
         try
         {
-            var report = _exporter.Export(_currentProject, dialog.FileName, new ExportOptions());
+            var destination = dialog.FileName;
+            var report = BusyWork.Run(this, () => _exporter.Export(_currentProject, destination, new ExportOptions()));
             MessageBox.Show(this, report.Summary, UiLocalizationManager.T("Export terminé"), MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
@@ -204,9 +215,9 @@ public partial class MainWindow : Window
 
         var dialog = new SaveFileDialog
         {
-            Filter = "Fichiers texte (*.txt)|*.txt",
+            Filter = Anno1800IslandTool.Core.Localization.TextCatalog.T("Fichiers texte (*.txt)|*.txt"),
             FileName = IOPath.GetFileNameWithoutExtension(_currentProject.Metadata.SourceArchivePath) + "_report.txt",
-            Title = "Sauver le résumé et le rapport de validation"
+            Title = Anno1800IslandTool.Core.Localization.TextCatalog.T("Sauver le résumé et le rapport de validation")
         };
 
         if (dialog.ShowDialog(this) != true)
@@ -230,7 +241,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _editor.RegenerateAllTexts(_currentProject);
+        BusyWork.Run(this, () => _editor.RegenerateAllTexts(_currentProject));
         RefreshProjectDisplay();
         MessageBox.Show(this, UiLocalizationManager.T("Les textes pivots ont été régénérés depuis le modèle."), UiLocalizationManager.T("Régénération"), MessageBoxButton.OK, MessageBoxImage.Information);
     }
@@ -255,7 +266,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Vue 2D", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.Message, Anno1800IslandTool.Core.Localization.TextCatalog.T("Vue 2D"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -264,7 +275,7 @@ public partial class MainWindow : Window
     {
         if (_currentProject is null)
         {
-            MessageBox.Show(this, "Aucun projet chargé.", "Terrain 3D", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun projet chargé."), Anno1800IslandTool.Core.Localization.TextCatalog.T("Terrain 3D"), MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -276,7 +287,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.ToString(), "Terrain 3D", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.ToString(), Anno1800IslandTool.Core.Localization.TextCatalog.T("Terrain 3D"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -284,7 +295,7 @@ public partial class MainWindow : Window
     {
         if (_currentProject is null)
         {
-            MessageBox.Show(this, "Aucun projet chargé.", "Teinte végétation", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun projet chargé."), Anno1800IslandTool.Core.Localization.TextCatalog.T("Teinte végétation"), MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -299,7 +310,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.ToString(), "Teinte végétation", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.ToString(), Anno1800IslandTool.Core.Localization.TextCatalog.T("Teinte végétation"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -308,7 +319,7 @@ public partial class MainWindow : Window
     {
         if (_currentProject is null)
         {
-            MessageBox.Show(this, "Aucun projet chargé.", "Material map", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun projet chargé."), "Material map", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -316,7 +327,7 @@ public partial class MainWindow : Window
             _currentProject.Rd3d.MaterialMap.Height <= 0 ||
             !_currentProject.Rd3d.MaterialMap.HasAnyData)
         {
-            MessageBox.Show(this, "Aucune MaterialIDs2 / MaterialAlphas2 exploitable n'a été trouvée dans le rd3d.xml.", "Material map", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune MaterialIDs2 / MaterialAlphas2 exploitable n'a été trouvée dans le rd3d.xml."), "Material map", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -358,13 +369,14 @@ public partial class MainWindow : Window
         try
         {
             var edits = ReadMetadataEditorValues();
-            _editor.ApplyMetadataEdits(_currentProject, edits, SyncDerivedCheckBox.IsChecked == true);
+            var syncDerived = SyncDerivedCheckBox.IsChecked == true;
+            BusyWork.Run(this, () => _editor.ApplyMetadataEdits(_currentProject, edits, syncDerived));
             RefreshProjectDisplay();
-            MessageBox.Show(this, "Métadonnées appliquées au projet.", "Édition", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Métadonnées appliquées au projet."), Anno1800IslandTool.Core.Localization.TextCatalog.T("Édition"), MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Édition des métadonnées", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.Message, Anno1800IslandTool.Core.Localization.TextCatalog.T("Édition des métadonnées"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -410,9 +422,9 @@ public partial class MainWindow : Window
         try
         {
             var slots = _slotRows.Select(r => r.ToDefinition()).ToList();
-            _editor.ReplaceSlotObjects(_currentProject, slots);
+            BusyWork.Run(this, () => _editor.ReplaceSlotObjects(_currentProject, slots));
             RefreshProjectDisplay();
-            MessageBox.Show(this, "Slots appliqués au projet.", "Slots", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Slots appliqués au projet."), "Slots", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
@@ -445,7 +457,7 @@ public partial class MainWindow : Window
     private void ClearPropInstancesButton_Click(object sender, RoutedEventArgs e)
     {
         _propInstanceRows.Clear();
-        SelectionDetailsTextBox.Text = "Instances PropGrid vidées dans l'UI. Clique sur 'Appliquer PropGrid' pour écrire la suppression dans rd3d.xml.";
+        SelectionDetailsTextBox.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Instances PropGrid vidées dans l'UI. Clique sur 'Appliquer PropGrid' pour écrire la suppression dans rd3d.xml.");
     }
 
     private void ApplyPropGridButton_Click(object sender, RoutedEventArgs e)
@@ -459,9 +471,9 @@ public partial class MainWindow : Window
         {
             var fileNames = _propFileNameRows.Select(r => r.Value).Where(v => !string.IsNullOrWhiteSpace(v)).ToList();
             var instances = _propInstanceRows.Select(r => r.RawXml).Where(v => !string.IsNullOrWhiteSpace(v)).ToList();
-            _editor.ReplacePropGrid(_currentProject, fileNames, instances);
+            BusyWork.Run(this, () => _editor.ReplacePropGrid(_currentProject, fileNames, instances));
             RefreshProjectDisplay();
-            MessageBox.Show(this, "PropGrid appliqué au projet. Les <None> supprimés ne seront pas réécrits.", "PropGrid RD3D", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("PropGrid appliqué au projet. Les <None> supprimés ne seront pas réécrits."), "PropGrid RD3D", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
@@ -490,7 +502,7 @@ public partial class MainWindow : Window
         var target = FindDefaultGroundObjectTarget(_currentProject);
         if (target is null)
         {
-            MessageBox.Show(this, "Aucune page mesh avec cluster n'est chargée. Réimporte l'île avec 'Lire le détail des pages'.", "GroundObjects", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune page mesh avec cluster n'est chargée. Réimporte l'île avec 'Lire le détail des pages'."), "GroundObjects", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -545,7 +557,7 @@ public partial class MainWindow : Window
     {
         _groundObjectRows.Clear();
         Refresh2DOverlayOnly();
-        SelectionDetailsTextBox.Text = "Tous les GroundObjects ont été retirés de l'UI. Clique sur 'Appliquer GroundObjects' pour générer les pages mesh vidées.";
+        SelectionDetailsTextBox.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Tous les GroundObjects ont été retirés de l'UI. Clique sur 'Appliquer GroundObjects' pour générer les pages mesh vidées.");
     }
 
     private void ApplyGroundObjectsButton_Click(object sender, RoutedEventArgs e)
@@ -558,9 +570,9 @@ public partial class MainWindow : Window
         try
         {
             var placements = _groundObjectRows.Select(r => r.ToPlacement(_currentProject)).ToList();
-            _editor.ReplaceGroundObjects(_currentProject, placements);
+            BusyWork.Run(this, () => _editor.ReplaceGroundObjects(_currentProject, placements));
             RefreshProjectDisplay();
-            MessageBox.Show(this, $"GroundObjects appliqués : {placements.Count} objet(s). Les pages mesh affectées seront remplacées dans le ZIP exporté.", "GroundObjects", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.F($"GroundObjects appliqués : {placements.Count} objet(s). Les pages mesh affectées seront remplacées dans le ZIP exporté."), "GroundObjects", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
@@ -627,13 +639,13 @@ public partial class MainWindow : Window
 
             var areas = _areaRows.Select(a => a.ToDefinition()).ToList();
             var spawns = _spawnRows.Select(s => s.ToDefinition()).ToList();
-            _editor.ReplaceZones(_currentProject, playableArea, areas, spawns);
+            BusyWork.Run(this, () => _editor.ReplaceZones(_currentProject, playableArea, areas, spawns));
             RefreshProjectDisplay();
-            MessageBox.Show(this, "Zones appliquées au projet.", "Zones", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Zones appliquées au projet."), Anno1800IslandTool.Core.Localization.TextCatalog.T("Zones"), MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Zones", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.Message, Anno1800IslandTool.Core.Localization.TextCatalog.T("Zones"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -651,14 +663,19 @@ public partial class MainWindow : Window
             var areas = _areaRows.Select(a => a.ToDefinition()).ToList();
             var spawns = _spawnRows.Select(s => s.ToDefinition()).ToList();
 
-            _editor.ReplaceSlotObjects(_currentProject, slots);
-            _editor.ReplaceZones(_currentProject, playableArea, areas, spawns);
+            BusyWork.Run(this, () => {
+
+                _editor.ReplaceSlotObjects(_currentProject, slots);
+
+                _editor.ReplaceZones(_currentProject, playableArea, areas, spawns);
+
+            });
             RefreshProjectDisplay();
-            MessageBox.Show(this, "Les modifications faites depuis la vue 2D ont été appliquées au projet.", "Vue 2D", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Les modifications faites depuis la vue 2D ont été appliquées au projet."), Anno1800IslandTool.Core.Localization.TextCatalog.T("Vue 2D"), MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Vue 2D", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.Message, Anno1800IslandTool.Core.Localization.TextCatalog.T("Vue 2D"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -670,15 +687,16 @@ public partial class MainWindow : Window
         }
 
         var section = RawTextSelector.SelectedItem?.ToString() ?? string.Empty;
-        var result = _editor.ApplyRawText(_currentProject, section, RawTextBox.Text ?? string.Empty);
+        var text = RawTextBox.Text ?? string.Empty;
+        var result = BusyWork.Run(this, () => _editor.ApplyRawText(_currentProject, section, text));
         if (!result.Succeeded)
         {
-            MessageBox.Show(this, result.Message, "Texte brut", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, result.Message, Anno1800IslandTool.Core.Localization.TextCatalog.T("Texte brut"), MessageBoxButton.OK, MessageBoxImage.Error);
             return;
         }
 
         RefreshProjectDisplay();
-        MessageBox.Show(this, result.Message, "Texte brut", MessageBoxButton.OK, MessageBoxImage.Information);
+        MessageBox.Show(this, result.Message, Anno1800IslandTool.Core.Localization.TextCatalog.T("Texte brut"), MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private void ReloadRawTextButton_Click(object sender, RoutedEventArgs e)
@@ -873,6 +891,16 @@ public partial class MainWindow : Window
         }
     }
 
+    private void MapSizeTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        // Programmatic population restores the saved grid immediately afterwards.
+        if (ActiveMapGridXTextBox is null || ActiveMapGridYTextBox is null) return;
+        if (!int.TryParse(MapSizeTextBox.Text, out var size) || size < 8 || size > 2040 || size % 8 != 0) return;
+        var side = (size / 8).ToString(CultureInfo.InvariantCulture);
+        ActiveMapGridXTextBox.Text = side;
+        ActiveMapGridYTextBox.Text = side;
+    }
+
     private MetadataEditModel ReadMetadataEditorValues()
     {
         return new MetadataEditModel
@@ -991,7 +1019,7 @@ public partial class MainWindow : Window
         RawTextSelector_SelectionChanged(this, new SelectionChangedEventArgs(ComboBox.SelectionChangedEvent, Array.Empty<object>(), Array.Empty<object>()));
         PopulateEditorsFromProject(_currentProject);
         RefreshGameDataObjectsEditor();
-        SelectionDetailsTextBox.Text = "Sélectionne un fichier, une page, un slot ou un spawn pour voir plus de détails.";
+        SelectionDetailsTextBox.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Sélectionne un fichier, une page, un slot ou un spawn pour voir plus de détails.");
 
         var previewCandidates = _currentProject.SourceFiles
             .Where(f => f.Kind == FileKind.PreviewImage)
@@ -1024,7 +1052,7 @@ public partial class MainWindow : Window
         HeightMapImage.Source = _currentHeightMapBitmap;
 
         var selectedPreview = PreviewSelectorComboBox.SelectedItem as string;
-        var candidates = PreviewSelectorComboBox.Items.Cast<object>().Select(i => i?.ToString() ?? string.Empty).Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
+        var candidates = PreviewSelectorComboBox.Items.Cast<object>().Select(i => i?.ToString() ?? string.Empty).Where(s => !string.IsNullOrWhiteSpace(s)).Concat(project.GeneratedBinaryFileReplacements.Keys.Where(p => p.EndsWith("mapimage.png", StringComparison.OrdinalIgnoreCase))).ToList();
         _effectivePreviewPath = ResolvePreferredPreviewPath(project, selectedPreview is null ? candidates : new[] { selectedPreview }.Concat(candidates).ToList());
         _currentPreviewBitmap = LoadPreviewBitmap(project, _effectivePreviewPath);
 
@@ -1174,7 +1202,7 @@ public partial class MainWindow : Window
         var nearest = candidates.FirstOrDefault();
         if (nearest is null || nearest.Distance > 18)
         {
-            SelectionDetailsTextBox.Text = "Aucun slot/spawn/GroundObject proche du clic. Choisis un mode de déplacement ou clique plus près d'un point.";
+            SelectionDetailsTextBox.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun slot/spawn/GroundObject proche du clic. Choisis un mode de déplacement ou clique plus près d'un point.");
             return;
         }
 
@@ -1182,19 +1210,19 @@ public partial class MainWindow : Window
         {
             SlotsDataGrid.SelectedItem = slot;
             SlotsDataGrid.ScrollIntoView(slot);
-            SelectionDetailsTextBox.Text = BuildSlotSelectionDetails(slot) + Environment.NewLine + Environment.NewLine + "Sélection faite depuis la vue 2D.";
+            SelectionDetailsTextBox.Text = BuildSlotSelectionDetails(slot) + Environment.NewLine + Environment.NewLine + Anno1800IslandTool.Core.Localization.TextCatalog.T("Sélection faite depuis la vue 2D.");
         }
         else if (nearest.Kind == "spawn" && nearest.Row is EditableSpawnPointRow spawn)
         {
             SpawnsDataGrid.SelectedItem = spawn;
             SpawnsDataGrid.ScrollIntoView(spawn);
-            SelectionDetailsTextBox.Text = BuildSpawnSelectionDetails(spawn) + Environment.NewLine + Environment.NewLine + "Sélection faite depuis la vue 2D.";
+            SelectionDetailsTextBox.Text = BuildSpawnSelectionDetails(spawn) + Environment.NewLine + Environment.NewLine + Anno1800IslandTool.Core.Localization.TextCatalog.T("Sélection faite depuis la vue 2D.");
         }
         else if (nearest.Kind == "ground" && nearest.Row is EditableGroundObjectRow ground)
         {
             GroundObjectsDataGrid.SelectedItem = ground;
             GroundObjectsDataGrid.ScrollIntoView(ground);
-            SelectionDetailsTextBox.Text = BuildGroundObjectSelectionDetails(ground) + Environment.NewLine + Environment.NewLine + "Sélection faite depuis la vue 2D.";
+            SelectionDetailsTextBox.Text = BuildGroundObjectSelectionDetails(ground) + Environment.NewLine + Environment.NewLine + Anno1800IslandTool.Core.Localization.TextCatalog.T("Sélection faite depuis la vue 2D.");
         }
     }
 
@@ -1202,26 +1230,26 @@ public partial class MainWindow : Window
     {
         if (SlotsDataGrid.SelectedItem is not EditableSlotObjectRow row)
         {
-            MessageBox.Show(this, "Sélectionne d'abord un slot dans l'onglet 'Slots (édition)'.", "Déplacer slot", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Sélectionne d'abord un slot dans l'onglet 'Slots (édition)'."), Anno1800IslandTool.Core.Localization.TextCatalog.T("Déplacer slot"), MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
         row.PosXText = mapPoint.X.ToString("0.###", CultureInfo.InvariantCulture);
         row.PosZText = mapPoint.Y.ToString("0.###", CultureInfo.InvariantCulture);
-        SelectionDetailsTextBox.Text = BuildSlotSelectionDetails(row) + Environment.NewLine + Environment.NewLine + "Position mise à jour depuis la vue 2D. Clique 'Appliquer vue 2D' ou 'Appliquer slots' pour écrire dans le projet.";
+        SelectionDetailsTextBox.Text = BuildSlotSelectionDetails(row) + Environment.NewLine + Environment.NewLine + Anno1800IslandTool.Core.Localization.TextCatalog.T("Position mise à jour depuis la vue 2D. Clique 'Appliquer vue 2D' ou 'Appliquer slots' pour écrire dans le projet.");
     }
 
     private void MoveSelectedSpawn(Float2 mapPoint)
     {
         if (SpawnsDataGrid.SelectedItem is not EditableSpawnPointRow row)
         {
-            MessageBox.Show(this, "Sélectionne d'abord un spawn dans l'onglet 'Zones (édition)'.", "Déplacer spawn", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Sélectionne d'abord un spawn dans l'onglet 'Zones (édition)'."), Anno1800IslandTool.Core.Localization.TextCatalog.T("Déplacer spawn"), MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
         row.PosXText = mapPoint.X.ToString("0.###", CultureInfo.InvariantCulture);
         row.PosZText = mapPoint.Y.ToString("0.###", CultureInfo.InvariantCulture);
-        SelectionDetailsTextBox.Text = BuildSpawnSelectionDetails(row) + Environment.NewLine + Environment.NewLine + "Position mise à jour depuis la vue 2D. Clique 'Appliquer vue 2D' ou 'Appliquer zones' pour écrire dans le projet.";
+        SelectionDetailsTextBox.Text = BuildSpawnSelectionDetails(row) + Environment.NewLine + Environment.NewLine + Anno1800IslandTool.Core.Localization.TextCatalog.T("Position mise à jour depuis la vue 2D. Clique 'Appliquer vue 2D' ou 'Appliquer zones' pour écrire dans le projet.");
     }
 
     private void AddSlotAtPoint(Float2 mapPoint)
@@ -1238,7 +1266,7 @@ public partial class MainWindow : Window
         _slotRows.Add(newRow);
         SlotsDataGrid.SelectedItem = newRow;
         SlotsDataGrid.ScrollIntoView(newRow);
-        SelectionDetailsTextBox.Text = BuildSlotSelectionDetails(newRow) + Environment.NewLine + Environment.NewLine + "Nouveau slot ajouté dans la grille. Renseigne ObjectId / Guid si nécessaire, puis applique les modifications.";
+        SelectionDetailsTextBox.Text = BuildSlotSelectionDetails(newRow) + Environment.NewLine + Environment.NewLine + Anno1800IslandTool.Core.Localization.TextCatalog.T("Nouveau slot ajouté dans la grille. Renseigne ObjectId / Guid si nécessaire, puis applique les modifications.");
     }
 
     private void AddSpawnAtPoint(Float2 mapPoint)
@@ -1254,20 +1282,20 @@ public partial class MainWindow : Window
         _spawnRows.Add(newRow);
         SpawnsDataGrid.SelectedItem = newRow;
         SpawnsDataGrid.ScrollIntoView(newRow);
-        SelectionDetailsTextBox.Text = BuildSpawnSelectionDetails(newRow) + Environment.NewLine + Environment.NewLine + "Nouveau spawn ajouté dans la grille. Renseigne le tag si besoin, puis applique les modifications.";
+        SelectionDetailsTextBox.Text = BuildSpawnSelectionDetails(newRow) + Environment.NewLine + Environment.NewLine + Anno1800IslandTool.Core.Localization.TextCatalog.T("Nouveau spawn ajouté dans la grille. Renseigne le tag si besoin, puis applique les modifications.");
     }
 
     private void MoveSelectedGroundObject(Float2 mapPoint)
     {
         if (GroundObjectsDataGrid.SelectedItem is not EditableGroundObjectRow row)
         {
-            MessageBox.Show(this, "Sélectionne d'abord un GroundObject dans l'onglet 'GroundObjects / végétation'.", "Déplacer GroundObject", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Sélectionne d'abord un GroundObject dans l'onglet 'GroundObjects / végétation'."), Anno1800IslandTool.Core.Localization.TextCatalog.T("Déplacer GroundObject"), MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
         row.PosXText = mapPoint.X.ToString("0.###", CultureInfo.InvariantCulture);
         row.PosZText = mapPoint.Y.ToString("0.###", CultureInfo.InvariantCulture);
-        SelectionDetailsTextBox.Text = BuildGroundObjectSelectionDetails(row) + Environment.NewLine + Environment.NewLine + "Position mise à jour depuis la vue 2D. Clique 'Appliquer GroundObjects' pour écrire dans les pages mesh.";
+        SelectionDetailsTextBox.Text = BuildGroundObjectSelectionDetails(row) + Environment.NewLine + Environment.NewLine + Anno1800IslandTool.Core.Localization.TextCatalog.T("Position mise à jour depuis la vue 2D. Clique 'Appliquer GroundObjects' pour écrire dans les pages mesh.");
     }
 
     private void AddGroundObjectAtPoint(Float2 mapPoint)
@@ -1280,7 +1308,7 @@ public partial class MainWindow : Window
         var target = FindDefaultGroundObjectTarget(_currentProject);
         if (target is null)
         {
-            MessageBox.Show(this, "Aucune page mesh avec cluster n'est chargée. Réimporte l'île avec 'Lire le détail des pages'.", "Ajouter GroundObject", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune page mesh avec cluster n'est chargée. Réimporte l'île avec 'Lire le détail des pages'."), Anno1800IslandTool.Core.Localization.TextCatalog.T("Ajouter GroundObject"), MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -1303,7 +1331,7 @@ public partial class MainWindow : Window
         _groundObjectRows.Add(newRow);
         GroundObjectsDataGrid.SelectedItem = newRow;
         GroundObjectsDataGrid.ScrollIntoView(newRow);
-        SelectionDetailsTextBox.Text = BuildGroundObjectSelectionDetails(newRow) + Environment.NewLine + Environment.NewLine + "Nouveau GroundObject ajouté depuis la vue 2D. Renseigne FileName/Kind si nécessaire, puis applique les modifications.";
+        SelectionDetailsTextBox.Text = BuildGroundObjectSelectionDetails(newRow) + Environment.NewLine + Environment.NewLine + Anno1800IslandTool.Core.Localization.TextCatalog.T("Nouveau GroundObject ajouté depuis la vue 2D. Renseigne FileName/Kind si nécessaire, puis applique les modifications.");
     }
 
 
@@ -1323,7 +1351,7 @@ public partial class MainWindow : Window
             PlayableAreaBottomTextBox.Text = y.ToString(CultureInfo.InvariantCulture);
         }
 
-        SelectionDetailsTextBox.Text = $"PlayableArea mise à jour depuis la vue 2D : [{PlayableAreaLeftTextBox.Text}, {PlayableAreaTopTextBox.Text}, {PlayableAreaRightTextBox.Text}, {PlayableAreaBottomTextBox.Text}]\n\nClique 'Appliquer vue 2D' ou 'Appliquer zones' pour écrire dans le projet.";
+        SelectionDetailsTextBox.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"PlayableArea mise à jour depuis la vue 2D : [{PlayableAreaLeftTextBox.Text}, {PlayableAreaTopTextBox.Text}, {PlayableAreaRightTextBox.Text}, {PlayableAreaBottomTextBox.Text}]\n\nClique 'Appliquer vue 2D' ou 'Appliquer zones' pour écrire dans le projet.");
     }
 
     private void SetMapEditMode(MapEditMode mode)
@@ -1336,34 +1364,34 @@ public partial class MainWindow : Window
     {
         MapModeTextBlock.Text = _mapEditMode switch
         {
-            MapEditMode.Select => "Mode: Sélection",
-            MapEditMode.MoveSlot => "Mode: Déplacer slot sélectionné",
-            MapEditMode.MoveSpawn => "Mode: Déplacer spawn sélectionné",
-            MapEditMode.AddSlot => "Mode: Ajouter un slot au clic",
-            MapEditMode.AddSpawn => "Mode: Ajouter un spawn au clic",
-            MapEditMode.MoveGroundObject => "Mode: Déplacer GroundObject sélectionné",
-            MapEditMode.AddGroundObject => "Mode: Ajouter un GroundObject au clic",
-            MapEditMode.SetPlayableTopLeft => "Mode: Définir le coin haut-gauche de la zone",
-            MapEditMode.SetPlayableBottomRight => "Mode: Définir le coin bas-droit de la zone",
-            _ => "Mode: Sélection"
+            MapEditMode.Select => Anno1800IslandTool.Core.Localization.TextCatalog.T("Mode: Sélection"),
+            MapEditMode.MoveSlot => Anno1800IslandTool.Core.Localization.TextCatalog.T("Mode: Déplacer slot sélectionné"),
+            MapEditMode.MoveSpawn => Anno1800IslandTool.Core.Localization.TextCatalog.T("Mode: Déplacer spawn sélectionné"),
+            MapEditMode.AddSlot => Anno1800IslandTool.Core.Localization.TextCatalog.T("Mode: Ajouter un slot au clic"),
+            MapEditMode.AddSpawn => Anno1800IslandTool.Core.Localization.TextCatalog.T("Mode: Ajouter un spawn au clic"),
+            MapEditMode.MoveGroundObject => Anno1800IslandTool.Core.Localization.TextCatalog.T("Mode: Déplacer GroundObject sélectionné"),
+            MapEditMode.AddGroundObject => Anno1800IslandTool.Core.Localization.TextCatalog.T("Mode: Ajouter un GroundObject au clic"),
+            MapEditMode.SetPlayableTopLeft => Anno1800IslandTool.Core.Localization.TextCatalog.T("Mode: Définir le coin haut-gauche de la zone"),
+            MapEditMode.SetPlayableBottomRight => Anno1800IslandTool.Core.Localization.TextCatalog.T("Mode: Définir le coin bas-droit de la zone"),
+            _ => Anno1800IslandTool.Core.Localization.TextCatalog.T("Mode: Sélection")
         };
     }
 
     private void Update2DStats(IslandProject project, BitmapSource? background)
     {
-        var previewText = string.IsNullOrWhiteSpace(_effectivePreviewPath) ? "(aucune image chargeable, fallback coarse heightmap)" : _effectivePreviewPath;
-        var backgroundText = background is null ? "aucun" : $"{background.PixelWidth}x{background.PixelHeight}";
-        var selectedSlot = SlotsDataGrid.SelectedItem is EditableSlotObjectRow slot ? $"slot #{_slotRows.IndexOf(slot)}" : "aucun";
-                var selectedSpawn = SpawnsDataGrid.SelectedItem is EditableSpawnPointRow spawn ? $"spawn #{_spawnRows.IndexOf(spawn)}" : "aucun";
-                var selectedGround = GroundObjectsDataGrid.SelectedItem is EditableGroundObjectRow ground ? $"ground #{_groundObjectRows.IndexOf(ground)}" : "aucun";
+        var previewText = string.IsNullOrWhiteSpace(_effectivePreviewPath) ? Anno1800IslandTool.Core.Localization.TextCatalog.T("(aucune image chargeable, fallback coarse heightmap)") : _effectivePreviewPath;
+        var backgroundText = background is null ? Anno1800IslandTool.Core.Localization.TextCatalog.T("aucun") : $"{background.PixelWidth}x{background.PixelHeight}";
+        var selectedSlot = SlotsDataGrid.SelectedItem is EditableSlotObjectRow slot ? $"slot #{_slotRows.IndexOf(slot)}" : Anno1800IslandTool.Core.Localization.TextCatalog.T("aucun");
+                var selectedSpawn = SpawnsDataGrid.SelectedItem is EditableSpawnPointRow spawn ? $"spawn #{_spawnRows.IndexOf(spawn)}" : Anno1800IslandTool.Core.Localization.TextCatalog.T("aucun");
+                var selectedGround = GroundObjectsDataGrid.SelectedItem is EditableGroundObjectRow ground ? $"ground #{_groundObjectRows.IndexOf(ground)}" : Anno1800IslandTool.Core.Localization.TextCatalog.T("aucun");
         ImageStatsTextBox.Text =
             $"HeightMap coarse: {project.GameData.TerrainHeightMap.Width} x {project.GameData.TerrainHeightMap.Height}\n" +
-            $"Samples lus: {project.GameData.TerrainHeightMap.Samples.Length}\n" +
-            $"Preview effective: {previewText}\n" +
-            $"Canvas / fond: {backgroundText}\n" +
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"Samples lus: {project.GameData.TerrainHeightMap.Samples.Length}\n") +
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"Preview effective: {previewText}\n") +
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"Canvas / fond: {backgroundText}\n") +
             $"PlayableArea: {ReadPlayableAreaFromEditors()}\n" +
-            $"Slots visibles: {_slotRows.Count} | Spawns visibles: {_spawnRows.Count} | GroundObjects visibles: {_groundObjectRows.Count}\n" +
-            $"Sélection 2D: {selectedSlot}, {selectedSpawn}, {selectedGround}";
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"Slots visibles: {_slotRows.Count} | Spawns visibles: {_spawnRows.Count} | GroundObjects visibles: {_groundObjectRows.Count}\n") +
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"Sélection 2D: {selectedSlot}, {selectedSpawn}, {selectedGround}");
     }
 
     private RectI ReadPlayableAreaFromEditors()
@@ -1415,23 +1443,7 @@ public partial class MainWindow : Window
 
 
     private static string? ResolvePreferredPreviewPath(IslandProject project, IEnumerable<string> candidates)
-    {
-        foreach (var path in candidates.Where(p => !string.IsNullOrWhiteSpace(p)).Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            var extension = IOPath.GetExtension(path).ToLowerInvariant();
-            if (extension is not (".png" or ".jpg" or ".jpeg" or ".bmp"))
-            {
-                continue;
-            }
-
-            if (LoadPreviewBitmap(project, path) is not null)
-            {
-                return path;
-            }
-        }
-
-        return null;
-    }
+        => UiProjectHelpers.ResolvePreferredPreviewPath(project, candidates);
 
     private static BitmapSource? LoadPreviewBitmap(IslandProject project, string? relativePath)
     {
@@ -1520,28 +1532,28 @@ public partial class MainWindow : Window
         var vertexCount = page.Clusters.Sum(c => c.Vertices.Count);
         var indexCount = page.Clusters.Sum(c => c.Indices.Count);
         var groundObjects = page.Clusters.Sum(c => c.GroundObjects.Count);
-        return clusterCount == 0 && vertexCount == 0 && indexCount == 0 ? "payload non lu" : $"clusters={clusterCount}, vtx={vertexCount}, idx={indexCount}, ground={groundObjects}";
+        return clusterCount == 0 && vertexCount == 0 && indexCount == 0 ? Anno1800IslandTool.Core.Localization.TextCatalog.T("payload non lu") : $"clusters={clusterCount}, vtx={vertexCount}, idx={indexCount}, ground={groundObjects}";
     }
 
     private static string BuildNormalMapShortDetails(NormalMapPage page)
-        => page.DownsampledWidth == 0 && page.DeltaLevels.Count == 0 ? "payload non lu" : $"down={page.DownsampledWidth}x{page.DownsampledHeight}, deltas={page.DeltaLevels.Count}";
+        => page.DownsampledWidth == 0 && page.DeltaLevels.Count == 0 ? Anno1800IslandTool.Core.Localization.TextCatalog.T("payload non lu") : $"down={page.DownsampledWidth}x{page.DownsampledHeight}, deltas={page.DeltaLevels.Count}";
 
     private static string BuildFileDetails(FileReference file)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"Type : {file.Kind}");
-        sb.AppendLine($"Taille : {file.SizeInBytes} octets");
-        sb.AppendLine($"Chemin : {file.RelativePath}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Taille : {file.SizeInBytes} octets"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Chemin : {file.RelativePath}"));
         return sb.ToString();
     }
 
     private static string BuildPageDetails(IslandProject project, PageRow row)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"Famille : {row.Family}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Famille : {row.Family}"));
         sb.AppendLine($"LOD : {row.Lod}");
-        sb.AppendLine($"Coordonnées : {row.X} x {row.Y}");
-        sb.AppendLine($"Chemin : {row.Path}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Coordonnées : {row.X} x {row.Y}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Chemin : {row.Path}"));
         sb.AppendLine();
 
         if (row.Family == "Mesh" && project.MeshPages.TryGetValue(new TerrainPageKey(row.Lod, row.X, row.Y), out var mesh))
@@ -1559,7 +1571,7 @@ public partial class MainWindow : Window
         else if (row.Family == "TintMap" && project.TintMapPages.TryGetValue(new TerrainPageKey(row.Lod, row.X, row.Y), out var tint))
         {
             sb.AppendLine($"Dimensions DDS : {tint.Width} x {tint.Height}");
-            sb.AppendLine($"Taille brute : {tint.RawDdsBytes.Length} octets");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Taille brute : {tint.RawDdsBytes.Length} octets"));
         }
 
         return sb.ToString();
@@ -1579,23 +1591,23 @@ public partial class MainWindow : Window
     }
 
     private static string BuildSlotSelectionDetails(EditableSlotObjectRow slot)
-        => $"Slot sélectionné\nObjectId: {slot.ObjectIdText}\nGuid: {slot.ObjectGuid}\nPosition: {slot.PosXText}, {slot.PosYText}, {slot.PosZText}";
+        => Anno1800IslandTool.Core.Localization.TextCatalog.F($"Slot sélectionné\nObjectId: {slot.ObjectIdText}\nGuid: {slot.ObjectGuid}\nPosition: {slot.PosXText}, {slot.PosYText}, {slot.PosZText}");
 
     private static string BuildSpawnSelectionDetails(EditableSpawnPointRow spawn)
-        => $"Spawn sélectionné\nPosition: {spawn.PosXText}, {spawn.PosYText}, {spawn.PosZText}\nTag: {spawn.Tag}";
+        => Anno1800IslandTool.Core.Localization.TextCatalog.F($"Spawn sélectionné\nPosition: {spawn.PosXText}, {spawn.PosYText}, {spawn.PosZText}\nTag: {spawn.Tag}");
 
     private static string BuildGroundObjectSelectionDetails(EditableGroundObjectRow ground)
-        => $"GroundObject sélectionné\nPage: LOD {ground.LodText}, X {ground.PageXText}, Y {ground.PageYText}, cluster {ground.ClusterIndexText}\nKind: {ground.Kind}\nFileName: {ground.FileName}\nPosition XZ: {ground.PosXText}, {ground.PosZText}\nRotationY: {ground.RotationYText}\nCoverage: {ground.CoverageText}\nPagePath: {ground.PagePath}";
+        => Anno1800IslandTool.Core.Localization.TextCatalog.F($"GroundObject sélectionné\nPage: LOD {ground.LodText}, X {ground.PageXText}, Y {ground.PageYText}, cluster {ground.ClusterIndexText}\nKind: {ground.Kind}\nFileName: {ground.FileName}\nPosition XZ: {ground.PosXText}, {ground.PosZText}\nRotationY: {ground.RotationYText}\nCoverage: {ground.CoverageText}\nPagePath: {ground.PagePath}");
 
     private static string BuildGroundObjectsSummary(IslandProject project, IEnumerable<EditableGroundObjectRow> rows)
     {
         var list = rows.ToList();
         var sb = new StringBuilder();
-        sb.AppendLine("Résumé GroundObjects / props / végétation");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Résumé GroundObjects / props / végétation"));
         sb.AppendLine();
-        sb.AppendLine($"Objets éditables : {list.Count}");
-        sb.AppendLine($"Pages mesh avec payload : {project.MeshPages.Values.Count(p => p.Clusters.Count > 0)}");
-        sb.AppendLine($"Pages LOD0/LOD1 avec GroundObjects : {project.MeshPages.Values.Count(p => p.Key.Lod <= 1 && p.Clusters.Any(c => c.GroundObjects.Count > 0))}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Objets éditables : {list.Count}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Pages mesh avec payload : {project.MeshPages.Values.Count(p => p.Clusters.Count > 0)}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Pages LOD0/LOD1 avec GroundObjects : {project.MeshPages.Values.Count(p => p.Key.Lod <= 1 && p.Clusters.Any(c => c.GroundObjects.Count > 0))}"));
         sb.AppendLine($"PropGrid FileNames : {project.Rd3d.PropGrid.FileNames.Count}");
         sb.AppendLine();
         foreach (var group in list.GroupBy(r => r.Kind).OrderBy(g => g.Key))
@@ -1603,10 +1615,10 @@ public partial class MainWindow : Window
             sb.AppendLine($"{group.Key}: {group.Count()}");
         }
         sb.AppendLine();
-        sb.AppendLine("Pages touchées dans la grille actuelle :");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Pages touchées dans la grille actuelle :"));
         foreach (var group in list.GroupBy(r => $"LOD {r.LodText} / {r.PageXText}x{r.PageYText}").OrderBy(g => g.Key).Take(40))
         {
-            sb.AppendLine($"- {group.Key}: {group.Count()} objet(s)");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"- {group.Key}: {group.Count()} objet(s)"));
         }
         return sb.ToString();
     }
@@ -1624,8 +1636,13 @@ public partial class MainWindow : Window
         var areas = _areaRows.Select(a => a.ToDefinition()).ToList();
         var spawns = _spawnRows.Select(s => s.ToDefinition()).ToList();
 
-        _editor.ReplaceSlotObjects(_currentProject, slots);
-        _editor.ReplaceZones(_currentProject, playableArea, areas, spawns);
+        BusyWork.Run(this, () => {
+
+            _editor.ReplaceSlotObjects(_currentProject, slots);
+
+            _editor.ReplaceZones(_currentProject, playableArea, areas, spawns);
+
+        });
     }
 
     private static bool MatchesPath(string? left, string? right)
@@ -1642,7 +1659,7 @@ public partial class MainWindow : Window
     {
         if (!int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
         {
-            throw new InvalidOperationException($"Valeur invalide pour {fieldName}.");
+            throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Valeur invalide pour {fieldName}."));
         }
 
         return value;
@@ -1652,7 +1669,7 @@ public partial class MainWindow : Window
     {
         if (!float.TryParse((text ?? string.Empty).Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
         {
-            throw new InvalidOperationException($"Valeur invalide pour {field}.");
+            throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Valeur invalide pour {field}."));
         }
 
         return value;
@@ -1722,7 +1739,7 @@ public partial class MainWindow : Window
         {
             if (!long.TryParse(ObjectIdText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var objectId))
             {
-                throw new InvalidOperationException("ObjectId de slot invalide.");
+                throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("ObjectId de slot invalide."));
             }
 
             return new SlotObjectDefinition
@@ -1817,7 +1834,7 @@ public partial class MainWindow : Window
 
             if (!project.MeshPages.TryGetValue(key, out var page))
             {
-                throw new InvalidOperationException($"Page mesh introuvable pour GroundObject : LOD {key.Lod}, X {key.X}, Y {key.Y}.");
+                throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Page mesh introuvable pour GroundObject : LOD {key.Lod}, X {key.X}, Y {key.Y}."));
             }
 
             return new GroundObjectPlacement

@@ -1,4 +1,4 @@
-﻿<Window x:Class="Anno1800IslandTool.UI.Map2DEditorWindow"
+<Window x:Class="Anno1800IslandTool.UI.Map2DEditorWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering"
@@ -135,6 +135,9 @@
             </ScrollViewer>
         </Grid>
 
-        <TextBlock Grid.Row="2" Margin="0,8,0,0" Text="Astuce : garde le clic droit pour déplacer la vue. Utilise Ctrl + molette pour zoomer/dézoomer. Le clic gauche sert à sélectionner ou éditer selon le mode. Clique 'Appliquer au projet' puis exporte le ZIP depuis la fenêtre principale." Foreground="#555"/>
+        <StackPanel Grid.Row="2">
+            <TextBlock x:Name="CoordinatesTextBlock" Margin="0,6,0,0" FontWeight="SemiBold" Text="Survolez la carte pour lire X / Z — Z → droite · X ↓ bas (orientation GPU de référence)"/>
+        <TextBlock Margin="0,8,0,0" Text="Astuce : garde le clic droit pour déplacer la vue. Utilise Ctrl + molette pour zoomer/dézoomer. Le clic gauche sert à sélectionner ou éditer selon le mode. Clique 'Appliquer au projet' puis exporte le ZIP depuis la fenêtre principale." Foreground="#555"/>
+        </StackPanel>
     </Grid>
 </Window>

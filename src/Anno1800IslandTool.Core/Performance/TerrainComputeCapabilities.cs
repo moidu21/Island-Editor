@@ -1,4 +1,4 @@
-﻿namespace Anno1800IslandTool.Core.Performance;
+namespace Anno1800IslandTool.Core.Performance;
 
 /// <summary>
 /// Résumé léger des capacités de calcul v40. Le backend GPU de calcul est
@@ -32,6 +32,6 @@ public sealed class TerrainComputeCapabilities
             TerrainComputeScheduler.LogicalProcessorCount,
             TerrainComputeScheduler.MaxDegreeOfParallelism,
             gpuComputeBackendAvailable: false,
-            gpuComputeBackendName: "non chargé",
-            notes: "v40 utilise un backend CPU parallèle et prépare l'interface de bascule GPU. Le rendu WPF/Direct3D peut déjà être accéléré par la carte graphique côté UI.");
+            gpuComputeBackendName: Anno1800IslandTool.Core.Localization.TextCatalog.T("non chargé"),
+            notes: Anno1800IslandTool.Core.Localization.TextCatalog.T("v40 utilise un backend CPU parallèle et prépare l'interface de bascule GPU. Le rendu WPF/Direct3D peut déjà être accéléré par la carte graphique côté UI."));
 }

@@ -1,4 +1,4 @@
-﻿
+
 using Anno1800IslandTool.Core.Terrain;
 using Anno1800IslandTool.Core.Validation;
 
@@ -6,6 +6,8 @@ namespace Anno1800IslandTool.Core.Models;
 
 public sealed class IslandProject
 {
+    // Canvas extent before an enlargement whose new land has not yet been initialized.
+    public int? PendingNewLandOriginalSize { get; set; }
     public Dictionary<long, float> GeneratedRiverBedDepths { get; set; } = new();
     public Anno1800IslandTool.Core.Common.RectI? EmergedMaterialBounds { get; set; }
     public HashSet<TerrainPageKey> EmergedTintPages { get; } = new();

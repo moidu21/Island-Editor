@@ -1,4 +1,4 @@
-﻿using Xunit;
+using Xunit;
 using Anno1800IslandTool.Pipeline.Services;
 namespace Anno1800IslandTool.Tests;
 public class RdaResourceTests

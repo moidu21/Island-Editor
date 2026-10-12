@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 
 namespace Anno1800IslandTool.Core.Terrain;
 
@@ -62,7 +62,7 @@ public static class TerrainMaterialPackEncoding
 
         if (normalizedAlphaWeights.Count < SlotCount)
         {
-            throw new ArgumentException($"Il faut {SlotCount} valeurs alpha normalisées.", nameof(normalizedAlphaWeights));
+            throw new ArgumentException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Il faut {SlotCount} valeurs alpha normalisées."), nameof(normalizedAlphaWeights));
         }
 
         var weights = new int[SlotCount];
@@ -94,7 +94,7 @@ public static class TerrainMaterialPackEncoding
 
         if (values.Count < SlotCount)
         {
-            throw new ArgumentException($"Il faut au moins {SlotCount} valeurs.", argumentName ?? nameof(values));
+            throw new ArgumentException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Il faut au moins {SlotCount} valeurs."), argumentName ?? nameof(values));
         }
 
         uint packed = 0;
@@ -236,7 +236,7 @@ public static class TerrainMaterialPackEncoding
     {
         if (slot < 0 || slot >= SlotCount)
         {
-            throw new ArgumentOutOfRangeException(nameof(slot), $"Slot invalide : {slot}. Attendu 0..{SlotCount - 1}.");
+            throw new ArgumentOutOfRangeException(nameof(slot), Anno1800IslandTool.Core.Localization.TextCatalog.F($"Slot invalide : {slot}. Attendu 0..{SlotCount - 1}."));
         }
 
         return (int)((packed >> (slot * BitsPerSlot)) & SlotMask);
@@ -246,7 +246,7 @@ public static class TerrainMaterialPackEncoding
     {
         if (slot < 0 || slot >= SlotCount)
         {
-            throw new ArgumentOutOfRangeException(nameof(slot), $"Slot invalide : {slot}. Attendu 0..{SlotCount - 1}.");
+            throw new ArgumentOutOfRangeException(nameof(slot), Anno1800IslandTool.Core.Localization.TextCatalog.F($"Slot invalide : {slot}. Attendu 0..{SlotCount - 1}."));
         }
 
         var shift = slot * BitsPerSlot;

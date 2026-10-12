@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Xml.Linq;
 using Anno1800IslandTool.Core.Common;
 using Anno1800IslandTool.Core.Models;
@@ -13,7 +13,7 @@ public static class SceneryPlacementService
     {
         if(!float.IsFinite(item.Scale)||item.Scale<=0||!float.IsFinite(item.RotationDegrees)
             ||!float.IsFinite(item.Position.X)||!float.IsFinite(item.Position.Y)||!float.IsFinite(item.Position.Z))
-            throw new ArgumentException("Invalid scenery placement.");
+            throw new ArgumentException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Invalid scenery placement."));
         string N(float value)=>value.ToString("R",CultureInfo.InvariantCulture).Replace('.',',');
         float half=item.RotationDegrees*MathF.PI/360;
         return new XElement("None",new XElement("Index",index),
@@ -29,7 +29,7 @@ public static class SceneryPlacementService
         {
             string file=placement.File.Replace('\\','/');
             if(!file.StartsWith("data/",StringComparison.OrdinalIgnoreCase)||file.Split('/').Contains("..")||!file.EndsWith(".prp",StringComparison.OrdinalIgnoreCase))
-                throw new ArgumentException("Invalid prop resource.");
+                throw new ArgumentException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Invalid prop resource."));
             int index=names.FindIndex(n=>n.Replace('\\','/').Equals(file,StringComparison.OrdinalIgnoreCase));
             if(index<0){index=names.Count;names.Add(file);}
             instances.Add(new(){RawNoneXml=Serialize(placement,index)});

@@ -1,0 +1,14 @@
+using System.Diagnostics;
+using System.Text;
+using System.Security.Cryptography;
+using Anno1800IslandTool.Core.Models;
+using Anno1800IslandTool.Pipeline.Services;
+using Anno1800IslandTool.Pipeline.Editing;
+using Anno1800IslandTool.Formats.Writers;
+var project=new IslandProject();IslandCanvasResizer.Resize(project,args.Length > 0 ? int.Parse(args[0]) : 256);
+project.RawContent.Rd3dText=new Rd3dWriter().Write(project.Rd3d);
+project.RawContent.GameDataText=new GameDataWriter().Write(project.GameData);
+var regen=new ProjectTextRegenerator();regen.RegenerateRd3dText(project);
+GC.Collect();var sw=Stopwatch.StartNew();long before=GC.GetTotalAllocatedBytes(true);
+regen.RegenerateRd3dText(project);
+Console.WriteLine($"ms={sw.ElapsedMilliseconds} allocated_mib={(GC.GetTotalAllocatedBytes(true)-before)/1048576} peak_mib={Process.GetCurrentProcess().PeakWorkingSet64/1048576} sha={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(project.RawContent.Rd3dText)))}");

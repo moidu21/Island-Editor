@@ -1,4 +1,4 @@
-﻿namespace Anno1800IslandTool.Core.Terrain;
+namespace Anno1800IslandTool.Core.Terrain;
 
 /// <summary>
 /// Classification centralisée des pages mesh.
@@ -79,11 +79,11 @@ public static class MeshPageClassifier
     public static string GetRoleLabel(MeshPageRole role)
         => role switch
         {
-            MeshPageRole.MetadataCoverage => "métadonnées/coverage/ground objects",
-            MeshPageRole.ProbableEditableGeometry => "géométrie probable (payload non chargé)",
-            MeshPageRole.EditableGeometry => "géométrie éditable",
-            MeshPageRole.DecodedGeometryNotEditable => "géométrie décodée non éditable",
-            _ => "inconnu"
+            MeshPageRole.MetadataCoverage => Anno1800IslandTool.Core.Localization.TextCatalog.T("métadonnées/coverage/ground objects"),
+            MeshPageRole.ProbableEditableGeometry => Anno1800IslandTool.Core.Localization.TextCatalog.T("géométrie probable (payload non chargé)"),
+            MeshPageRole.EditableGeometry => Anno1800IslandTool.Core.Localization.TextCatalog.T("géométrie éditable"),
+            MeshPageRole.DecodedGeometryNotEditable => Anno1800IslandTool.Core.Localization.TextCatalog.T("géométrie décodée non éditable"),
+            _ => Anno1800IslandTool.Core.Localization.TextCatalog.T("inconnu")
         };
 
     public static string BuildReason(TerrainPageKey key, MeshPage? page)
@@ -91,23 +91,23 @@ public static class MeshPageClassifier
         var role = Classify(key, page);
         if (IsProtectedMetadataLod(key))
         {
-            var ground = HasGroundObjects(page) ? ", ground objects présents" : string.Empty;
-            var vertices = HasVertices(page) ? ", vertices ignorés par sécurité" : string.Empty;
-            return $"LOD{key.Lod} protégé : traité comme {GetRoleLabel(role)}{ground}{vertices}.";
+            var ground = HasGroundObjects(page) ? Anno1800IslandTool.Core.Localization.TextCatalog.T(", ground objects présents") : string.Empty;
+            var vertices = HasVertices(page) ? Anno1800IslandTool.Core.Localization.TextCatalog.T(", vertices ignorés par sécurité") : string.Empty;
+            return Anno1800IslandTool.Core.Localization.TextCatalog.F($"LOD{key.Lod} protégé : traité comme {GetRoleLabel(role)}{ground}{vertices}.");
         }
 
         if (IsUnsupportedFarMetadataLod(key))
         {
-            return $"LOD{key.Lod} conservé vanilla : hors plage éditable v42.9 LOD{FirstEditableGeometryLod}..LOD{LastEditableGeometryLod}.";
+            return Anno1800IslandTool.Core.Localization.TextCatalog.F($"LOD{key.Lod} conservé vanilla : hors plage éditable v42.9 LOD{FirstEditableGeometryLod}..LOD{LastEditableGeometryLod}.");
         }
 
         return role switch
         {
-            MeshPageRole.EditableGeometry => $"Payload mesh décodé, LOD {FirstEditableGeometryLod}..{LastEditableGeometryLod}, vertices présents : page modifiable.",
-            MeshPageRole.ProbableEditableGeometry => $"LOD {FirstEditableGeometryLod}..{LastEditableGeometryLod} mais payload non chargé : page candidate, diagnostic uniquement tant que le payload n'est pas lu.",
-            MeshPageRole.DecodedGeometryNotEditable => $"LOD {FirstEditableGeometryLod}..{LastEditableGeometryLod} avec vertices, mais payload non marqué éditable : modification bloquée.",
-            MeshPageRole.MetadataCoverage => $"LOD {FirstEditableGeometryLod}..{LastEditableGeometryLod} sans vertices éditables : page traitée comme métadonnées/coverage.",
-            _ => "Statut mesh inconnu."
+            MeshPageRole.EditableGeometry => Anno1800IslandTool.Core.Localization.TextCatalog.F($"Payload mesh décodé, LOD {FirstEditableGeometryLod}..{LastEditableGeometryLod}, vertices présents : page modifiable."),
+            MeshPageRole.ProbableEditableGeometry => Anno1800IslandTool.Core.Localization.TextCatalog.F($"LOD {FirstEditableGeometryLod}..{LastEditableGeometryLod} mais payload non chargé : page candidate, diagnostic uniquement tant que le payload n'est pas lu."),
+            MeshPageRole.DecodedGeometryNotEditable => Anno1800IslandTool.Core.Localization.TextCatalog.F($"LOD {FirstEditableGeometryLod}..{LastEditableGeometryLod} avec vertices, mais payload non marqué éditable : modification bloquée."),
+            MeshPageRole.MetadataCoverage => Anno1800IslandTool.Core.Localization.TextCatalog.F($"LOD {FirstEditableGeometryLod}..{LastEditableGeometryLod} sans vertices éditables : page traitée comme métadonnées/coverage."),
+            _ => Anno1800IslandTool.Core.Localization.TextCatalog.T("Statut mesh inconnu.")
         };
     }
 }

@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Core.Common;
+using Anno1800IslandTool.Core.Common;
 using Anno1800IslandTool.Core.Performance;
 
 namespace Anno1800IslandTool.Core.Terrain;
@@ -28,7 +28,7 @@ public static class TerrainCoastTransitionPainter
         var result = new TerrainMaterialPaintResult();
         if (materialMap.Width <= 0 || materialMap.Height <= 0 || heightMap.Width <= 0 || heightMap.Height <= 0)
         {
-            result.Messages.Add("Material map ou heightmap vide : transition côte/plage/eau annulée.");
+            result.Messages.Add(Anno1800IslandTool.Core.Localization.TextCatalog.T("Material map ou heightmap vide : transition côte/plage/eau annulée."));
             return result;
         }
 
@@ -41,7 +41,7 @@ public static class TerrainCoastTransitionPainter
         var bounds = NormalizeMaterialCellBounds(materialMap, materialCellBounds);
         if (bounds.Right <= bounds.Left || bounds.Bottom <= bounds.Top)
         {
-            result.Messages.Add("Transition hauteur -> matériau ignorée : bounds matériau vides.");
+            result.Messages.Add(Anno1800IslandTool.Core.Localization.TextCatalog.T("Transition hauteur -> matériau ignorée : bounds matériau vides."));
             return result;
         }
 
@@ -149,12 +149,12 @@ public static class TerrainCoastTransitionPainter
         var boundsText = materialCellBounds.HasValue
             ? $" bounds={bounds.Left},{bounds.Top}->{bounds.Right},{bounds.Bottom}"
             : " global";
-        var maskText = activeMaterialCellPredicate is null ? string.Empty : ", filtrée par ActiveMapGrid.bits";
+        var maskText = activeMaterialCellPredicate is null ? string.Empty : Anno1800IslandTool.Core.Localization.TextCatalog.T(", filtrée par ActiveMapGrid.bits");
         var customPatternCount = CountCustomTransitionPatterns(options);
         var modeText = customPatternCount > 0
-            ? $"{customPatternCount} empreinte(s) personnalisée(s), fallback={(options.UseCellPatternTemplates ? "vanilla-like" : "ID dominant")}"
-            : (options.UseCellPatternTemplates ? "empreintes MaterialIDs2+MaterialAlphas2 vanilla-like sûres" : "ID dominant seul");
-        result.Messages.Add($"Transition hauteur -> matériau v44.9{boundsText}{maskText} : eau profonde={stats.DeepWaterCells}, eau faible/corail={stats.ShallowWaterCells}, plage côtière={stats.BeachCells}, terre basse={stats.LowLandCells}, roche={stats.RockCells}, ignorées={stats.SkippedCells}, bande côte={options.CoastBandCells}. Mode={modeText}. Les empreintes personnalisées peuvent venir de la fenêtre matériaux/materialset chargé ; les patterns vanilla-like restent le fallback sécurisé.");
+            ? Anno1800IslandTool.Core.Localization.TextCatalog.F($"{customPatternCount} empreinte(s) personnalisée(s), fallback={(options.UseCellPatternTemplates ? "vanilla-like" : Anno1800IslandTool.Core.Localization.TextCatalog.T("ID dominant"))}")
+            : (options.UseCellPatternTemplates ? Anno1800IslandTool.Core.Localization.TextCatalog.T("empreintes MaterialIDs2+MaterialAlphas2 vanilla-like sûres") : Anno1800IslandTool.Core.Localization.TextCatalog.T("ID dominant seul"));
+        result.Messages.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Transition hauteur -> matériau v44.9{boundsText}{maskText} : eau profonde={stats.DeepWaterCells}, eau faible/corail={stats.ShallowWaterCells}, plage côtière={stats.BeachCells}, terre basse={stats.LowLandCells}, roche={stats.RockCells}, ignorées={stats.SkippedCells}, bande côte={options.CoastBandCells}. Mode={modeText}. Les empreintes personnalisées peuvent venir de la fenêtre matériaux/materialset chargé ; les patterns vanilla-like restent le fallback sécurisé."));
         return result;
     }
 

@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Pipeline.Services;
+using Anno1800IslandTool.Pipeline.Services;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -68,7 +68,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
         RefreshFromParentData(refreshPalette: true);
         ClearCellEditorFields();
         UpdateCoastRoleCellsStatus();
-        CellDetailsTextBox.Text = "Aucune cellule sélectionnée.";
+        CellDetailsTextBox.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune cellule sélectionnée.");
         Activated += (_, _) => RefreshWorkingMapFromProjectIfClean();
         UpdateSliderLabels();
         UpdateCoastStrengthLabel();
@@ -111,7 +111,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
     {
         if (MaterialSetStatusTextBlock is not null)
         {
-            MaterialSetStatusTextBlock.Text = "Materialset courant : " + _ownerWindow.GetMaterialSetStatusForLargeWindow();
+            MaterialSetStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Materialset courant : ") + _ownerWindow.GetMaterialSetStatusForLargeWindow();
         }
     }
 
@@ -237,7 +237,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
             MaterialMapImage.Source = _ownerWindow.CreateCoastThresholdPreviewBitmapForLargeWindow(options, out var status, out var details);
             CoastStatusTextBlock.Text = status;
             CellDetailsTextBox.Text = details;
-            ImageHintTextBlock.Text = "Vue seuils hauteur monde : cliquer inspecte la hauteur et la classe prévue. La peinture est désactivée dans cette vue.";
+            ImageHintTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Vue seuils hauteur monde : cliquer inspecte la hauteur et la classe prévue. La peinture est désactivée dans cette vue.");
             RefreshMaterial3DFromCurrentBitmap();
             return;
         }
@@ -254,7 +254,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
         }
 
         MaterialMapImage.Source = _ownerWindow.CreateMaterialMapBitmap();
-        ImageHintTextBlock.Text = "Vue matériaux / peinture : clique pour inspecter, clic droit ou pickup pour prélever, cliquer/glisser peint si le mode peinture est activé.";
+        ImageHintTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Vue matériaux / peinture : clique pour inspecter, clic droit ou pickup pour prélever, cliquer/glisser peint si le mode peinture est activé.");
         RefreshMaterial3DFromCurrentBitmap();
     }
 
@@ -285,8 +285,8 @@ public partial class TerrainMaterialMapLargeWindow : Window
         }
 
         var cell = _ownerWindow.WorkingMaterialMap.GetCell(x, y);
-        var brushText = PaintModeCheckBox.IsChecked == true ? " Cercle rouge = rayon du pinceau." : string.Empty;
-        ImageHintTextBlock.Text = $"Survol : x={x}, y={y}, dominant ID={cell.DominantMaterialId}, poids={cell.DominantWeight}/31.{brushText}";
+        var brushText = PaintModeCheckBox.IsChecked == true ? Anno1800IslandTool.Core.Localization.TextCatalog.T(" Cercle rouge = rayon du pinceau.") : string.Empty;
+        ImageHintTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Survol : x={x}, y={y}, dominant ID={cell.DominantMaterialId}, poids={cell.DominantWeight}/31.{brushText}");
     }
 
     private void MaterialMapImage_MouseLeave(object sender, MouseEventArgs e)
@@ -341,7 +341,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
     {
         if (_ownerWindow.UndoMaterialEdit())
         {
-            MaterialHistoryStatusTextBlock.Text = "Dernière modification de matériaux annulée.";
+            MaterialHistoryStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Dernière modification de matériaux annulée.");
         }
         RefreshUndoRedoState(preserveMessage: true);
     }
@@ -350,7 +350,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
     {
         if (_ownerWindow.RedoMaterialEdit())
         {
-            MaterialHistoryStatusTextBlock.Text = "Modification de matériaux rétablie.";
+            MaterialHistoryStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Modification de matériaux rétablie.");
         }
         RefreshUndoRedoState(preserveMessage: true);
     }
@@ -378,8 +378,8 @@ public partial class TerrainMaterialMapLargeWindow : Window
         if (!preserveMessage)
         {
             MaterialHistoryStatusTextBlock.Text = _ownerWindow.CanUndoMaterialEdit
-                ? "Des modifications peuvent être annulées. Raccourcis : Ctrl+Z / Ctrl+Y."
-                : "Aucune modification à annuler.";
+                ? Anno1800IslandTool.Core.Localization.TextCatalog.T("Des modifications peuvent être annulées. Raccourcis : Ctrl+Z / Ctrl+Y.")
+                : Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune modification à annuler.");
         }
     }
 
@@ -450,13 +450,13 @@ public partial class TerrainMaterialMapLargeWindow : Window
 
         if (!useCellBrush && material is null)
         {
-            PaintStatusTextBlock.Text = "Aucun matériau terrain sélectionné.";
+            PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun matériau terrain sélectionné.");
             return;
         }
 
         if (useCellBrush && cellPattern is null)
         {
-            PaintStatusTextBlock.Text = "Aucune cellule terrain valide. Fais un pickup ou remplis les slots ID/alpha, puis clique sur Utiliser cette cellule.";
+            PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune cellule terrain valide. Fais un pickup ou remplis les slots ID/alpha, puis clique sur Utiliser cette cellule.");
             return;
         }
 
@@ -476,9 +476,9 @@ public partial class TerrainMaterialMapLargeWindow : Window
         {
             RefreshFromParentData(refreshPalette: false);
             var label = useCellBrush
-                ? $"cellule {_cellEditorSourceX},{_cellEditorSourceY} [{_ownerWindow.FormatMaterialIdsForLargeWindow(cellPattern!.MaterialIds)}]"
+                ? Anno1800IslandTool.Core.Localization.TextCatalog.F($"cellule {_cellEditorSourceX},{_cellEditorSourceY} [{_ownerWindow.FormatMaterialIdsForLargeWindow(cellPattern!.MaterialIds)}]")
                 : $"ID {options.MaterialId}";
-            var status = $"Vue agrandie : {options.Mode} {label} à {x},{y} : {result.CellsChanged} cellule(s), {result.BlocksChanged} bloc(s). Total cellules modifiées: {_ownerWindow.WorkingMaterialEditState.TotalCellsChanged}.";
+            var status = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Vue agrandie : {options.Mode} {label} à {x},{y} : {result.CellsChanged} cellule(s), {result.BlocksChanged} bloc(s). Total cellules modifiées: {_ownerWindow.WorkingMaterialEditState.TotalCellsChanged}.");
             PaintStatusTextBlock.Text = status;
             ImageHintTextBlock.Text = status;
             _ownerWindow.SetStatusFromLargeWindow(status);
@@ -493,8 +493,8 @@ public partial class TerrainMaterialMapLargeWindow : Window
     {
         var dialog = new OpenFileDialog
         {
-            Title = "Sélectionner un materialset Anno 1800",
-            Filter = "Materialset XML (*.xml)|*.xml|Tous les fichiers (*.*)|*.*",
+            Title = Anno1800IslandTool.Core.Localization.TextCatalog.T("Sélectionner un materialset Anno 1800"),
+            Filter = Anno1800IslandTool.Core.Localization.TextCatalog.T("Materialset XML (*.xml)|*.xml|Tous les fichiers (*.*)|*.*"),
             CheckFileExists = true,
             Multiselect = false
         };
@@ -511,11 +511,11 @@ public partial class TerrainMaterialMapLargeWindow : Window
             RefreshFromParentData(refreshPalette: true);
             PaintStatusTextBlock.Text = status;
             CellDetailsTextBox.Text = status;
-            MaterialSetStatusTextBlock.Text = "Materialset courant : " + _ownerWindow.GetMaterialSetStatusForLargeWindow();
+            MaterialSetStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Materialset courant : ") + _ownerWindow.GetMaterialSetStatusForLargeWindow();
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.ToString(), "Chargement du materialset", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.ToString(), Anno1800IslandTool.Core.Localization.TextCatalog.T("Chargement du materialset"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -533,7 +533,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
 
     private void ApplySelectedEmbeddedMaterialSet()
     {
-        if (_isApplyingEmbeddedMaterialSet || EmbeddedMaterialSetComboBox.SelectedItem is not string fileName)
+        if (BusyWork.IsBusy || _isApplyingEmbeddedMaterialSet || EmbeddedMaterialSetComboBox.SelectedItem is not string fileName)
         {
             return;
         }
@@ -541,18 +541,22 @@ public partial class TerrainMaterialMapLargeWindow : Window
         _isApplyingEmbeddedMaterialSet = true;
         try
         {
+            BusyWork.RunOperation(this, async () =>
+            {
             var status = _ownerWindow.UseEmbeddedMaterialSet(fileName);
             _gameDataRoot = null; _materialTextureCache.Clear();
-            if (RdaGameResources.SavedGameFolder() is not null) _ = PrepareArchiveMaterialsAsync(false);
+            if (UseGameTexturesCheckBox.IsChecked == true && RdaGameResources.SavedGameFolder() is not null) await PrepareArchiveMaterialsAsync(false);
             UpdateRd3dMaterialSetCheckBox.IsChecked = true;
             RefreshFromParentData(refreshPalette: true);
             PaintStatusTextBlock.Text = status;
             CellDetailsTextBox.Text = status;
             RefreshMaterialSetStatus();
+            await CompletePendingRefreshAsync();
+            });
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.ToString(), "Chargement du materialset intégré", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.ToString(), Anno1800IslandTool.Core.Localization.TextCatalog.T("Chargement du materialset intégré"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -570,8 +574,8 @@ public partial class TerrainMaterialMapLargeWindow : Window
         BrushModeComboBox.SelectedItem = TerrainMaterialBrushMode.StampPickedCell;
 
         var activeIds = _ownerWindow.FormatMaterialIdsForLargeWindow(_pickedCellPattern.MaterialIds);
-        PickupStatusTextBlock.Text = $"Pickup : cellule {x},{y} | dominant ID {_pickedCellPattern.DominantMaterialId} | slots {activeIds}.";
-        PaintStatusTextBlock.Text = "Pickup prêt : les champs cellule sont remplis. Modifie les IDs/alphas si besoin, puis clique/glisse pour peindre cette cellule.";
+        PickupStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Pickup : cellule {x},{y} | dominant ID {_pickedCellPattern.DominantMaterialId} | slots {activeIds}.");
+        PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Pickup prêt : les champs cellule sont remplis. Modifie les IDs/alphas si besoin, puis clique/glisse pour peindre cette cellule.");
         CellDetailsTextBox.Text = BuildPickedCellDetails(_pickedCellPattern);
         ImageHintTextBlock.Text = PickupStatusTextBlock.Text;
     }
@@ -579,9 +583,9 @@ public partial class TerrainMaterialMapLargeWindow : Window
     private string BuildPickedCellDetails(TerrainMaterialCellPattern pattern)
     {
         var lines = new System.Text.StringBuilder();
-        lines.AppendLine($"Pickup cellule source : x={pattern.SourceX}, y={pattern.SourceY}");
-        lines.AppendLine($"Slot dominant : {pattern.DominantSlot}, Material ID={pattern.DominantMaterialId}, poids={pattern.DominantWeight}/31");
-        lines.AppendLine("Cette empreinte sera repeinte avec le mode StampPickedCell : slots MaterialIDs2 + alphas MaterialAlphas2.");
+        lines.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Pickup cellule source : x={pattern.SourceX}, y={pattern.SourceY}"));
+        lines.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Slot dominant : {pattern.DominantSlot}, Material ID={pattern.DominantMaterialId}, poids={pattern.DominantWeight}/31"));
+        lines.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Cette empreinte sera repeinte avec le mode StampPickedCell : slots MaterialIDs2 + alphas MaterialAlphas2."));
         lines.AppendLine();
 
         for (var i = 0; i < TerrainMaterialPackEncoding.SlotCount; i++)
@@ -601,7 +605,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
         {
             _cellEditorSourceX = pattern.SourceX;
             _cellEditorSourceY = pattern.SourceY;
-            CellEditorSourceTextBlock.Text = $"Cellule source : x={pattern.SourceX}, y={pattern.SourceY}";
+            CellEditorSourceTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Cellule source : x={pattern.SourceX}, y={pattern.SourceY}");
             var idBoxes = GetCellIdTextBoxes();
             var alphaBoxes = GetCellAlphaTextBoxes();
             for (var i = 0; i < TerrainMaterialPackEncoding.SlotCount; i++)
@@ -610,7 +614,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
                 alphaBoxes[i].Text = (i < pattern.AlphaWeights.Length ? pattern.AlphaWeights[i] : 0).ToString(CultureInfo.InvariantCulture);
             }
 
-            CellEditorStatusTextBlock.Text = $"Cellule chargée : dominant ID {pattern.DominantMaterialId}, alpha {pattern.DominantWeight}/31.";
+            CellEditorStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Cellule chargée : dominant ID {pattern.DominantMaterialId}, alpha {pattern.DominantWeight}/31.");
         }
         finally
         {
@@ -625,7 +629,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
         {
             _cellEditorSourceX = -1;
             _cellEditorSourceY = -1;
-            CellEditorSourceTextBlock.Text = "Cellule source : aucune";
+            CellEditorSourceTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Cellule source : aucune");
             var idBoxes = GetCellIdTextBoxes();
             var alphaBoxes = GetCellAlphaTextBoxes();
             for (var i = 0; i < TerrainMaterialPackEncoding.SlotCount; i++)
@@ -634,7 +638,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
                 alphaBoxes[i].Text = i == 0 ? "31" : "0";
             }
 
-            CellEditorStatusTextBlock.Text = "Cellule par défaut : slot 0 ID 2 alpha 31. Fais un pickup pour récupérer une cellule vanilla/modifiée.";
+            CellEditorStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Cellule par défaut : slot 0 ID 2 alpha 31. Fais un pickup pour récupérer une cellule vanilla/modifiée.");
         }
         finally
         {
@@ -668,12 +672,12 @@ public partial class TerrainMaterialMapLargeWindow : Window
         {
             if (!int.TryParse(idBoxes[i].Text?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
             {
-                errors.AppendLine($"Slot {i}: Material ID invalide.");
+                errors.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Slot {i}: Material ID invalide."));
             }
 
             if (!int.TryParse(alphaBoxes[i].Text?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var alpha))
             {
-                errors.AppendLine($"Slot {i}: alpha invalide.");
+                errors.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Slot {i}: alpha invalide."));
             }
 
             ids[i] = TerrainMaterialPackEncoding.ClampSlot(id);
@@ -693,7 +697,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
         {
             if (showErrors)
             {
-                CellEditorStatusTextBlock.Text = "Cellule invalide : au moins un alpha doit être supérieur à 0.";
+                CellEditorStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Cellule invalide : au moins un alpha doit être supérieur à 0.");
             }
             return null;
         }
@@ -747,8 +751,8 @@ public partial class TerrainMaterialMapLargeWindow : Window
         UsePickedCellBrushCheckBox.IsChecked = true;
         BrushModeComboBox.SelectedItem = TerrainMaterialBrushMode.StampPickedCell;
         SelectCellBrushSource();
-        PickupStatusTextBlock.Text = $"Cellule personnalisée active | dominant ID {pattern.DominantMaterialId} | slots {_ownerWindow.FormatMaterialIdsForLargeWindow(pattern.MaterialIds)}.";
-        PaintStatusTextBlock.Text = "Cellule personnalisée prête : cliquer/glisser peint ces slots MaterialIDs2 + MaterialAlphas2.";
+        PickupStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Cellule personnalisée active | dominant ID {pattern.DominantMaterialId} | slots {_ownerWindow.FormatMaterialIdsForLargeWindow(pattern.MaterialIds)}.");
+        PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Cellule personnalisée prête : cliquer/glisser peint ces slots MaterialIDs2 + MaterialAlphas2.");
         CellDetailsTextBox.Text = BuildPickedCellDetails(pattern);
     }
 
@@ -759,15 +763,15 @@ public partial class TerrainMaterialMapLargeWindow : Window
         PickupNextClickCheckBox.IsChecked = false;
         ClearCellEditorFields();
         SelectSimpleBrushSource();
-        PickupStatusTextBlock.Text = "Pickup : aucun. Clic droit sur la carte pour prélever.";
-        PaintStatusTextBlock.Text = "Cellule personnalisée vidée.";
+        PickupStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Pickup : aucun. Clic droit sur la carte pour prélever.");
+        PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Cellule personnalisée vidée.");
     }
 
     private void SetSelectedMaterialInCellSlotButton_Click(object sender, RoutedEventArgs e)
     {
         if (PaintMaterialComboBox.SelectedItem is not TerrainMaterialMapWindow.MaterialPaletteRow row)
         {
-            CellEditorStatusTextBlock.Text = "Aucun matériau palette sélectionné.";
+            CellEditorStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun matériau palette sélectionné.");
             return;
         }
 
@@ -782,12 +786,12 @@ public partial class TerrainMaterialMapLargeWindow : Window
 
         _cellEditorSourceX = -1;
         _cellEditorSourceY = -1;
-        CellEditorSourceTextBlock.Text = $"Cellule source : édition manuelle, slot {slot} depuis palette ID {row.Id}";
+        CellEditorSourceTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Cellule source : édition manuelle, slot {slot} depuis palette ID {row.Id}");
         var pattern = BuildCellPatternFromEditor(showErrors: false);
         if (pattern is not null)
         {
             _pickedCellPattern = pattern;
-            CellEditorStatusTextBlock.Text = $"Slot {slot} mis à ID {row.Id} | {row.Label}. Cellule dominante ID {pattern.DominantMaterialId}.";
+            CellEditorStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Slot {slot} mis à ID {row.Id} | {row.Label}. Cellule dominante ID {pattern.DominantMaterialId}.");
         }
     }
 
@@ -814,7 +818,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
         _coastRoleCellPatterns[roleKey] = pattern.Clone();
         _pickedCellPattern = pattern.Clone();
         UpdateCoastRoleCellsStatus();
-        CoastStatusTextBlock.Text = $"Cellule personnalisée assignée au seuil {GetCoastRoleLabel(roleKey)}.";
+        CoastStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Cellule personnalisée assignée au seuil {GetCoastRoleLabel(roleKey)}.");
         CellDetailsTextBox.Text = BuildPickedCellDetails(pattern);
         if (CurrentViewMode == LargeViewMode.CoastThresholds)
         {
@@ -826,7 +830,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
     {
         _coastRoleCellPatterns.Clear();
         UpdateCoastRoleCellsStatus();
-        CoastStatusTextBlock.Text = "Cellules personnalisées de seuils vidées. Retour aux combos matériaux + patterns vanilla-like.";
+        CoastStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Cellules personnalisées de seuils vidées. Retour aux combos matériaux + patterns vanilla-like.");
         if (CurrentViewMode == LargeViewMode.CoastThresholds)
         {
             RefreshMapImage();
@@ -846,11 +850,11 @@ public partial class TerrainMaterialMapLargeWindow : Window
     private static string GetCoastRoleLabel(string key)
         => key.ToLowerInvariant() switch
         {
-            "deep" => "eau profonde",
-            "shallow" => "eau faible / corail",
-            "beach" => "plage",
-            "lowland" => "terre basse",
-            "rock" => "roche pente",
+            "deep" => Anno1800IslandTool.Core.Localization.TextCatalog.T("eau profonde"),
+            "shallow" => Anno1800IslandTool.Core.Localization.TextCatalog.T("eau faible / corail"),
+            "beach" => Anno1800IslandTool.Core.Localization.TextCatalog.T("plage"),
+            "lowland" => Anno1800IslandTool.Core.Localization.TextCatalog.T("terre basse"),
+            "rock" => Anno1800IslandTool.Core.Localization.TextCatalog.T("roche pente"),
             _ => key
         };
 
@@ -863,14 +867,14 @@ public partial class TerrainMaterialMapLargeWindow : Window
 
         if (_coastRoleCellPatterns.Count == 0)
         {
-            CoastRoleCellsStatusTextBlock.Text = "Seuils : aucune cellule personnalisée assignée.";
+            CoastRoleCellsStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Seuils : aucune cellule personnalisée assignée.");
             return;
         }
 
         var parts = _coastRoleCellPatterns
             .OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase)
             .Select(p => $"{GetCoastRoleLabel(p.Key)}=[{_ownerWindow.FormatMaterialIdsForLargeWindow(p.Value.MaterialIds)}]");
-        CoastRoleCellsStatusTextBlock.Text = "Seuils personnalisés : " + string.Join(" ; ", parts);
+        CoastRoleCellsStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Seuils personnalisés : ") + string.Join(" ; ", parts);
     }
 
     private void CellBrushSourceComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -884,7 +888,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
         {
             UsePickedCellBrushCheckBox.IsChecked = true;
             BrushModeComboBox.SelectedItem = TerrainMaterialBrushMode.StampPickedCell;
-            CellEditorStatusTextBlock.Text = "Source cellule active : pickup ou champs ci-dessous seront utilisés pour peindre.";
+            CellEditorStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Source cellule active : pickup ou champs ci-dessous seront utilisés pour peindre.");
         }
         else
         {
@@ -893,7 +897,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
             {
                 BrushModeComboBox.SelectedItem = TerrainMaterialBrushMode.Blend;
             }
-            CellEditorStatusTextBlock.Text = "Source matériau simple active : la palette terrain est utilisée.";
+            CellEditorStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Source matériau simple active : la palette terrain est utilisée.");
         }
     }
 
@@ -907,18 +911,19 @@ public partial class TerrainMaterialMapLargeWindow : Window
         var pattern = BuildCellPatternFromEditor(showErrors: false);
         if (pattern is null)
         {
-            CellEditorStatusTextBlock.Text = "Cellule en cours d'édition : corrige les IDs/alphas avant de peindre.";
+            CellEditorStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Cellule en cours d'édition : corrige les IDs/alphas avant de peindre.");
             return;
         }
 
         _pickedCellPattern = pattern;
-        CellEditorStatusTextBlock.Text = $"Cellule éditée : dominant ID {pattern.DominantMaterialId}, alpha {pattern.DominantWeight}/31. Clique Utiliser cette cellule ou peins directement avec la source cellule.";
+        CellEditorStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Cellule éditée : dominant ID {pattern.DominantMaterialId}, alpha {pattern.DominantWeight}/31. Clique Utiliser cette cellule ou peins directement avec la source cellule.");
     }
 
     private void RefreshWorkingMapFromProjectIfClean()
     {
         if (_ownerWindow.TryRefreshWorkingMapFromProjectForLargeWindow(out var status))
         {
+            _decodedTintCache.Clear();
             RefreshFromParentData(refreshPalette: false);
             PaintStatusTextBlock.Text = status;
         }
@@ -1010,7 +1015,7 @@ public partial class TerrainMaterialMapLargeWindow : Window
     {
         _ownerWindow.ApplyWorkingMaterialMapToProjectFromLargeWindow();
         RefreshFromParentData(refreshPalette: false);
-        PaintStatusTextBlock.Text = "Peinture appliquée au projet depuis la vue agrandie.";
+        PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Peinture appliquée au projet depuis la vue agrandie.");
     }
 
     private void ResetWorkingMapButton_Click(object sender, RoutedEventArgs e)
@@ -1021,16 +1026,16 @@ public partial class TerrainMaterialMapLargeWindow : Window
         PickupNextClickCheckBox.IsChecked = false;
         ClearCellEditorFields();
         RefreshFromParentData(refreshPalette: false);
-        PickupStatusTextBlock.Text = "Pickup : aucun. Clic droit sur la carte pour prélever.";
-        PaintStatusTextBlock.Text = "Copie de travail réinitialisée depuis le projet.";
-        CellDetailsTextBox.Text = "Aucune cellule sélectionnée.";
+        PickupStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Pickup : aucun. Clic droit sur la carte pour prélever.");
+        PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Copie de travail réinitialisée depuis le projet.");
+        CellDetailsTextBox.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune cellule sélectionnée.");
     }
 
     private void RefreshButton_Click(object sender, RoutedEventArgs e)
     {
         RefreshWorkingMapFromProjectIfClean();
         RefreshFromParentData(refreshPalette: true);
-        PaintStatusTextBlock.Text = "Vue matériaux rafraîchie depuis le projet si aucune édition locale n'était en attente.";
+        PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Vue matériaux rafraîchie depuis le projet si aucune édition locale n'était en attente.");
     }
 
     private void ClearPickupButton_Click(object sender, RoutedEventArgs e)
@@ -1039,15 +1044,15 @@ public partial class TerrainMaterialMapLargeWindow : Window
         UsePickedCellBrushCheckBox.IsChecked = false;
         PickupNextClickCheckBox.IsChecked = false;
         ClearCellEditorFields();
-        PickupStatusTextBlock.Text = "Pickup : aucun. Clic droit sur la carte pour prélever.";
-        PaintStatusTextBlock.Text = "Pickup/cellule effacé.";
+        PickupStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Pickup : aucun. Clic droit sur la carte pour prélever.");
+        PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Pickup/cellule effacé.");
     }
 
     private void PaintMaterialComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (PaintMaterialComboBox.SelectedItem is TerrainMaterialMapWindow.MaterialPaletteRow row)
         {
-            PaintStatusTextBlock.Text = $"Matériau sélectionné : ID {row.Id} | {row.Label}";
+            PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Matériau sélectionné : ID {row.Id} | {row.Label}");
         }
     }
 
@@ -1071,17 +1076,21 @@ public partial class TerrainMaterialMapLargeWindow : Window
     {
         try
         {
+            BusyWork.RunOperation(this, async () =>
+            {
             var options = ReadCoastTransitionOptions();
             var details = _ownerWindow.ApplyCoastTransitionFromLargeWindow(options, out var status);
             CoastStatusTextBlock.Text = status;
-            PaintStatusTextBlock.Text = "Image Matériaux/peinture mise à jour depuis les seuils hauteur. Clique ensuite sur Appliquer au projet pour l'export ZIP.";
+            PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Image Matériaux/peinture mise à jour depuis les seuils hauteur. Clique ensuite sur Appliquer au projet pour l'export ZIP.");
             CellDetailsTextBox.Text = details;
             RefreshFromParentData(refreshPalette: false);
             ViewModeComboBox.SelectedItem = ViewModeComboBox.Items.OfType<LargeViewModeRow>().FirstOrDefault(r => r.Mode == LargeViewMode.PaintMap);
+            await CompletePendingRefreshAsync();
+            });
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.ToString(), "Transition côte/plage/eau", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.ToString(), Anno1800IslandTool.Core.Localization.TextCatalog.T("Transition côte/plage/eau"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -1095,12 +1104,16 @@ public partial class TerrainMaterialMapLargeWindow : Window
     {
         try
         {
+            BusyWork.RunOperation(this, async () =>
+            {
             var details = _ownerWindow.ApplyTopologyFromLargeWindow(ReadTopologyOptions(), out var status);
             TopologyStatusTextBlock.Text = status;
             PaintStatusTextBlock.Text = UiLocalizationManager.T("Image matériaux mise à jour depuis la topologie. Clique ensuite sur Appliquer au projet pour l’export ZIP.");
             CellDetailsTextBox.Text = details;
             RefreshFromParentData(refreshPalette: false);
             ViewModeComboBox.SelectedItem = ViewModeComboBox.Items.OfType<LargeViewModeRow>().FirstOrDefault(r => r.Mode == LargeViewMode.PaintMap);
+            await CompletePendingRefreshAsync();
+            });
         }
         catch (Exception ex)
         {

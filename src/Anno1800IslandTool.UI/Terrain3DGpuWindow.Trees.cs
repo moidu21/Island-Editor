@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using System.Windows;
 using Anno1800IslandTool.Core.Terrain;
 using HelixToolkit;
@@ -58,7 +58,7 @@ public partial class Terrain3DGpuWindow
         }
 
         RefreshTreePreview();
-        TreeStatusTextBlock.Text = $"{_pendingTreeInstances.Count:N0} arbres en attente ({added:N0} ajoutés par ce passage).";
+        TreeStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"{_pendingTreeInstances.Count:N0} arbres en attente ({added:N0} ajoutés par ce passage).");
     }
 
     private void RefreshTreePreview()
@@ -92,8 +92,8 @@ public partial class Terrain3DGpuWindow
         _pendingTreeInstances.Clear();
         _hasLastTreeStampCenter = false;
         RefreshTreePreview();
-        TreeStatusTextBlock.Text = "Aucun arbre en attente.";
-        StatusTextBlock.Text = "L’aperçu des arbres a été effacé.";
+        TreeStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun arbre en attente.");
+        StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("L’aperçu des arbres a été effacé.");
         CompleteToolHistoryAction();
     }
 
@@ -101,29 +101,29 @@ public partial class Terrain3DGpuWindow
     {
         if (_pendingTreeInstances.Count == 0)
         {
-            StatusTextBlock.Text = "Peignez d’abord une zone d’arbres sur la terre.";
+            StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Peignez d’abord une zone d’arbres sur la terre.");
             return;
         }
         if (_applyTreesToProject is null)
         {
-            StatusTextBlock.Text = "Le service d’ajout d’arbres n’est pas disponible.";
+            StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Le service d’ajout d’arbres n’est pas disponible.");
             return;
         }
         try
         {
             ApplyTreesButton.IsEnabled = false;
-            var summary = _applyTreesToProject(_pendingTreeInstances.ToArray());
+            var summary = BusyWork.RunOnUi(this, () => _applyTreesToProject(_pendingTreeInstances.ToArray()));
             _hasDirectProjectCommit = true;
             _pendingTreeInstances.Clear();
             _hasLastTreeStampCenter = false;
             RefreshTreePreview();
-            TreeStatusTextBlock.Text = "Aucun arbre en attente.";
+            TreeStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun arbre en attente.");
             RebaseTransactionAfterDirectCommit();
             StatusTextBlock.Text = summary;
         }
         catch (Exception ex)
         {
-            StatusTextBlock.Text = $"Les arbres n’ont pas pu être appliqués : {ex.Message}";
+            StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Les arbres n’ont pas pu être appliqués : {ex.Message}");
         }
         finally
         {

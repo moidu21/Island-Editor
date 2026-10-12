@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;
 using Anno1800IslandTool.Core.Validation;
@@ -21,14 +21,14 @@ public sealed class TerrainCoverageValidator : IValidator<IslandProject>
 
         if (project.MeshPages.Count == 0 && project.NormalMapPages.Count == 0 && project.TintMapPages.Count == 0)
         {
-            report.Add(ValidationSeverity.Info, ValidationCode.TerrainCoverageDiagnostic, "Couverture terrain v30 : aucune page mesh/normalmap/tintmap importée.");
+            report.Add(ValidationSeverity.Info, ValidationCode.TerrainCoverageDiagnostic, Anno1800IslandTool.Core.Localization.TextCatalog.T("Couverture terrain v30 : aucune page mesh/normalmap/tintmap importée."));
             return report;
         }
 
         var (sampleWidth, sampleHeight) = TerrainPageCoverage.ResolveReferenceSampleSize(project);
         if (sampleWidth <= 0 || sampleHeight <= 0)
         {
-            report.Add(ValidationSeverity.Warning, ValidationCode.TerrainCoverageDiagnostic, "Couverture terrain v30 : taille de référence GameData inconnue, recouvrement spatial impossible.");
+            report.Add(ValidationSeverity.Warning, ValidationCode.TerrainCoverageDiagnostic, Anno1800IslandTool.Core.Localization.TextCatalog.T("Couverture terrain v30 : taille de référence GameData inconnue, recouvrement spatial impossible."));
             return report;
         }
 
@@ -36,7 +36,7 @@ public sealed class TerrainCoverageValidator : IValidator<IslandProject>
         report.Add(
             ValidationSeverity.Info,
             ValidationCode.TerrainCoverageDiagnostic,
-            $"Couverture terrain v30 : repère commun {sampleWidth}x{sampleHeight} samples GameData, validation par recouvrement spatial activée, LOD0/LOD1 protégés comme métadonnées/coverage et exclus des écritures de vertices.");
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"Couverture terrain v30 : repère commun {sampleWidth}x{sampleHeight} samples GameData, validation par recouvrement spatial activée, LOD0/LOD1 protégés comme métadonnées/coverage et exclus des écritures de vertices."));
 
         AddFamilyCoverageSummary(report, coverage, TerrainPageCoverage.MeshFamily);
         AddFamilyCoverageSummary(report, coverage, TerrainPageCoverage.NormalMapFamily);
@@ -53,7 +53,7 @@ public sealed class TerrainCoverageValidator : IValidator<IslandProject>
         var pages = TerrainPageCoverage.GetFamily(coverage, family);
         if (pages.Count == 0)
         {
-            report.Add(ValidationSeverity.Info, ValidationCode.TerrainCoverageDiagnostic, $"{family} coverage : aucune page.");
+            report.Add(ValidationSeverity.Info, ValidationCode.TerrainCoverageDiagnostic, Anno1800IslandTool.Core.Localization.TextCatalog.F($"{family} coverage : aucune page."));
             return;
         }
 
@@ -69,14 +69,14 @@ public sealed class TerrainCoverageValidator : IValidator<IslandProject>
                 var columns = g.Max(p => p.GridColumns);
                 var rows = g.Max(p => p.GridRows);
                 var exact = g.All(p => p.IsExactKeyGrid) ? "rect" : "crop";
-                return $"L{g.Key}={g.Count()} [{minX}..{maxX}x{minY}..{maxY}] grille {columns}x{rows} {exact}";
+                return Anno1800IslandTool.Core.Localization.TextCatalog.F($"L{g.Key}={g.Count()} [{minX}..{maxX}x{minY}..{maxY}] grille {columns}x{rows} {exact}");
             })
             .ToList();
 
         report.Add(
             ValidationSeverity.Info,
             ValidationCode.TerrainCoverageDiagnostic,
-            $"{family} coverage : {pages.Count} page(s), {string.Join("; ", lodSummary)}.");
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"{family} coverage : {pages.Count} page(s), {string.Join("; ", lodSummary)}."));
     }
 
     private static void AddProtectedMeshLodDiagnostics(ValidationReport report, IslandProject project, IReadOnlyList<TerrainPageBounds> coverage)
@@ -96,7 +96,7 @@ public sealed class TerrainCoverageValidator : IValidator<IslandProject>
         report.Add(
             ValidationSeverity.Info,
             ValidationCode.TerrainCoverageDiagnostic,
-            $"[OK] Mesh LOD0/LOD1 : {protectedPages.Count} page(s) traitées comme métadonnées/coverage/ground objects, exclues de la validation mesh éditable. Ground objects sur {withGroundObjects}, vertices ignorés par sécurité sur {withVertices}. Aucune régénération de vertices n'est autorisée sur ces LOD sauf opération explicitement supportée.");
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"[OK] Mesh LOD0/LOD1 : {protectedPages.Count} page(s) traitées comme métadonnées/coverage/ground objects, exclues de la validation mesh éditable. Ground objects sur {withGroundObjects}, vertices ignorés par sécurité sur {withVertices}. Aucune régénération de vertices n'est autorisée sur ces LOD sauf opération explicitement supportée."));
     }
 
     private static void AddMeshNormalOverlapDiagnostics(ValidationReport report, IslandProject project, IReadOnlyList<TerrainPageBounds> coverage)
@@ -108,13 +108,13 @@ public sealed class TerrainCoverageValidator : IValidator<IslandProject>
 
         if (meshPages.Count == 0)
         {
-            report.Add(ValidationSeverity.Info, ValidationCode.TerrainCoverageDiagnostic, "Mesh/NormalMap : aucune page mesh éditable/probable à vérifier.");
+            report.Add(ValidationSeverity.Info, ValidationCode.TerrainCoverageDiagnostic, Anno1800IslandTool.Core.Localization.TextCatalog.T("Mesh/NormalMap : aucune page mesh éditable/probable à vérifier."));
             return;
         }
 
         if (normalPages.Count == 0)
         {
-            report.Add(ValidationSeverity.Warning, ValidationCode.MissingTerrainCounterpart, "Mesh/NormalMap : pages mesh éditables/probables présentes, mais aucune normalmap/heightpage importée.");
+            report.Add(ValidationSeverity.Warning, ValidationCode.MissingTerrainCounterpart, Anno1800IslandTool.Core.Localization.TextCatalog.T("Mesh/NormalMap : pages mesh éditables/probables présentes, mais aucune normalmap/heightpage importée."));
             return;
         }
 
@@ -147,7 +147,7 @@ public sealed class TerrainCoverageValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.TerrainCoverageDiagnostic,
-                $"[OK] Mesh/NormalMap : {totalCoveredSameLod}/{meshPages.Count} page(s) mesh éditables/probables ont au moins une normalmap au même LOD par recouvrement spatial.");
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"[OK] Mesh/NormalMap : {totalCoveredSameLod}/{meshPages.Count} page(s) mesh éditables/probables ont au moins une normalmap au même LOD par recouvrement spatial."));
         }
         else
         {
@@ -156,7 +156,7 @@ public sealed class TerrainCoverageValidator : IValidator<IslandProject>
                 report.Add(
                     ValidationSeverity.Warning,
                     ValidationCode.MissingTerrainCounterpart,
-                    $"Mesh/NormalMap : {missingSameLod.Count}/{meshPages.Count} page(s) mesh éditables/probables n'ont aucune normalmap recouvrante, exemples : {FormatExamples(missingSameLod)}.");
+                    Anno1800IslandTool.Core.Localization.TextCatalog.F($"Mesh/NormalMap : {missingSameLod.Count}/{meshPages.Count} page(s) mesh éditables/probables n'ont aucune normalmap recouvrante, exemples : {FormatExamples(missingSameLod)}."));
             }
 
             if (coveredByOtherLodOnly.Count > 0)
@@ -164,7 +164,7 @@ public sealed class TerrainCoverageValidator : IValidator<IslandProject>
                 report.Add(
                     ValidationSeverity.Info,
                     ValidationCode.TerrainCoverageDiagnostic,
-                    $"Mesh/NormalMap : {coveredByOtherLodOnly.Count} page(s) mesh n'ont pas de normalmap au même LOD, mais recoupent une normalmap d'un autre LOD, exemples : {FormatExamples(coveredByOtherLodOnly)}.");
+                    Anno1800IslandTool.Core.Localization.TextCatalog.F($"Mesh/NormalMap : {coveredByOtherLodOnly.Count} page(s) mesh n'ont pas de normalmap au même LOD, mais recoupent une normalmap d'un autre LOD, exemples : {FormatExamples(coveredByOtherLodOnly)}."));
             }
 
             if (totalCoveredSameLod > 0)
@@ -172,7 +172,7 @@ public sealed class TerrainCoverageValidator : IValidator<IslandProject>
                 report.Add(
                     ValidationSeverity.Info,
                     ValidationCode.TerrainCoverageDiagnostic,
-                    $"Mesh/NormalMap : {totalCoveredSameLod}/{meshPages.Count} page(s) mesh éditables/probables couvertes au même LOD par recouvrement spatial.");
+                    Anno1800IslandTool.Core.Localization.TextCatalog.F($"Mesh/NormalMap : {totalCoveredSameLod}/{meshPages.Count} page(s) mesh éditables/probables couvertes au même LOD par recouvrement spatial."));
             }
         }
 
@@ -185,7 +185,7 @@ public sealed class TerrainCoverageValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.TerrainCoverageDiagnostic,
-                $"NormalMap : {normalWithoutMeshSameLod.Count} page(s) exemple sans mesh recouvrante au même LOD. Ce n'est pas forcément une erreur si la grille normalmap est plus large/recadrée : {FormatExamples(normalWithoutMeshSameLod)}.");
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"NormalMap : {normalWithoutMeshSameLod.Count} page(s) exemple sans mesh recouvrante au même LOD. Ce n'est pas forcément une erreur si la grille normalmap est plus large/recadrée : {FormatExamples(normalWithoutMeshSameLod)}."));
         }
     }
 
@@ -205,7 +205,7 @@ public sealed class TerrainCoverageValidator : IValidator<IslandProject>
         report.Add(
             ValidationSeverity.Info,
             ValidationCode.TerrainCoverageDiagnostic,
-            $"Mesh/TintMap : {covered}/{meshPages.Count} page(s) mesh éditables/probables recoupent au moins une tintmap, tous LOD confondus.");
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"Mesh/TintMap : {covered}/{meshPages.Count} page(s) mesh éditables/probables recoupent au moins une tintmap, tous LOD confondus."));
     }
 
     private static bool IsEditableOrProbableMesh(IslandProject project, TerrainPageKey key)
@@ -223,6 +223,6 @@ public sealed class TerrainCoverageValidator : IValidator<IslandProject>
             .Take(8)
             .Select(p => $"{p.Key} {p.SampleBounds}")
             .ToList();
-        return values.Count == 0 ? "aucun" : string.Join(", ", values);
+        return values.Count == 0 ? Anno1800IslandTool.Core.Localization.TextCatalog.T("aucun") : string.Join(", ", values);
     }
 }

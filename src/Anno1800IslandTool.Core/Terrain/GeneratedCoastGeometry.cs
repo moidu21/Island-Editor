@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Numerics;
 using System.Xml.Linq;
 
@@ -13,6 +13,17 @@ public static class GeneratedCoastGeometry
         try { doc = XDocument.Parse(text, LoadOptions.PreserveWhitespace); }
         catch (System.Xml.XmlException) { return text; }
         var changed = false;
+        // Older object-list insertion placed generated coasts after <objects />.
+        // Move only recognized generated coasts into the native list, preserving all payloads.
+        foreach (var group in doc.Descendants("EditorObject").ToArray())
+        foreach (var item in group.Elements("None").ToArray())
+        {
+            if (item.Element("guid")?.Value != "1003910" ||
+                !long.TryParse(item.Element("ID")?.Value, out var id) || !GeneratedBeachZones.IsGeneratedId(id)) continue;
+            var objects = group.Element("objects");
+            if (objects is null) { objects = new XElement("objects"); group.AddFirst(objects); }
+            item.Remove(); objects.Add(item); changed = true;
+        }
         foreach (var item in doc.Descendants().Where(n => n.Element("guid")?.Value == "1003910"))
         {
             if (!long.TryParse(item.Element("ID")?.Value, out var id) || !GeneratedBeachZones.IsGeneratedId(id)) continue;

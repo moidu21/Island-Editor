@@ -1,4 +1,4 @@
-﻿namespace Anno1800IslandTool.Core.Terrain;
+namespace Anno1800IslandTool.Core.Terrain;
 
 /// <summary>
 /// Représentation compacte de la material map terrain du rd3d.xml.
@@ -33,13 +33,7 @@ public sealed class TerrainMaterialMap
             ? new int[TerrainMaterialPackEncoding.SlotCount]
             : TerrainMaterialPackEncoding.DecodeAlphaWeights(PackedMaterialAlphas[GetAlphaIndex(x, y)]);
 
-        return new TerrainMaterialCell
-        {
-            X = x,
-            Y = y,
-            MaterialIds = ids,
-            AlphaWeights = alphas
-        };
+        return new TerrainMaterialCell(x, y, ids, alphas);
     }
 
     public void SetCell(int x, int y, IReadOnlyList<int> materialIds, IReadOnlyList<int> alphaWeights)
@@ -99,8 +93,7 @@ public sealed class TerrainMaterialMap
         EnsureCoordinates(x, y);
         EnsureBackingArrays();
         var slot = EnsureMaterialInBlock(x, y, materialId, out _, out _);
-        PackedMaterialAlphas[GetAlphaIndex(x, y)] = TerrainMaterialPackEncoding.EncodeMaterialAlphas(
-            TerrainMaterialPackEncoding.SetExclusiveAlphaSlot(slot, dominantWeight));
+        PackedMaterialAlphas[GetAlphaIndex(x, y)] = (uint)TerrainMaterialPackEncoding.ClampSlot(dominantWeight) << (slot * 5);
     }
 
     public void BlendMaterial(int x, int y, int materialId, int amount)
@@ -141,8 +134,10 @@ public sealed class TerrainMaterialMap
         var blockIndex = GetMaterialIdBlockIndex(x, y);
         var blockX = x / MaterialIdBlockSize;
         var blockY = y / MaterialIdBlockSize;
-        var ids = TerrainMaterialPackEncoding.DecodeMaterialIds(PackedMaterialIds[blockIndex]);
-        var existingSlot = Array.IndexOf(ids, clampedId);
+        uint packedIds = PackedMaterialIds[blockIndex];
+        int existingSlot = -1;
+        for (int i = 0; i < 6; i++)
+            if (((packedIds >> (i * 5)) & 31) == clampedId) { existingSlot = i; break; }
         if (existingSlot >= 0)
         {
             blockChanged = false;
@@ -150,6 +145,7 @@ public sealed class TerrainMaterialMap
             return existingSlot;
         }
 
+        var ids = TerrainMaterialPackEncoding.DecodeMaterialIds(packedIds);
         var slot = FindUnusedOrLeastUsedSlot(blockX, blockY, ids);
         replacedMaterialId = ids[slot];
         ids[slot] = clampedId;
@@ -171,11 +167,9 @@ public sealed class TerrainMaterialMap
         {
             for (var x = startX; x <= endX; x++)
             {
-                var alphas = GetCellAlphaWeights(x, y);
+                uint alphas = PackedMaterialAlphas.Length == 0 ? 0 : PackedMaterialAlphas[GetAlphaIndex(x, y)];
                 for (var i = 0; i < TerrainMaterialPackEncoding.SlotCount; i++)
-                {
-                    usage[i] += alphas[i];
-                }
+                    usage[i] += (int)((alphas >> (i * 5)) & 31);
             }
         }
 
@@ -271,7 +265,7 @@ public sealed class TerrainMaterialMap
         EnsureCoordinates(x, y);
         if (MaterialIdBlockSize <= 0)
         {
-            throw new InvalidOperationException("MaterialIdBlockSize doit être supérieur à zéro.");
+            throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("MaterialIdBlockSize doit être supérieur à zéro."));
         }
 
         var blockX = x / MaterialIdBlockSize;
@@ -279,7 +273,7 @@ public sealed class TerrainMaterialMap
         var index = blockY * BlockWidth + blockX;
         if (PackedMaterialIds.Length > 0 && index >= PackedMaterialIds.Length)
         {
-            throw new IndexOutOfRangeException($"Bloc MaterialIDs2 hors limites : {index}, count {PackedMaterialIds.Length}.");
+            throw new IndexOutOfRangeException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Bloc MaterialIDs2 hors limites : {index}, count {PackedMaterialIds.Length}."));
         }
 
         return index;
@@ -291,7 +285,7 @@ public sealed class TerrainMaterialMap
         var index = y * Width + x;
         if (PackedMaterialAlphas.Length > 0 && index >= PackedMaterialAlphas.Length)
         {
-            throw new IndexOutOfRangeException($"Texel MaterialAlphas2 hors limites : {index}, count {PackedMaterialAlphas.Length}.");
+            throw new IndexOutOfRangeException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Texel MaterialAlphas2 hors limites : {index}, count {PackedMaterialAlphas.Length}."));
         }
 
         return index;
@@ -529,7 +523,7 @@ public sealed class TerrainMaterialMap
     {
         if (x < 0 || y < 0 || x >= Width || y >= Height)
         {
-            throw new ArgumentOutOfRangeException(nameof(x), $"Coordonnées material map invalides : {x},{y} pour {Width}x{Height}.");
+            throw new ArgumentOutOfRangeException(nameof(x), Anno1800IslandTool.Core.Localization.TextCatalog.F($"Coordonnées material map invalides : {x},{y} pour {Width}x{Height}."));
         }
     }
 
@@ -537,7 +531,7 @@ public sealed class TerrainMaterialMap
     {
         if (blockX < 0 || blockY < 0 || blockX >= BlockWidth || blockY >= BlockHeight)
         {
-            throw new ArgumentOutOfRangeException(nameof(blockX), $"Bloc MaterialIDs2 invalide : {blockX},{blockY} pour {BlockWidth}x{BlockHeight}.");
+            throw new ArgumentOutOfRangeException(nameof(blockX), Anno1800IslandTool.Core.Localization.TextCatalog.F($"Bloc MaterialIDs2 invalide : {blockX},{blockY} pour {BlockWidth}x{BlockHeight}."));
         }
     }
 

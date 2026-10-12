@@ -1,4 +1,4 @@
-﻿using System.Xml.Linq;
+using System.Xml.Linq;
 using Anno1800IslandTool.Core.Common;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;
@@ -20,7 +20,7 @@ public class Corrections4687Tests
  {
   var xml="<Content><WorldManager><RiverGrid><x>8</x><y>8</y><bits>255 255 255 255 255 255 255 255</bits></RiverGrid></WorldManager></Content>";
   var text=GeneratedRiverService.SynchronizeRiverCoverage(xml,8,false);
-  Assert.Equal("0 0 0 0 0 0 0 0",XDocument.Parse(text).Descendants("bits").Single().Value);
+  Assert.Equal(string.Join(" ", Enumerable.Repeat(0, 4 * 8)),XDocument.Parse(text).Descendants("bits").Single().Value);
  }
  [Fact] public void SavedBedDepthSurvivesRepeatAndDeletedCurvesAreNotRecreated()
  {

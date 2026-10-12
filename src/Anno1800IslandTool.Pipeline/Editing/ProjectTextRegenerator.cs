@@ -52,25 +52,29 @@ public sealed class ProjectTextRegenerator
             new IslandProjectEditor().ResynchronizeMeshUsedMaterialBitsFromMaterialMap(project);
         if (Anno1800IslandTool.Pipeline.Services.CoastalMaterialUnderlay.Ensure(project) > 0)
             new IslandProjectEditor().ResynchronizeMeshUsedMaterialBitsFromMaterialMap(project);
-        var fallback = _rd3dWriter.Write(project.Rd3d);
+        if (Anno1800IslandTool.Pipeline.Services.EnbesaCoastalAlgae.Apply(project.Rd3d.MaterialMap, project.GameData.TerrainHeightMap, project.MaterialSet) > 0)
+        {
+            project.IsModified = true;
+            new IslandProjectEditor().ResynchronizeMeshUsedMaterialBitsFromMaterialMap(project);
+        }
+        string Fallback() => _rd3dWriter.Write(project.Rd3d);
         var candidate = string.IsNullOrWhiteSpace(project.RawContent.Rd3dText)
-            ? fallback
+            ? Fallback()
             : UpdateRd3dText(project.RawContent.Rd3dText!, project.Rd3d, project.GameData.TerrainHeightMap, project.Root, project.PreserveManualGlobalTintBaseTextureData);
-        project.RawContent.Rd3dText = Anno1800IslandTool.Pipeline.Services.GeneratedRiverService.ReapplyWaterFlow(
-            Anno1800IslandTool.Pipeline.Services.TerrainWaterMapSynchronizer.Synchronize(
-                PseudoXmlSafety.EnsureSingleRootOrFallback(candidate, fallback), project.GameData.TerrainHeightMap),
-            project.RawContent.GameDataText);
+        project.RawContent.Rd3dText = Anno1800IslandTool.Pipeline.Services.TerrainRd3dFinalizer.Apply(
+            PseudoXmlSafety.EnsureSingleRootOrFallback(candidate, Fallback), project);
     }
 
-    public void RegenerateGameDataText(IslandProject project)
+    public void RegenerateGameDataText(IslandProject project, bool rebuildAllTerrainAreas = false)
     {
-        var fallback = _gameDataWriter.Write(project.GameData);
+        string Fallback() => _gameDataWriter.Write(project.GameData);
         var sourceText = string.IsNullOrWhiteSpace(project.RawContent.GameDataText)
-            ? fallback
+            ? Fallback()
             : project.RawContent.GameDataText!;
         sourceText = Anno1800IslandTool.Pipeline.Services.MineSlotService.RestoreGeneratedSequences(sourceText);
-        var candidate = UpdateGameDataText(sourceText, project.Metadata.MapSize, project.GameData, project.Root);
-        var safeText = GeneratedCoastGeometry.RepairBounds(PseudoXmlSafety.EnsureSingleRootOrFallback(candidate, fallback));
+        sourceText = Anno1800IslandTool.Pipeline.Services.IslandGridSynchronization.SynchronizeSpawnText(sourceText, project.Root.MapSize);
+        var candidate = UpdateGameDataText(sourceText, project.Metadata.MapSize, project.GameData, project.Root, rebuildAllTerrainAreas);
+        var safeText = GeneratedCoastGeometry.RepairBounds(PseudoXmlSafety.EnsureSingleRootOrFallback(candidate, Fallback));
         var irrigatedBiome = Anno1800IslandTool.Pipeline.Services.GeneratedRiverService.UsesIrrigation(project);
         project.RawContent.GameDataText = Anno1800IslandTool.Pipeline.Services.GeneratedRiverService.SynchronizeRiverObjects(
             safeText,
@@ -167,6 +171,17 @@ public sealed class ProjectTextRegenerator
             text = ReplaceTagValue(text, "MaterialAlphas2", FormatPackedMaterialArray(rd3d.MaterialMap.PackedMaterialAlphas));
         }
         text = ReplacePropGrid(text, rd3d.PropGrid);
+        // GritMap2 stores 4x4 compression blocks; its header is measured in texels.
+        // Resizing the block payload must not leave the original island's 768x768 header.
+        var grit = ReadBalancedBlock(text, "GritMap2");
+        var gritWidth = grit is null ? 0 : ReadIntTag(grit, "width") ?? 0;
+        var gritHeight = grit is null ? 0 : ReadIntTag(grit, "height") ?? 0;
+        if (gritWidth > 0 && gritHeight > 0)
+        {
+            text = ReplaceTagValue(text, "GritMapWidth", checked(gritWidth * 4).ToString(CultureInfo.InvariantCulture));
+            text = ReplaceTagValue(text, "GritMapHeight", checked(gritHeight * 4).ToString(CultureInfo.InvariantCulture));
+        }
+
 
         // v26.8 : Anno utilise aussi la <CoarseHeightMap> RD3D comme source de hauteur
         // terrain proche via cTerrainHeightTex. Si elle reste ancienne pendant que GameData,
@@ -317,7 +332,7 @@ public sealed class ProjectTextRegenerator
         }
 
         sb.Append(levelsBody, last, levelsBody.Length - last);
-        return text.Substring(0, levelsRange.Value.ContentStart) + sb + text.Substring(levelsRange.Value.ContentStart + levelsRange.Value.ContentLength);
+        return ReplaceRange(text, levelsRange.Value.ContentStart, levelsRange.Value.ContentStart + levelsRange.Value.ContentLength, sb.ToString());
     }
 
     private static string ReplaceRd3dSingleLevelHasMeshArray(
@@ -449,7 +464,7 @@ public sealed class ProjectTextRegenerator
         }
 
         sb.Append(levelsBody, last, levelsBody.Length - last);
-        var updatedContainerBody = containerBody.Substring(0, levelsRange.Value.ContentStart) + sb + containerBody.Substring(levelsRange.Value.ContentStart + levelsRange.Value.ContentLength);
+        var updatedContainerBody = ReplaceRange(containerBody, levelsRange.Value.ContentStart, levelsRange.Value.ContentStart + levelsRange.Value.ContentLength, sb.ToString());
         return ReplaceBalancedBlock(text, containerTag, updatedContainerBody);
     }
 
@@ -548,7 +563,7 @@ public sealed class ProjectTextRegenerator
         }
 
         sb.Append(levelsBody, last, levelsBody.Length - last);
-        return text.Substring(0, levelsRange.Value.ContentStart) + sb + text.Substring(levelsRange.Value.ContentStart + levelsRange.Value.ContentLength);
+        return ReplaceRange(text, levelsRange.Value.ContentStart, levelsRange.Value.ContentStart + levelsRange.Value.ContentLength, sb.ToString());
     }
 
     private static string ReplaceRd3dSingleLevelBounds(string levelBody, CoarseHeightMap heightMap)
@@ -726,14 +741,14 @@ public sealed class ProjectTextRegenerator
     }
 
 
-    private static string UpdateGameDataText(string text, int mapSize, GameDataDefinition gameData, IslandRootDefinition root)
+    private static string UpdateGameDataText(string text, int mapSize, GameDataDefinition gameData, IslandRootDefinition root, bool rebuildAllTerrainAreas)
     {
         text = ReplaceTagValue(text, "WorldSize", $"{mapSize} {mapSize}");
         text = ReplaceSimpleRectTag(text, "PlayableArea", gameData.PlayableArea);
         var formattedHeightMap = string.Join(" ", gameData.TerrainHeightMap.Samples.Select(v => FormatGameDataHeightSample(v, gameData.TerrainHeightMap)));
 
         var terrainBody = ReadBalancedBlock(text, "TerrainManager");
-        var previousHeightMap = new Anno1800IslandTool.Formats.Readers.GameDataReader().Read("<Content><TerrainManager>" + terrainBody + "</TerrainManager></Content>").TerrainHeightMap;
+        var previousHeightMap = new Anno1800IslandTool.Formats.Readers.GameDataReader().ReadHeightMap(text);
         if (!string.IsNullOrWhiteSpace(terrainBody))
         {
             var outerHeightMapBody = ReadBalancedBlock(terrainBody, "HeightMap");
@@ -753,7 +768,7 @@ public sealed class ProjectTextRegenerator
         }
         else
         {
-            text = PseudoXmlSafety.EnsureSingleRootOrFallback(_fallbackGameData(gameData, mapSize), _fallbackGameData(gameData, mapSize));
+            text = PseudoXmlSafety.EnsureSingleRootOrFallback(_fallbackGameData(gameData, mapSize), () => _fallbackGameData(gameData, mapSize));
         }
 
         text = ReplaceAreaIdsBlock(text, gameData.Areas);
@@ -768,7 +783,7 @@ public sealed class ProjectTextRegenerator
         // - AreaIDs : zones modifiées recalculées, identifiants de propriétaires conservés.
         // - RegrowManager/TreeMap : conservation des arbres existants uniquement sur terrain valide.
         // - StreetMap : conservation des routes existantes uniquement sur terrain constructible.
-        text = SynchronizeGameDataTerrainMaps(text, gameData.TerrainHeightMap, mapSize, root, previousHeightMap);
+        text = SynchronizeGameDataTerrainMaps(text, gameData.TerrainHeightMap, mapSize, root, previousHeightMap, rebuildAllTerrainAreas);
 
         return text;
     }
@@ -777,7 +792,7 @@ public sealed class ProjectTextRegenerator
         => new GameDataWriter().Write(gameData);
 
 
-    private static string SynchronizeGameDataTerrainMaps(string text, CoarseHeightMap heightMap, int mapSize, IslandRootDefinition root, CoarseHeightMap previousHeightMap)
+    private static string SynchronizeGameDataTerrainMaps(string text, CoarseHeightMap heightMap, int mapSize, IslandRootDefinition root, CoarseHeightMap previousHeightMap, bool rebuildAllTerrainAreas)
     {
         if (string.IsNullOrWhiteSpace(text) ||
             heightMap.Width <= 1 ||
@@ -789,7 +804,7 @@ public sealed class ProjectTextRegenerator
         }
 
         text = ReplaceWorldManagerWaterMask(text, heightMap, mapSize, root);
-        text = ReplaceAreaIdsFromTerrain(text, heightMap, mapSize, root, previousHeightMap);
+        text = ReplaceAreaIdsFromTerrain(text, heightMap, mapSize, root, previousHeightMap, rebuildAllTerrainAreas);
         text = SanitizeRegrowTreeMapFromTerrain(text, heightMap, mapSize, root);
         text = SanitizeStreetMapFromTerrain(text, heightMap, mapSize, root);
         return text;
@@ -812,7 +827,7 @@ public sealed class ProjectTextRegenerator
     // bateau s'arrêtait trop loin et le comptoir n'était jamais proposé.
     private const float GameDataBaseLandThresholdWorld = 0.0f;
     private const float GameDataBuildableMinWorld = -7.75f;
-    private const float GameDataBuildableMaxWorld = 11.0f;
+    // Elevation alone does not make a flat plateau unbuildable.
     private const float GameDataBuildableMaxSlope = 0.65f;
     private const float GameDataTreeMinWorld = 0.25f;
     private const float GameDataTreeMaxWorld = 22.0f;
@@ -917,7 +932,6 @@ public sealed class ProjectTextRegenerator
             buildable[i] =
                 land[i] &&
                 h >= GameDataBuildableMinWorld &&
-                h <= GameDataBuildableMaxWorld &&
                 slope <= GameDataBuildableMaxSlope;
 
             // A harbor straddles land and shallow water. AreaIDs layer 32 must
@@ -1052,11 +1066,11 @@ public sealed class ProjectTextRegenerator
         var masks = BuildGameDataTerrainMasks(heightMap, width, height, mapSize, root);
         var updated = ReplaceTagValue(body, "x", masks.Width.ToString(CultureInfo.InvariantCulture));
         updated = ReplaceTagValue(updated, "y", masks.Height.ToString(CultureInfo.InvariantCulture));
-        updated = ReplaceTagValue(updated, "bits", FormatIntList(PackBits(masks.Land)));
+        updated = ReplaceTagValue(updated, "bits", FormatIntList(PackBitsAlignedRows(masks.Land, masks.Width, masks.Height)));
         return ReplaceBalancedBlock(text, "Water", updated);
     }
 
-    private static string ReplaceAreaIdsFromTerrain(string text, CoarseHeightMap heightMap, int mapSize, IslandRootDefinition root, CoarseHeightMap previousHeightMap)
+    private static string ReplaceAreaIdsFromTerrain(string text, CoarseHeightMap heightMap, int mapSize, IslandRootDefinition root, CoarseHeightMap previousHeightMap, bool rebuildAllTerrainAreas)
     {
         var body=ReadBalancedBlock(text,"AreaIDs");
         bool missing = string.IsNullOrWhiteSpace(body);
@@ -1074,7 +1088,7 @@ public sealed class ProjectTextRegenerator
         if(element.Element("val") is null && element.Element("block") is null) return text;
         var grid=Anno1800IslandTool.Pipeline.Services.GameplayGridCodec.Read(element,2);
         var changed=Anno1800IslandTool.Pipeline.Services.TerrainAreaGridSync.ChangedCells(previousHeightMap,heightMap,grid.Width,grid.Height);
-        if (missing) Array.Fill(changed, true);
+        if (missing || rebuildAllTerrainAreas) Array.Fill(changed, true);
         var beaches=GeneratedBeachZones.Parse(text);
         var masks=BuildGameDataTerrainMasks(heightMap,grid.Width,grid.Height,mapSize,root,beaches);
         for(int i=0;i<changed.Length;i++)
@@ -1187,9 +1201,11 @@ public sealed class ProjectTextRegenerator
             return new List<int>();
         }
 
-        return Regex.Matches(match.Groups["values"].Value, @"-?\d+", RegexOptions.CultureInvariant)
-            .Select(m => int.Parse(m.Value, CultureInfo.InvariantCulture))
-            .ToList();
+        var span = match.Groups["values"].ValueSpan;
+        var result = new List<int>(Regex.Count(span, @"-?\d+", RegexOptions.CultureInvariant));
+        foreach (var number in Regex.EnumerateMatches(span, @"-?\d+", RegexOptions.CultureInvariant))
+            result.Add(int.Parse(span.Slice(number.Index, number.Length), CultureInfo.InvariantCulture));
+        return result;
     }
 
     private static bool[] UnpackBits(IReadOnlyList<int> bytes, int cellCount)
@@ -1657,7 +1673,9 @@ public sealed class ProjectTextRegenerator
             var end = text.IndexOf(closeTag, start + openTag.Length, StringComparison.OrdinalIgnoreCase);
             if (end >= 0)
             {
-                return text.Substring(0, start + openTag.Length) + value + text.Substring(end);
+                var oldValue = text.AsSpan(start + openTag.Length, end - start - openTag.Length);
+                if (oldValue.SequenceEqual(value.AsSpan())) return text;
+                return string.Concat(text.AsSpan(0, start + openTag.Length), value.AsSpan(), text.AsSpan(end));
             }
         }
 
@@ -1718,10 +1736,16 @@ public sealed class ProjectTextRegenerator
 
         if (wholeBlock)
         {
-            return text.Substring(0, range.Value.OpenTagStart) + replacementContent + text.Substring(range.Value.CloseTagEnd);
+            return ReplaceRange(text, range.Value.OpenTagStart, range.Value.CloseTagEnd, replacementContent);
         }
 
-        return text.Substring(0, range.Value.ContentStart) + replacementContent + text.Substring(range.Value.ContentStart + range.Value.ContentLength);
+        return ReplaceRange(text, range.Value.ContentStart, range.Value.ContentStart + range.Value.ContentLength, replacementContent);
+    }
+
+    private static string ReplaceRange(string text, int start, int end, string replacement)
+    {
+        if (text.AsSpan(start, end - start).SequenceEqual(replacement.AsSpan())) return text;
+        return string.Concat(text.AsSpan(0, start), replacement.AsSpan(), text.AsSpan(end));
     }
 
     private static BalancedTagRange? FindBalancedTagRange(string text, string tag)

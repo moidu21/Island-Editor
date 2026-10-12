@@ -38,14 +38,14 @@ public static class TerrainTopologyMaterialPainter
         var result = new TerrainMaterialPaintResult();
         if (materialMap.Width <= 0 || materialMap.Height <= 0 || heightMap.Width <= 1 || heightMap.Height <= 1)
         {
-            result.Messages.Add("Material map ou heightmap vide : peinture topologique annulée.");
+            result.Messages.Add(Anno1800IslandTool.Core.Localization.TextCatalog.T("Material map ou heightmap vide : peinture topologique annulée."));
             return result;
         }
 
         var bounds = NormalizeBounds(materialMap, materialCellBounds);
         if (bounds.Right <= bounds.Left || bounds.Bottom <= bounds.Top)
         {
-            result.Messages.Add("Peinture topologique ignorée : zone vide.");
+            result.Messages.Add(Anno1800IslandTool.Core.Localization.TextCatalog.T("Peinture topologique ignorée : zone vide."));
             return result;
         }
 
@@ -77,6 +77,7 @@ public static class TerrainTopologyMaterialPainter
         bool continuous = options.UseNativeCells && !options.UseBlend &&
             new[]{TerrainTopologyRole.Flat,TerrainTopologyRole.GentleSlope,TerrainTopologyRole.SteepSlope,TerrainTopologyRole.Ridge,TerrainTopologyRole.Hollow}
                 .All(r => options.CellRecipes.TryGetValue(r,out var recipe) && recipe.PrimaryMaterialId==ResolveMaterialId(r,options));
+        var orderedRecipes = options.CellRecipes.OrderBy(p => p.Key).Select(p => p.Value).ToArray();
         var decisions = new TopologyDecision[materialMap.Width * materialMap.Height];
         TerrainComputeScheduler.For(bounds.Top, bounds.Bottom, 64, y =>
         {
@@ -116,7 +117,7 @@ public static class TerrainTopologyMaterialPainter
                     foreach(var layer in recipe.Layers)Add(layer.MaterialId);
             }
             if(continuous)
-                foreach(var recipe in options.CellRecipes.OrderBy(p=>p.Key).Select(p=>p.Value))
+                foreach(var recipe in orderedRecipes)
                 { Add(recipe.PrimaryMaterialId); foreach(var layer in recipe.Layers)Add(layer.MaterialId); }
             if(options.FlatTilingEnabled)Add(options.FlatTilingMaterialId);
             while(ids.Count<6)ids.Add(ids[0]);
@@ -232,13 +233,53 @@ public static class TerrainTopologyMaterialPainter
             }
         }
 
+        // Keep the low shoreline continuous. Native vegetation overlays otherwise
+        // produce green holes on flat beach cells. Do not recolour inland lowlands.
+        if (!options.UseBlend && options.OpaqueBaseMaterialId is int beachId)
+        for (int y=bounds.Top; y<bounds.Bottom; y++)
+        for (int x=bounds.Left; x<bounds.Right; x++)
+        {
+            if (activeMaterialCellPredicate is not null && !activeMaterialCellPredicate(x,y)) continue;
+            double hx=(x+.5)/materialMap.Width*(heightMap.Width-1), hy=(y+.5)/materialMap.Height*(heightMap.Height-1);
+            float h=TerrainHeightEncoding.SampleCoarseHeightMapWorld(heightMap,hx,hy);
+            if (h<=0 || h>=1.25f) continue;
+            double dx=8*(heightMap.Width-1)/Math.Max(1,options.WorldWidth>0?options.WorldWidth:materialMap.Width);
+            double dy=8*(heightMap.Height-1)/Math.Max(1,options.WorldHeight>0?options.WorldHeight:materialMap.Height);
+            bool nearWater=false;
+            for(int az=-1;az<=1 && !nearWater;az++)
+            for(int ax=-1;ax<=1 && !nearWater;ax++)
+            {
+                if(ax==0 && az==0)continue;
+                for(int step=1;step<=4 && !nearWater;step++)
+                    nearWater=TerrainHeightEncoding.SampleCoarseHeightMapWorld(heightMap,
+                        Math.Clamp(hx+ax*dx*step/4,0,heightMap.Width-1),
+                        Math.Clamp(hy+az*dy*step/4,0,heightMap.Height-1))<=0;
+            }
+            if(!nearWater)continue;
+            TerrainMaterialUnderlay.EnsureCell(materialMap,x,y,beachId);
+            int block=materialMap.GetMaterialIdBlockIndex(x,y), index=y*materialMap.Width+x;
+            uint ids=materialMap.PackedMaterialIds[block], old=materialMap.PackedMaterialAlphas[index], next=0;
+            float fade=Math.Clamp((h-.5f)/.75f,0,1);fade=fade*fade*(3-2*fade);
+            bool hasBeach=false;
+            for(int slot=0;slot<6;slot++)
+            {
+                bool beach=((ids>>(5*slot))&31)==beachId;hasBeach|=beach;
+                uint weight=beach?31u:(uint)Math.Round(((old>>(5*slot))&31)*fade);
+                next|=weight<<(5*slot);
+            }
+            if(!hasBeach || next==old)continue;
+            materialMap.PackedMaterialAlphas[index]=next;
+            result.CellsChanged++;result.AffectedMaterialIds.Add(beachId);changedBlocks.Add(block);
+            left=Math.Min(left,x);top=Math.Min(top,y);right=Math.Max(right,x+1);bottom=Math.Max(bottom,y+1);
+        }
+
         result.BlocksChanged = changedBlocks.Count;
         if (result.CellsChanged > 0)
         {
             result.AffectedBounds = new RectI(left, top, right, bottom);
         }
 
-        result.Messages.Add($"Peinture topologique : plats={stats.FlatCells}, pentes douces={stats.GentleSlopeCells}, pentes fortes={stats.SteepSlopeCells}, crêtes={stats.RidgeCells}, creux={stats.HollowCells}, préservées={stats.PreservedCells}, ignorées={stats.SkippedCells}. Analyse locale rayon={options.AnalysisRadius}, sans seuil d'altitude.");
+        result.Messages.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Peinture topologique : plats={stats.FlatCells}, pentes douces={stats.GentleSlopeCells}, pentes fortes={stats.SteepSlopeCells}, crêtes={stats.RidgeCells}, creux={stats.HollowCells}, préservées={stats.PreservedCells}, ignorées={stats.SkippedCells}. Analyse locale rayon={options.AnalysisRadius}, sans seuil d'altitude."));
         return result;
     }
 
@@ -311,16 +352,22 @@ public static class TerrainTopologyMaterialPainter
         roleWeights[(int)TerrainTopologyRole.SteepSlope]=flatEdge*steep*(1-shape);
         roleWeights[(int)(d.Curvature>=0?TerrainTopologyRole.Ridge:TerrainTopologyRole.Hollow)]=shape;
         Span<float> weights=stackalloc float[32];weights.Clear();
+        Span<double> variations = stackalloc double[32];
+        uint computedVariations = 0;
         foreach(var pair in options.CellRecipes)
         {
             float mix=roleWeights[(int)pair.Key];if(mix<=0)continue;
             var recipe=pair.Value;
             int primary=TerrainMaterialPackEncoding.ClampSlot(recipe.PrimaryMaterialId);
-            weights[primary]+=mix*(options.ClampedStrength/31f)*(float)(recipe.PrimaryMinimum+(recipe.PrimaryMaximum-recipe.PrimaryMinimum)*Variation(primary));
+            if ((computedVariations & (1u << primary)) == 0)
+            { variations[primary] = Variation(primary); computedVariations |= 1u << primary; }
+            weights[primary]+=mix*(options.ClampedStrength/31f)*(float)(recipe.PrimaryMinimum+(recipe.PrimaryMaximum-recipe.PrimaryMinimum)*variations[primary]);
             foreach(var layer in recipe.Layers)
             {
                 int id=TerrainMaterialPackEncoding.ClampSlot(layer.MaterialId);
-                float weight=(float)(layer.Minimum+(layer.Maximum-layer.Minimum)*Variation(id));
+                if ((computedVariations & (1u << id)) == 0)
+                { variations[id] = Variation(id); computedVariations |= 1u << id; }
+                float weight=(float)(layer.Minimum+(layer.Maximum-layer.Minimum)*variations[id]);
                 if(layer.FadeOnSlope)weight*=1-steep;
                 weights[id]+=mix*weight;
             }

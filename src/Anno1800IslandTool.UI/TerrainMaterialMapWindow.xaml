@@ -1,4 +1,4 @@
-﻿<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering" x:Class="Anno1800IslandTool.UI.TerrainMaterialMapWindow" Title="Anno1800IslandTool v46.120 - matériaux carrelés et menus organisés" Height="1080" Width="1520" WindowStartupLocation="CenterOwner">
+﻿<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering" x:Class="Anno1800IslandTool.UI.TerrainMaterialMapWindow" Title="Anno1800IslandTool v46.156" Height="1080" Width="1520" WindowStartupLocation="CenterOwner">
   <Grid Margin="12">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto"/>

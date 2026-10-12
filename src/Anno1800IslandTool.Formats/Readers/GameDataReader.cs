@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text.RegularExpressions;
 using Anno1800IslandTool.Core.Common;
 using Anno1800IslandTool.Core.Models;
@@ -25,17 +25,8 @@ public sealed class GameDataReader
     {
         var result = new GameDataDefinition();
 
+        result.TerrainHeightMap = ReadHeightMap(text);
         var terrainManagerBlock = ReadBalancedBlock(text, "TerrainManager") ?? string.Empty;
-        var outerHeightMapBlock = ReadBalancedBlock(terrainManagerBlock, "HeightMap") ?? string.Empty;
-        var samplesBlock = ReadBalancedBlock(outerHeightMapBlock, "HeightMap") ?? string.Empty;
-
-        result.TerrainHeightMap = new CoarseHeightMap
-        {
-            Width = ReadInt(outerHeightMapBlock, "Width") ?? 0,
-            Height = ReadInt(outerHeightMapBlock, "Height") ?? 0,
-            Samples = ParseSamples(samplesBlock),
-            SampleEncoding = TerrainHeightSampleEncoding.GameDataRawUInt16
-        };
 
         var playableAreaMatch = Regex.Match(text, @"<PlayableArea>\s*(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)", RegexOptions.IgnoreCase);
         if (playableAreaMatch.Success)
@@ -76,6 +67,21 @@ public sealed class GameDataReader
         return result;
     }
 
+    // Height synchronization needs only this grid, not manager diagnostics or objects.
+    public CoarseHeightMap ReadHeightMap(string text)
+    {
+        var terrainManagerBlock = ReadBalancedBlock(text, "TerrainManager") ?? string.Empty;
+        var outerHeightMapBlock = ReadBalancedBlock(terrainManagerBlock, "HeightMap") ?? string.Empty;
+        var samplesBlock = ReadBalancedBlock(outerHeightMapBlock, "HeightMap") ?? string.Empty;
+        return new CoarseHeightMap
+        {
+            Width = ReadInt(outerHeightMapBlock, "Width") ?? 0,
+            Height = ReadInt(outerHeightMapBlock, "Height") ?? 0,
+            Samples = ParseSamples(samplesBlock),
+            SampleEncoding = TerrainHeightSampleEncoding.GameDataRawUInt16
+        };
+    }
+
     private static GameplayBlockInfo AnalyzeBlock(string tag, string? body)
     {
         if (string.IsNullOrWhiteSpace(body))
@@ -88,9 +94,9 @@ public sealed class GameDataReader
             Tag = tag,
             IsPresent = true,
             RawBody = body,
-            NoneCount = Regex.Matches(body, @"<None>(?!\s*</None>)", RegexOptions.IgnoreCase).Count,
-            PositionCount = Regex.Matches(body, @"<Position>\s*[^<\r\n]+\s*</Position>", RegexOptions.IgnoreCase).Count,
-            RectCount = Regex.Matches(body, @"-?\d+\s+-?\d+\s+-?\d+\s+-?\d+").Count,
+            NoneCount = Regex.Count(body, @"<None>(?!\s*</None>)", RegexOptions.IgnoreCase),
+            PositionCount = Regex.Count(body, @"<Position>\s*[^<\r\n]+\s*</Position>", RegexOptions.IgnoreCase),
+            RectCount = Regex.Count(body, @"-?\d+\s+-?\d+\s+-?\d+\s+-?\d+"),
             Width = ReadInt(body, "x") ?? 0,
             Height = ReadInt(body, "y") ?? 0
         };
@@ -100,7 +106,7 @@ public sealed class GameDataReader
             var bitsMatch = Regex.Match(body, @"<bits>\s*(?<bits>[^<]*)", RegexOptions.IgnoreCase);
             if (bitsMatch.Success)
             {
-                info.BitCount = Regex.Matches(bitsMatch.Groups["bits"].Value, @"-?\d+").Count;
+                info.BitCount = Regex.Count(bitsMatch.Groups["bits"].Value, @"-?\d+");
             }
         }
 
@@ -109,16 +115,16 @@ public sealed class GameDataReader
             var valMatch = Regex.Match(body, @"<val>\s*(?<values>[^<]*)", RegexOptions.IgnoreCase);
             if (valMatch.Success)
             {
-                info.ValueCount = Regex.Matches(valMatch.Groups["values"].Value, @"-?\d+").Count;
+                info.ValueCount = Regex.Count(valMatch.Groups["values"].Value, @"-?\d+");
             }
         }
         else if (tag.Equals("SpawnAreaPoints", StringComparison.OrdinalIgnoreCase))
         {
-            info.ValueCount = Regex.Matches(body, @"<m_AreaPointGrid>|<m_AreaRect>|<Position>", RegexOptions.IgnoreCase).Count;
+            info.ValueCount = Regex.Count(body, @"<m_AreaPointGrid>|<m_AreaRect>|<Position>", RegexOptions.IgnoreCase);
         }
         else
         {
-            info.ValueCount = Regex.Matches(body, @"-?\d+").Count;
+            info.ValueCount = Regex.Count(body, @"-?\d+");
         }
 
         return info;
@@ -236,16 +242,17 @@ public sealed class GameDataReader
             return Array.Empty<float>();
         }
 
-        var matches = Regex.Matches(text, @"-?\d+(?:[\.,]\d+)?");
-        if (matches.Count == 0)
+        const string pattern = @"-?\d+(?:[\.,]\d+)?";
+        var values = new float[Regex.Count(text, pattern)];
+        int index = 0;
+        foreach (var match in Regex.EnumerateMatches(text.AsSpan(), pattern))
         {
-            return Array.Empty<float>();
-        }
-
-        var values = new float[matches.Count];
-        for (var i = 0; i < matches.Count; i++)
-        {
-            values[i] = float.Parse(matches[i].Value.Replace(',', '.'), CultureInfo.InvariantCulture);
+            var token = text.AsSpan(match.Index, match.Length);
+            // Keep the legacy comma-decimal behavior; ordinary integer grids
+            // allocate only their final sample array.
+            values[index++] = token.Contains(',')
+                ? float.Parse(token.ToString().Replace(',', '.'), CultureInfo.InvariantCulture)
+                : float.Parse(token, CultureInfo.InvariantCulture);
         }
 
         return values;

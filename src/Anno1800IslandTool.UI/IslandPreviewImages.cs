@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Anno1800IslandTool.Core.Common;
@@ -9,6 +9,7 @@ using Anno1800IslandTool.UI.Rendering;
 namespace Anno1800IslandTool.UI;
 internal static class IslandPreviewImages
 {
+    public static event Action<IslandProject>? Refreshed;
     public static string Refresh(IslandProject project) => Refresh(project,
         ActiveMapGridMaskCodec.Decode(project.Root.ActiveMapGrid,project.Root.ActiveMapGridBits,project.Root.ActiveMapRect),
         project.Root.ActiveMapGrid,project.GameData.TerrainHeightMap);
@@ -42,7 +43,7 @@ internal static class IslandPreviewImages
     {
         if (grid.X <= 0 || grid.Y <= 0 || activeMask.Count < grid.X * grid.Y || heightMap.Width <= 0 || heightMap.Height <= 0 || heightMap.Samples.Length < (long)heightMap.Width * heightMap.Height)
         {
-            return "Aperçus 2D : données insuffisantes.";
+            return Anno1800IslandTool.Core.Localization.TextCatalog.T("Aperçus 2D : données insuffisantes.");
         }
 
         const int size = 1024;
@@ -109,7 +110,8 @@ internal static class IslandPreviewImages
         }
 
         project.ModifiedSections.Add("PreviewImages2D");
-        return "Aperçus 2D : activemapimage, mapimage et gamemapimage recalculés en PNG/DDS.";
+        Refreshed?.Invoke(project);
+        return Anno1800IslandTool.Core.Localization.TextCatalog.T("Aperçus 2D : activemapimage, mapimage et gamemapimage recalculés en PNG/DDS.");
     }
 
     private static string ResolvePreviewBaseDirectory(IslandProject project)

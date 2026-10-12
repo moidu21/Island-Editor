@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text;
 using Anno1800IslandTool.Pipeline.Services;
 
@@ -8,7 +8,7 @@ public partial class Terrain3DWindow
 {
     private string ApplyTreesFromGpu(IReadOnlyList<GpuTreeInstance> trees)
     {
-        if (trees.Count == 0) return "Aucun arbre à ajouter.";
+        if (trees.Count == 0) return Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun arbre à ajouter.");
         var fileNames = _project.Rd3d.PropGrid.FileNames.ToList();
         var synchronizer = new Anno1800IslandTool.Pipeline.Services.MaterialSetEnvironmentSynchronizer();
         var compatiblePaths = synchronizer.GetCompatibleTreePaths(_project, out var biomeName).ToList();
@@ -24,7 +24,7 @@ public partial class Terrain3DWindow
             }
             treeIndexes.Add(existing);
         }
-        if (treeIndexes.Count == 0) throw new InvalidOperationException($"Aucun arbre compatible n’est disponible pour le biome {biomeName}.");
+        if (treeIndexes.Count == 0) throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Aucun arbre compatible n’est disponible pour le biome {biomeName}."));
 
         var gridWidth = _project.Rd3d.GridWidth > 0 ? _project.Rd3d.GridWidth : _project.Root.MapSize * 32d;
         var gridHeight = _project.Rd3d.GridHeight > 0 ? _project.Rd3d.GridHeight : _project.Root.MapSize * 32d;
@@ -54,7 +54,9 @@ public partial class Terrain3DWindow
             sb.AppendLine($"  <Rotation>0 {TreeNumber(sin)} 0 {TreeNumber(cos)}</Rotation>");
             sb.AppendLine($"  <Scale>{TreeNumber(tree.Scale)} {TreeNumber(tree.Scale)} {TreeNumber(tree.Scale)}</Scale>");
             sb.AppendLine("  <Color>1 1 1 1</Color>");
-            sb.AppendLine("  <AdaptTerrainHeight>True</AdaptTerrainHeight>");
+            // Position.Y is already sampled on the terrain. Keep the native tree transform
+            // stable across mesh/impostor LOD changes; terrain validation updates the anchor.
+            sb.AppendLine("  <AdaptTerrainHeight>False</AdaptTerrainHeight>");
             sb.Append("</None>");
             instances.Add(sb.ToString());
         }

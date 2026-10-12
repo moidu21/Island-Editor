@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading;
 using System.Windows;
 using System.Windows.Media;
@@ -57,7 +57,7 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.ToString(), "Anno1800IslandTool - startup error", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(ex.ToString(), Anno1800IslandTool.Core.Localization.TextCatalog.T("Anno1800IslandTool - startup error"), MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown();
         }
     }

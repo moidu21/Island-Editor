@@ -1,4 +1,4 @@
-﻿namespace Anno1800IslandTool.Core.Models;
+namespace Anno1800IslandTool.Core.Models;
 
 public sealed class GameplayBlockInfo
 {
@@ -19,7 +19,7 @@ public sealed class GameplayBlockInfo
         {
             if (!IsPresent)
             {
-                return "absent";
+                return Anno1800IslandTool.Core.Localization.TextCatalog.T("absent");
             }
 
             var parts = new List<string>();
@@ -53,7 +53,7 @@ public sealed class GameplayBlockInfo
                 parts.Add($"bits={BitCount}");
             }
 
-            return parts.Count == 0 ? "présent" : string.Join(", ", parts);
+            return parts.Count == 0 ? Anno1800IslandTool.Core.Localization.TextCatalog.T("présent") : string.Join(", ", parts);
         }
     }
 }

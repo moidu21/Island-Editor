@@ -1,4 +1,4 @@
-﻿namespace Anno1800IslandTool.Formats.Discovery;
+namespace Anno1800IslandTool.Formats.Discovery;
 
 public sealed class DiscoveredIslandFiles
 {

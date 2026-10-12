@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text.RegularExpressions;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Validation;
@@ -25,7 +25,7 @@ public sealed class Rd3dContractValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.SuspiciousRd3dSetting,
-                $"UnitScale inattendu. Attendu 0.03125, obtenu {rd3d.UnitScale.ToString(CultureInfo.InvariantCulture)}.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"UnitScale inattendu. Attendu 0.03125, obtenu {rd3d.UnitScale.ToString(CultureInfo.InvariantCulture)}."),
                 project.Rd3dFilePath ?? "rd3d.xml");
         }
 
@@ -34,7 +34,7 @@ public sealed class Rd3dContractValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.SuspiciousRd3dSetting,
-                "UsingSplitImageHeightMaps vaut False alors que les îles interprétées connues utilisent True.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.T("UsingSplitImageHeightMaps vaut False alors que les îles interprétées connues utilisent True."),
                 project.Rd3dFilePath);
         }
 
@@ -70,7 +70,7 @@ public sealed class Rd3dContractValidator : IValidator<IslandProject>
                 report.Add(
                     ValidationSeverity.Info,
                     ValidationCode.TerrainCoverageDiagnostic,
-                    $"[OK] HasMeshArray LOD{lod} : {width}x{height}, {bitCount} octets, stride align4 valide.",
+                    Anno1800IslandTool.Core.Localization.TextCatalog.F($"[OK] HasMeshArray LOD{lod} : {width}x{height}, {bitCount} octets, stride align4 valide."),
                     project.Rd3dFilePath ?? "rd3d.xml");
                 continue;
             }
@@ -78,7 +78,7 @@ public sealed class Rd3dContractValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Error,
                 ValidationCode.TerrainCoverageDiagnostic,
-                $"HasMeshArray LOD{lod} invalide : {bitCount} octets, attendu {expected} pour {width}x{height} avec stride align4(ceil(width/8)). Export à risque de dalles/culling/crash.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"HasMeshArray LOD{lod} invalide : {bitCount} octets, attendu {expected} pour {width}x{height} avec stride align4(ceil(width/8)). Export à risque de dalles/culling/crash."),
                 project.Rd3dFilePath ?? "rd3d.xml");
         }
     }
@@ -107,7 +107,7 @@ public sealed class Rd3dContractValidator : IValidator<IslandProject>
                 var h = ReadIntTag(array, tag == "HasMeshArray" ? "y" : "height");
                 if ((x.HasValue && w.HasValue && x != w) || (z.HasValue && h.HasValue && z != h))
                     report.Add(ValidationSeverity.Error, ValidationCode.TerrainCoverageDiagnostic,
-                        $"LOD{lod} : LevelSize {x}x{z} différent de {tag} {w}x{h}.", project.Rd3dFilePath);
+                        Anno1800IslandTool.Core.Localization.TextCatalog.F($"LOD{lod} : LevelSize {x}x{z} différent de {tag} {w}x{h}."), project.Rd3dFilePath);
             }
             var step = ReadIntTag(body, "NodeSizeWS");
             if (step > 0 && x.HasValue && z.HasValue && project.Rd3d.GridWidth > 0 && project.Rd3d.GridHeight > 0)
@@ -116,7 +116,7 @@ public sealed class Rd3dContractValidator : IValidator<IslandProject>
                 var expectedZ = (int)Math.Ceiling(project.Rd3d.GridHeight / (32.0 * step.Value));
                 if (x != expectedX || z != expectedZ)
                     report.Add(ValidationSeverity.Error, ValidationCode.TerrainCoverageDiagnostic,
-                        $"LOD{lod} : LevelSize {x}x{z}, attendu {expectedX}x{expectedZ} pour NodeSizeWS={step}.", project.Rd3dFilePath);
+                        Anno1800IslandTool.Core.Localization.TextCatalog.F($"LOD{lod} : LevelSize {x}x{z}, attendu {expectedX}x{expectedZ} pour NodeSizeWS={step}."), project.Rd3dFilePath);
             }
             lod++;
         }
@@ -145,7 +145,7 @@ public sealed class Rd3dContractValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.SuspiciousRd3dSetting,
-                $"{label} inattendu. Attendu {expected}, obtenu {value}.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"{label} inattendu. Attendu {expected}, obtenu {value}."),
                 relatedFile ?? "rd3d.xml");
         }
     }

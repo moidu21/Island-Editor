@@ -1,4 +1,4 @@
-﻿namespace Anno1800IslandTool.Core.Terrain;
+namespace Anno1800IslandTool.Core.Terrain;
 
 /// <summary>Only the actual file extent bounds editing; no reserved ocean margin.</summary>
 public static class OceanSafetyBorder

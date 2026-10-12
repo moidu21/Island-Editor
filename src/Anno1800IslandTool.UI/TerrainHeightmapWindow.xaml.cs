@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -151,7 +151,7 @@ public partial class TerrainHeightmapWindow : Window
     {
         if (!TryParseDirtyHeightThreshold(out var threshold))
         {
-            MessageBox.Show(this, "Seuil invalide. Exemple attendu : 0 ou 12.5", "Vérification dirty area", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Seuil invalide. Exemple attendu : 0 ou 12.5"), Anno1800IslandTool.Core.Localization.TextCatalog.T("Vérification dirty area"), MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -159,7 +159,7 @@ public partial class TerrainHeightmapWindow : Window
         var state = _heightEditState;
         if (state.DirtyGameDataSamples.Count == 0)
         {
-            MessageBox.Show(this, "Aucun sample GameData exact dans le masque dirty.", "Vérification dirty area", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun sample GameData exact dans le masque dirty."), Anno1800IslandTool.Core.Localization.TextCatalog.T("Vérification dirty area"), MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -170,24 +170,24 @@ public partial class TerrainHeightmapWindow : Window
             .ToList();
 
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"Zone dirty exacte : {state.DirtyGameDataSamples.Count} sample(s)");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Zone dirty exacte : {state.DirtyGameDataSamples.Count} sample(s)"));
         if (state.TryGetAfterHeightMaximum(out var maxSample) && maxSample is not null)
         {
-            sb.AppendLine($"Max après : {maxSample.AfterWorldHeight.ToString("0.###", CultureInfo.InvariantCulture)} au sample X={maxSample.X}, Z={maxSample.Z}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Max après : {maxSample.AfterWorldHeight.ToString("0.###", CultureInfo.InvariantCulture)} au sample X={maxSample.X}, Z={maxSample.Z}"));
         }
-        sb.AppendLine($"Seuil : {threshold.ToString("0.###", CultureInfo.InvariantCulture)}");
-        sb.AppendLine($"Résultat : {(above.Count > 0 ? "OUI" : "NON")} — {state.CountSamplesAboveThreshold(threshold)} sample(s) > seuil");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Seuil : {threshold.ToString("0.###", CultureInfo.InvariantCulture)}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Résultat : {(above.Count > 0 ? Anno1800IslandTool.Core.Localization.TextCatalog.T("OUI") : Anno1800IslandTool.Core.Localization.TextCatalog.T("NON"))} — {state.CountSamplesAboveThreshold(threshold)} sample(s) > seuil"));
         if (above.Count > 0)
         {
             sb.AppendLine();
-            sb.AppendLine("Plus hauts samples dans la zone modifiée :");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Plus hauts samples dans la zone modifiée :"));
             foreach (var sample in above)
             {
-                sb.AppendLine($"- X={sample.X}, Z={sample.Z} : avant={sample.BeforeWorldHeight.ToString("0.###", CultureInfo.InvariantCulture)}, après={sample.AfterWorldHeight.ToString("0.###", CultureInfo.InvariantCulture)}, raw {sample.BeforeRaw.ToString("0.###", CultureInfo.InvariantCulture)}->{sample.AfterRaw.ToString("0.###", CultureInfo.InvariantCulture)}");
+                sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"- X={sample.X}, Z={sample.Z} : avant={sample.BeforeWorldHeight.ToString("0.###", CultureInfo.InvariantCulture)}, après={sample.AfterWorldHeight.ToString("0.###", CultureInfo.InvariantCulture)}, raw {sample.BeforeRaw.ToString("0.###", CultureInfo.InvariantCulture)}->{sample.AfterRaw.ToString("0.###", CultureInfo.InvariantCulture)}"));
             }
         }
 
-        MessageBox.Show(this, sb.ToString(), "Vérification dirty area", MessageBoxButton.OK, above.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
+        MessageBox.Show(this, sb.ToString(), Anno1800IslandTool.Core.Localization.TextCatalog.T("Vérification dirty area"), MessageBoxButton.OK, above.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
         RefreshStats();
     }
 
@@ -201,7 +201,7 @@ public partial class TerrainHeightmapWindow : Window
         var canvas = GetHeightCanvas();
         if (canvas is null || canvas.Width <= 0 || canvas.Height <= 0)
         {
-            MouseCoordinateTextBlock.Text = "RD3D : hors heightmap";
+            MouseCoordinateTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("RD3D : hors heightmap");
             return;
         }
 
@@ -288,7 +288,7 @@ public partial class TerrainHeightmapWindow : Window
 
             if (PageDetailsTextBox is not null)
             {
-                PageDetailsTextBox.Text = "Chargement détaillé des pages terrain indisponible pour ce projet." + Environment.NewLine + Environment.NewLine + ex.Message;
+                PageDetailsTextBox.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Chargement détaillé des pages terrain indisponible pour ce projet.") + Environment.NewLine + Environment.NewLine + ex.Message;
             }
 
             if (SelectedPagePreviewTextBox is not null)
@@ -314,7 +314,7 @@ public partial class TerrainHeightmapWindow : Window
 
         if (PageDetailsTextBox is not null)
         {
-            PageDetailsTextBox.Text = "Mode dégradé : seules la coarse heightmap et les stats sont disponibles." + Environment.NewLine + Environment.NewLine + ex.Message;
+            PageDetailsTextBox.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Mode dégradé : seules la coarse heightmap et les stats sont disponibles.") + Environment.NewLine + Environment.NewLine + ex.Message;
         }
 
         if (SelectedPagePreviewTextBox is not null)
@@ -413,7 +413,7 @@ public partial class TerrainHeightmapWindow : Window
             .Where(p => p.Key.Lod == lod)
             .OrderBy(p => p.Key.X)
             .ThenBy(p => p.Key.Y)
-            .Select(p => new PageRow("TintMap", p.Key.Lod, p.Key.X, p.Key.Y, p.OriginalRelativePath ?? string.Empty, p.Width > 0 ? "Décodée" : "Non décodée", $"{p.Width}x{p.Height} {p.DdsFormat}".Trim(), p.Width > 0 && p.Height > 0))
+            .Select(p => new PageRow("TintMap", p.Key.Lod, p.Key.X, p.Key.Y, p.OriginalRelativePath ?? string.Empty, p.Width > 0 ? Anno1800IslandTool.Core.Localization.TextCatalog.T("Décodée") : Anno1800IslandTool.Core.Localization.TextCatalog.T("Non décodée"), $"{p.Width}x{p.Height} {p.DdsFormat}".Trim(), p.Width > 0 && p.Height > 0))
             .ToList();
     }
 
@@ -858,7 +858,7 @@ public partial class TerrainHeightmapWindow : Window
         }
 
         MergeDirtyBounds(new RectI(changedMinX, changedMinY, changedMaxX, changedMaxY));
-        MarkDirtyOperation($"Heightmap {mode} autour sample X={Math.Round(mapX).ToString(CultureInfo.InvariantCulture)}, Z={Math.Round(mapY).ToString(CultureInfo.InvariantCulture)}");
+        MarkDirtyOperation(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Heightmap {mode} autour sample X={Math.Round(mapX).ToString(CultureInfo.InvariantCulture)}, Z={Math.Round(mapY).ToString(CultureInfo.InvariantCulture)}"));
         RefreshHeightBitmap();
         RefreshStats();
     }
@@ -898,7 +898,7 @@ public partial class TerrainHeightmapWindow : Window
 
     private void UpdatePageDetails(PageRow? row)
     {
-        var text = row is null ? "Aucune page sélectionnée." : BuildPageDetails(row);
+        var text = row is null ? Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune page sélectionnée.") : BuildPageDetails(row);
         if (PageDetailsTextBox is not null)
         {
             PageDetailsTextBox.Text = text;
@@ -916,7 +916,7 @@ public partial class TerrainHeightmapWindow : Window
         string text;
         if (_selectedPage is null)
         {
-            text = "Aucune page sélectionnée.";
+            text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune page sélectionnée.");
         }
         else
         {
@@ -925,7 +925,7 @@ public partial class TerrainHeightmapWindow : Window
             var bounds = GetSelectedPageSampleBounds();
             if (bounds is not null)
             {
-                text += Environment.NewLine + Environment.NewLine + $"Zone coarse approximative : X {bounds.Value.MinX}-{bounds.Value.MaxX}, Y {bounds.Value.MinY}-{bounds.Value.MaxY}";
+                text += Environment.NewLine + Environment.NewLine + Anno1800IslandTool.Core.Localization.TextCatalog.F($"Zone coarse approximative : X {bounds.Value.MinX}-{bounds.Value.MaxX}, Y {bounds.Value.MinY}-{bounds.Value.MaxY}");
             }
         }
 
@@ -988,11 +988,14 @@ public partial class TerrainHeightmapWindow : Window
     }
 
     private void ApplySelectedPageOperation(PageOperation operation)
+        => BusyWork.RunOnUi(this, () => ApplySelectedPageOperationCore(operation));
+
+    private void ApplySelectedPageOperationCore(PageOperation operation)
     {
         var bounds = GetSelectedPageSampleBounds();
         if (bounds is null)
         {
-            MessageBox.Show(this, "Sélectionne d'abord une page terrain réelle.", "Terrain / Heightmap", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Sélectionne d'abord une page terrain réelle."), "Terrain / Heightmap", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -1085,16 +1088,16 @@ public partial class TerrainHeightmapWindow : Window
             $"Samples: {_workingMap.Samples.Length}{Environment.NewLine}" +
             $"Min / Max / Avg: {min:0.###} / {max:0.###} / {avg:0.###}{Environment.NewLine}" +
             $"PlayableArea: {_project.GameData.PlayableArea}{Environment.NewLine}" +
-            $"Famille/LOD affichés: {GetSelectedFamily()} / {(LodComboBox?.SelectedItem?.ToString() ?? "?")}{Environment.NewLine}" +
-            $"Page sélectionnée: {(_selectedPage is null ? "aucune" : $"{_selectedPage.Family} LOD{_selectedPage.Lod} {_selectedPage.X}x{_selectedPage.Y}")}{Environment.NewLine}" +
-            $"Dirty bounds: {(_dirtySampleBounds is null ? "aucun" : _dirtySampleBounds.Value.ToString())}{Environment.NewLine}" +
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"Famille/LOD affichés: {GetSelectedFamily()} / {(LodComboBox?.SelectedItem?.ToString() ?? "?")}{Environment.NewLine}") +
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"Page sélectionnée: {(_selectedPage is null ? Anno1800IslandTool.Core.Localization.TextCatalog.T("aucune") : $"{_selectedPage.Family} LOD{_selectedPage.Lod} {_selectedPage.X}x{_selectedPage.Y}")}{Environment.NewLine}") +
+            $"Dirty bounds: {(_dirtySampleBounds is null ? Anno1800IslandTool.Core.Localization.TextCatalog.T("aucun") : _dirtySampleBounds.Value.ToString())}{Environment.NewLine}" +
             $"Dirty mask exact: {_heightEditState.DirtyGameDataSamples.Count} sample(s){Environment.NewLine}" +
-            $"Pinceau limité à la page: {(LimitBrushToSelectedPageCheckBox?.IsChecked == true ? "oui" : "non")}{Environment.NewLine}" +
-            $"Mode pinceau: {GetBrushMode()} | Rayon: {(BrushRadiusSlider?.Value ?? 0):0} | Force: {(BrushStrengthSlider?.Value ?? 0):0.##}{Environment.NewLine}" +
-            $"Local regeneration: {(localState?.HasData == true ? $"{localState.AffectedPages.Count} page(s)" : "aucune")}{Environment.NewLine}" +
-            $"NormalMaps interprétés écrites: {(localState?.GeneratedNormalMapWrites?.Count ?? 0)}{Environment.NewLine}" +
-            $"Mesh pages locales écrites: {(localState?.GeneratedMeshPageWrites?.Count ?? 0)}{Environment.NewLine}" +
-            $"Mesh éditables affectées: {(localState?.EditableMeshPagesAffected ?? 0)} | ignorées: {(localState?.SkippedNonEditableMeshPages ?? 0)}";
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"Pinceau limité à la page: {(LimitBrushToSelectedPageCheckBox?.IsChecked == true ? Anno1800IslandTool.Core.Localization.TextCatalog.T("oui") : Anno1800IslandTool.Core.Localization.TextCatalog.T("non"))}{Environment.NewLine}") +
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"Mode pinceau: {GetBrushMode()} | Rayon: {(BrushRadiusSlider?.Value ?? 0):0} | Force: {(BrushStrengthSlider?.Value ?? 0):0.##}{Environment.NewLine}") +
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"Local regeneration: {(localState?.HasData == true ? Anno1800IslandTool.Core.Localization.TextCatalog.F($"{localState.AffectedPages.Count} page(s)") : Anno1800IslandTool.Core.Localization.TextCatalog.T("aucune"))}{Environment.NewLine}") +
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"NormalMaps interprétés écrites: {(localState?.GeneratedNormalMapWrites?.Count ?? 0)}{Environment.NewLine}") +
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"Mesh pages locales écrites: {(localState?.GeneratedMeshPageWrites?.Count ?? 0)}{Environment.NewLine}") +
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"Mesh éditables affectées: {(localState?.EditableMeshPagesAffected ?? 0)} | ignorées: {(localState?.SkippedNonEditableMeshPages ?? 0)}");
     }
 
     private void AnyRefreshCheckBox_Changed(object sender, RoutedEventArgs e)
@@ -1166,13 +1169,15 @@ public partial class TerrainHeightmapWindow : Window
     {
         try
         {
+            BusyWork.Run(this, () => {
             _editor.ReplaceCoarseHeightMap(_project, Clone(_workingMap));
             if (_project.LocalRegeneration?.HasData == true)
             {
                 _editor.ApplyLocalRegeneration(_project, _project.LocalRegeneration);
             }
+            });
             ProjectApplied?.Invoke(this, EventArgs.Empty);
-            MessageBox.Show(this, "Coarse heightmap appliquée au projet. Les dérivés locaux et les éventuelles normalmaps interprétées générées restent disponibles dans l'onglet de régénération.", "Terrain / Heightmap", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Coarse heightmap appliquée au projet. Les dérivés locaux et les éventuelles normalmaps interprétées générées restent disponibles dans l'onglet de régénération."), "Terrain / Heightmap", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
@@ -1227,7 +1232,7 @@ public partial class TerrainHeightmapWindow : Window
             }
             else
             {
-                MessageBox.Show(this, "Sélectionne une page ou modifie la heightmap avant de lancer la régénération locale.", "Régénération locale", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Sélectionne une page ou modifie la heightmap avant de lancer la régénération locale."), Anno1800IslandTool.Core.Localization.TextCatalog.T("Régénération locale"), MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -1267,7 +1272,7 @@ public partial class TerrainHeightmapWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Régénération locale", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.Message, Anno1800IslandTool.Core.Localization.TextCatalog.T("Régénération locale"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -1277,7 +1282,7 @@ public partial class TerrainHeightmapWindow : Window
         {
             if (_project.LocalRegeneration is null || !_project.LocalRegeneration.HasData)
             {
-                MessageBox.Show(this, "Lance d'abord une régénération locale pour calculer les bounds et les pages affectées.", "NormalMaps interprétés", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Lance d'abord une régénération locale pour calculer les bounds et les pages affectées."), Anno1800IslandTool.Core.Localization.TextCatalog.T("NormalMaps interprétés"), MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -1286,14 +1291,14 @@ public partial class TerrainHeightmapWindow : Window
             {
                 _heightEditState.MarkNormalMapTouched(write.Key);
             }
-            _editor.ApplyGeneratedNormalMapWrites(_project, _project.LocalRegeneration);
+            BusyWork.Run(this, () => _editor.ApplyGeneratedNormalMapWrites(_project, _project.LocalRegeneration));
             RefreshLocalRegenerationView();
             RefreshStats();
-            MessageBox.Show(this, $"{writes.Count} page(s) NormalMap interprétée(s) générée(s). Elles seront écrites dans le ZIP exporté.", "NormalMaps interprétés", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.F($"{writes.Count} page(s) NormalMap interprétée(s) générée(s). Elles seront écrites dans le ZIP exporté."), Anno1800IslandTool.Core.Localization.TextCatalog.T("NormalMaps interprétés"), MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "NormalMaps interprétés", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.Message, Anno1800IslandTool.Core.Localization.TextCatalog.T("NormalMaps interprétés"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -1303,7 +1308,7 @@ public partial class TerrainHeightmapWindow : Window
         {
             if (_project.LocalRegeneration is null || !_project.LocalRegeneration.HasData)
             {
-                MessageBox.Show(this, "Lance d'abord une régénération locale pour calculer les bounds et les pages affectées.", "Mesh pages locales", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Lance d'abord une régénération locale pour calculer les bounds et les pages affectées."), Anno1800IslandTool.Core.Localization.TextCatalog.T("Mesh pages locales"), MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -1313,15 +1318,15 @@ public partial class TerrainHeightmapWindow : Window
             {
                 _heightEditState.MarkMeshPageTouched(write.Key, write.Comparison?.ChangedVertexCount ?? 1);
             }
-            _editor.ApplyGeneratedMeshPageWrites(_project, _project.LocalRegeneration);
+            BusyWork.Run(this, () => _editor.ApplyGeneratedMeshPageWrites(_project, _project.LocalRegeneration));
             RefreshLocalRegenerationView();
             RefreshStats();
             RefreshMeshComparisonView();
-            MessageBox.Show(this, $"{writes.Count} page(s) mesh éditable(s) générée(s). {(_project.LocalRegeneration?.SkippedNonEditableMeshPages ?? 0)} page(s) non éditable(s) ont été ignorée(s). Elles seront écrites dans le ZIP exporté.", "Mesh pages locales", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.F($"{writes.Count} page(s) mesh éditable(s) générée(s). {(_project.LocalRegeneration?.SkippedNonEditableMeshPages ?? 0)} page(s) non éditable(s) ont été ignorée(s). Elles seront écrites dans le ZIP exporté."), Anno1800IslandTool.Core.Localization.TextCatalog.T("Mesh pages locales"), MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Mesh pages locales", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.Message, Anno1800IslandTool.Core.Localization.TextCatalog.T("Mesh pages locales"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -1332,7 +1337,7 @@ private void ExportTargetedPatchButton_Click(object sender, RoutedEventArgs e)
     {
         if (_project.LocalRegeneration is null || !_project.LocalRegeneration.HasData)
         {
-            MessageBox.Show(this, "Lance d'abord une régénération locale avant d'exporter un patch ciblé.", "Export ciblé", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.T("Lance d'abord une régénération locale avant d'exporter un patch ciblé."), Anno1800IslandTool.Core.Localization.TextCatalog.T("Export ciblé"), MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -1342,9 +1347,9 @@ private void ExportTargetedPatchButton_Click(object sender, RoutedEventArgs e)
 
         var dialog = new SaveFileDialog
         {
-            Filter = "Archives ZIP (*.zip)|*.zip",
+            Filter = Anno1800IslandTool.Core.Localization.TextCatalog.T("Archives ZIP (*.zip)|*.zip"),
             FileName = (_project.Metadata.ProjectName ?? "island") + (onlySelectedPage.HasValue ? $"_{onlySelectedPage.Value.Lod}_{onlySelectedPage.Value.X}x{onlySelectedPage.Value.Y}" : "_targeted_patch") + ".zip",
-            Title = "Exporter un patch ciblé des pages générées"
+            Title = Anno1800IslandTool.Core.Localization.TextCatalog.T("Exporter un patch ciblé des pages générées")
         };
 
         if (dialog.ShowDialog(this) != true)
@@ -1354,11 +1359,11 @@ private void ExportTargetedPatchButton_Click(object sender, RoutedEventArgs e)
 
         _project.HeightEditState = _heightEditState;
         var report = _exporter.ExportTargetedPatch(_project, dialog.FileName, onlySelectedPage);
-        MessageBox.Show(this, report.Summary, "Export ciblé", MessageBoxButton.OK, MessageBoxImage.Information);
+        MessageBox.Show(this, report.Summary, Anno1800IslandTool.Core.Localization.TextCatalog.T("Export ciblé"), MessageBoxButton.OK, MessageBoxImage.Information);
     }
     catch (Exception ex)
     {
-        MessageBox.Show(this, ex.Message, "Export ciblé", MessageBoxButton.OK, MessageBoxImage.Error);
+        MessageBox.Show(this, ex.Message, Anno1800IslandTool.Core.Localization.TextCatalog.T("Export ciblé"), MessageBoxButton.OK, MessageBoxImage.Error);
     }
 }
 
@@ -1372,20 +1377,20 @@ private void RefreshMeshComparisonView()
 
     if (_selectedPage is null)
     {
-        textBox.Text = "Sélectionne une page terrain pour voir la comparaison avant/après. Les détails sont particulièrement utiles pour les Mesh pages générées localement.";
+        textBox.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Sélectionne une page terrain pour voir la comparaison avant/après. Les détails sont particulièrement utiles pour les Mesh pages générées localement.");
         return;
     }
 
     var key = new TerrainPageKey(_selectedPage.Lod, _selectedPage.X, _selectedPage.Y);
     if (!string.Equals(_selectedPage.Family, "Mesh", StringComparison.OrdinalIgnoreCase))
     {
-        textBox.Text = $"La page sélectionnée est de type {_selectedPage.Family}. La comparaison avant/après détaillée est disponible pour les Mesh pages générées localement.";
+        textBox.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"La page sélectionnée est de type {_selectedPage.Family}. La comparaison avant/après détaillée est disponible pour les Mesh pages générées localement.");
         return;
     }
 
     if (!_project.MeshPages.TryGetValue(key, out var mesh))
     {
-        textBox.Text = "La page mesh sélectionnée n'a pas été trouvée dans le projet chargé.";
+        textBox.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("La page mesh sélectionnée n'a pas été trouvée dans le projet chargé.");
         return;
     }
 
@@ -1400,45 +1405,45 @@ private void RefreshMeshComparisonView()
     var originalDecodedMax = originalDecodedHeights.Length > 0 ? originalDecodedHeights.Max() : 0f;
 
     var sb = new System.Text.StringBuilder();
-    sb.AppendLine("AVANT");
+    sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("AVANT"));
     sb.AppendLine($"Clusters : {mesh.Clusters.Count}");
     sb.AppendLine($"Vertices : {vertexCount}");
     sb.AppendLine($"Indices : {indexCount}");
     sb.AppendLine($"GroundObjects : {groundCount}");
-    sb.AppendLine($"Hauteur brute min/max : {originalRawMin.ToString("0.###", CultureInfo.InvariantCulture)} / {originalRawMax.ToString("0.###", CultureInfo.InvariantCulture)}");
-    sb.AppendLine($"Hauteur décodée min/max : {originalDecodedMin.ToString("0.###", CultureInfo.InvariantCulture)} / {originalDecodedMax.ToString("0.###", CultureInfo.InvariantCulture)}");
+    sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Hauteur brute min/max : {originalRawMin.ToString("0.###", CultureInfo.InvariantCulture)} / {originalRawMax.ToString("0.###", CultureInfo.InvariantCulture)}"));
+    sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Hauteur décodée min/max : {originalDecodedMin.ToString("0.###", CultureInfo.InvariantCulture)} / {originalDecodedMax.ToString("0.###", CultureInfo.InvariantCulture)}"));
     sb.AppendLine();
 
     var generated = _project.LocalRegeneration?.GeneratedMeshPageWrites?.LastOrDefault(w => w.Key.Equals(key));
     if (generated?.Comparison is null)
     {
-        sb.AppendLine("APRÈS");
-        sb.AppendLine("Aucune réécriture mesh locale n'a encore été générée pour cette page.");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("APRÈS"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune réécriture mesh locale n'a encore été générée pour cette page."));
         if (!mesh.HasEditablePayload)
         {
-            sb.AppendLine($"Cette page n'est pas éditable localement dans l'état actuel : {mesh.DecodeStatus}.");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Cette page n'est pas éditable localement dans l'état actuel : {mesh.DecodeStatus}."));
             if (!string.IsNullOrWhiteSpace(mesh.DecodeNotes))
             {
                 sb.AppendLine(mesh.DecodeNotes);
             }
         }
-        sb.AppendLine("Utilise l'onglet Régénération locale, puis clique sur Écrire Mesh pages locales.");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Utilise l'onglet Régénération locale, puis clique sur Écrire Mesh pages locales."));
         textBox.Text = sb.ToString().TrimEnd();
         return;
     }
 
     var comparison = generated.Comparison;
-    sb.AppendLine("APRÈS");
-    sb.AppendLine($"Vertices touchés : {comparison.ChangedVertexCount} / {comparison.VertexCount}");
-    sb.AppendLine($"Hauteur brute min/max : {comparison.GeneratedMinHeightRaw.ToString("0.###", CultureInfo.InvariantCulture)} / {comparison.GeneratedMaxHeightRaw.ToString("0.###", CultureInfo.InvariantCulture)}");
-    sb.AppendLine($"Hauteur décodée min/max : {comparison.GeneratedMinDecodedHeight.ToString("0.###", CultureInfo.InvariantCulture)} / {comparison.GeneratedMaxDecodedHeight.ToString("0.###", CultureInfo.InvariantCulture)}");
-    sb.AppendLine($"Δ absolu moyen : {comparison.AverageAbsoluteDelta.ToString("0.###", CultureInfo.InvariantCulture)}");
-    sb.AppendLine($"Δ absolu max : {comparison.MaxAbsoluteDelta.ToString("0.###", CultureInfo.InvariantCulture)}");
+    sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("APRÈS"));
+    sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Vertices touchés : {comparison.ChangedVertexCount} / {comparison.VertexCount}"));
+    sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Hauteur brute min/max : {comparison.GeneratedMinHeightRaw.ToString("0.###", CultureInfo.InvariantCulture)} / {comparison.GeneratedMaxHeightRaw.ToString("0.###", CultureInfo.InvariantCulture)}"));
+    sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Hauteur décodée min/max : {comparison.GeneratedMinDecodedHeight.ToString("0.###", CultureInfo.InvariantCulture)} / {comparison.GeneratedMaxDecodedHeight.ToString("0.###", CultureInfo.InvariantCulture)}"));
+    sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Δ absolu moyen : {comparison.AverageAbsoluteDelta.ToString("0.###", CultureInfo.InvariantCulture)}"));
+    sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Δ absolu max : {comparison.MaxAbsoluteDelta.ToString("0.###", CultureInfo.InvariantCulture)}"));
     sb.AppendLine();
     sb.AppendLine("DIFF / EXPORT");
-    sb.AppendLine($"Bounds coarse utilisés : {comparison.SampleBounds}");
-    sb.AppendLine($"Chemin cible : {generated.TargetPath}");
-    sb.AppendLine($"Résumé : {generated.Summary}");
+    sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Bounds coarse utilisés : {comparison.SampleBounds}"));
+    sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Chemin cible : {generated.TargetPath}"));
+    sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Résumé : {generated.Summary}"));
     if (!string.IsNullOrWhiteSpace(comparison.Notes))
     {
         sb.AppendLine($"Notes : {comparison.Notes}");
@@ -1520,7 +1525,7 @@ private void RefreshMeshComparisonView()
 
         if (summary is not null)
         {
-            summary.Text = state?.Summary ?? "Aucune régénération locale calculée pour le moment.";
+            summary.Text = state?.Summary ?? Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune régénération locale calculée pour le moment.");
         }
 
         if (grid is not null)
@@ -1548,7 +1553,7 @@ private void RefreshMeshComparisonView()
 
     private string GetSelectedFamily() => (FamilyComboBox?.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "Mesh";
 
-    private BrushMode GetBrushMode() => ((BrushModeComboBox?.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "Raise") switch
+    private BrushMode GetBrushMode() => ((BrushModeComboBox?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "Raise") switch
     {
         "Lower" => BrushMode.Lower,
         "Smooth" => BrushMode.Smooth,
@@ -1576,81 +1581,81 @@ private void RefreshMeshComparisonView()
 
         return page.DecodeStatus switch
         {
-            "Décodée" => $"clusters={clusterCount}, vtx={vertexCount}, idx={indexCount}, ground={groundObjects}, éditable",
-            "Vide" => $"clusters={clusterCount}, vide, ground={groundObjects}",
-            "Non décodée" => $"clusters lus={clusterCount}/{page.DeclaredClusterCount}, structure détectée, payload non exploitable",
-            _ => page.DecodeNotes.Length > 0 ? page.DecodeNotes : "payload non lu"
+            "Décodée" => Anno1800IslandTool.Core.Localization.TextCatalog.F($"clusters={clusterCount}, vtx={vertexCount}, idx={indexCount}, ground={groundObjects}, éditable"),
+            "Vide" => Anno1800IslandTool.Core.Localization.TextCatalog.F($"clusters={clusterCount}, vide, ground={groundObjects}"),
+            "Non décodée" => Anno1800IslandTool.Core.Localization.TextCatalog.F($"clusters lus={clusterCount}/{page.DeclaredClusterCount}, structure détectée, payload non exploitable"),
+            _ => page.DecodeNotes.Length > 0 ? page.DecodeNotes : Anno1800IslandTool.Core.Localization.TextCatalog.T("payload non lu")
         };
     }
 
     private static string BuildNormalMapShortDetails(NormalMapPage page)
     {
         return page.DownsampledWidth == 0 && page.DeltaLevels.Count == 0
-            ? "payload non lu"
+            ? Anno1800IslandTool.Core.Localization.TextCatalog.T("payload non lu")
             : $"down={page.DownsampledWidth}x{page.DownsampledHeight}, deltas={page.DeltaLevels.Count}";
     }
 
     private static string BuildNormalMapStatus(NormalMapPage page)
-        => page.DownsampledWidth == 0 && page.DeltaLevels.Count == 0 ? "Non décodée" : "Décodée";
+        => page.DownsampledWidth == 0 && page.DeltaLevels.Count == 0 ? Anno1800IslandTool.Core.Localization.TextCatalog.T("Non décodée") : Anno1800IslandTool.Core.Localization.TextCatalog.T("Décodée");
 
     private string BuildPageDetails(PageRow row)
     {
         var details = new List<string>
         {
-            $"Famille : {row.Family}",
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"Famille : {row.Family}"),
             $"LOD : {row.Lod}",
-            $"Coordonnées : {row.X} x {row.Y}",
-            $"Chemin : {row.Path}",
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"Coordonnées : {row.X} x {row.Y}"),
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"Chemin : {row.Path}"),
             string.Empty
         };
 
         var key = new TerrainPageKey(row.Lod, row.X, row.Y);
         if (row.Family == "Mesh" && _project.MeshPages.TryGetValue(key, out var mesh))
         {
-            details.Add($"Statut décodage : {mesh.DecodeStatus}");
-            details.Add($"Page éditable : {(mesh.HasEditablePayload ? "oui" : "non")}");
+            details.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Statut décodage : {mesh.DecodeStatus}"));
+            details.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Page éditable : {(mesh.HasEditablePayload ? Anno1800IslandTool.Core.Localization.TextCatalog.T("oui") : Anno1800IslandTool.Core.Localization.TextCatalog.T("non"))}"));
             if (!string.IsNullOrWhiteSpace(mesh.DecodeNotes))
             {
-                details.Add($"Diagnostic : {mesh.DecodeNotes}");
+                details.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Diagnostic : {mesh.DecodeNotes}"));
             }
             var affected = _project.LocalRegeneration?.AffectedPages?.FirstOrDefault(p => string.Equals(p.Family, "Mesh", StringComparison.OrdinalIgnoreCase) && p.Key.Equals(key));
             if (affected is not null)
             {
-                details.Add($"Affectée par régénération locale : oui");
-                details.Add($"Raison éditabilité locale : {affected.EditabilityReason}");
+                details.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Affectée par régénération locale : oui"));
+                details.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Raison éditabilité locale : {affected.EditabilityReason}"));
             }
-            details.Add($"Clusters lus : {mesh.ParsedClusterCount}");
-            details.Add($"Clusters attendus : {mesh.DeclaredClusterCount}");
-            details.Add($"Dimensions déclarées : {mesh.DeclaredWidth} x {mesh.DeclaredHeight}");
+            details.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Clusters lus : {mesh.ParsedClusterCount}"));
+            details.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Clusters attendus : {mesh.DeclaredClusterCount}"));
+            details.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Dimensions déclarées : {mesh.DeclaredWidth} x {mesh.DeclaredHeight}"));
             details.Add($"Vertices : {mesh.Clusters.Sum(c => c.Vertices.Count)}");
             details.Add($"Indices : {mesh.Clusters.Sum(c => c.Indices.Count)}");
             details.Add($"GroundObjects : {mesh.Clusters.Sum(c => c.GroundObjects.Count)}");
             if (mesh.VertexStride > 0)
             {
-                details.Add($"Stride supposé : {mesh.VertexStride} valeurs par vertex");
+                details.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Stride supposé : {mesh.VertexStride} valeurs par vertex"));
             }
             if (mesh.ProbableHeightComponentIndex is not null)
             {
-                details.Add($"Composante hauteur brute probable : index {mesh.ProbableHeightComponentIndex}");
-                details.Add("Décodage hauteur : DecodedHeight=((ushort)Raw1)-32767");
+                details.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Composante hauteur brute probable : index {mesh.ProbableHeightComponentIndex}"));
+                details.Add(Anno1800IslandTool.Core.Localization.TextCatalog.T("Décodage hauteur : DecodedHeight=((ushort)Raw1)-32767"));
             }
             if (!string.IsNullOrWhiteSpace(mesh.VertexLayoutHypothesis))
             {
-                details.Add($"Hypothèse layout : {mesh.VertexLayoutHypothesis}");
+                details.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Hypothèse layout : {mesh.VertexLayoutHypothesis}"));
             }
             if (!string.IsNullOrWhiteSpace(mesh.CoordinateRanges))
             {
-                details.Add($"Plages coordonnées / hauteur : {mesh.CoordinateRanges}");
+                details.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Plages coordonnées / hauteur : {mesh.CoordinateRanges}"));
             }
             var firstVertex = mesh.Clusters.SelectMany(c => c.Vertices).FirstOrDefault();
             if (firstVertex is not null)
             {
-                details.Add($"Exemple vertex brut : {firstVertex.BuildRawSummary()}");
-                details.Add($"Exemple hauteur brute/décodée : {firstVertex.HeightRaw} / {firstVertex.DecodedHeight}");
+                details.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Exemple vertex brut : {firstVertex.BuildRawSummary()}"));
+                details.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Exemple hauteur brute/décodée : {firstVertex.HeightRaw} / {firstVertex.DecodedHeight}"));
             }
             if (!string.IsNullOrWhiteSpace(mesh.DecodeNotes))
             {
-                details.Add($"Diagnostic : {mesh.DecodeNotes}");
+                details.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Diagnostic : {mesh.DecodeNotes}"));
             }
         }
         else if (row.Family == "NormalMap" && _project.NormalMapPages.TryGetValue(key, out var normal))
@@ -1665,7 +1670,7 @@ private void RefreshMeshComparisonView()
         else if (row.Family == "TintMap" && _project.TintMapPages.TryGetValue(key, out var tint))
         {
             details.Add($"Dimensions : {tint.Width} x {tint.Height}");
-            details.Add($"Octets DDS : {tint.RawDdsBytes.Length}");
+            details.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Octets DDS : {tint.RawDdsBytes.Length}"));
         }
 
         return string.Join(Environment.NewLine, details);

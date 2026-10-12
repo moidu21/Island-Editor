@@ -1,4 +1,4 @@
-﻿namespace Anno1800IslandTool.Pipeline.Services;
+namespace Anno1800IslandTool.Pipeline.Services;
 
 /// <summary>RD3D BaseTextureData dimensions count BC1 blocks, each stored as four Int16 words.</summary>
 public static class GlobalTintBlockCodec
@@ -6,7 +6,7 @@ public static class GlobalTintBlockCodec
     private static void Validate(int width, int height, IReadOnlyList<int> words)
     {
         if(width<=0 || height<=0 || words.Count!=checked(width*height*4))
-            throw new ArgumentException("Invalid BC1 base texture dimensions.");
+            throw new ArgumentException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Invalid BC1 base texture dimensions."));
     }
     private static void DecodeBlock(IReadOnlyList<int> words,int b,Span<int> pixels)
     {
@@ -44,7 +44,7 @@ public static class GlobalTintBlockCodec
     public static int[] Encode(int width,int height,IReadOnlyList<int> pixels,IReadOnlyList<int> originalWords)
     {
         if(width<=0 || height<=0 || width%4!=0 || height%4!=0 || pixels.Count!=checked(width*height*4))
-            throw new ArgumentException("Invalid pixel dimensions.");
+            throw new ArgumentException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Invalid pixel dimensions."));
         Validate(width/4,height/4,originalWords);
         var result=originalWords.ToArray();
         void EncodeRow(int by)

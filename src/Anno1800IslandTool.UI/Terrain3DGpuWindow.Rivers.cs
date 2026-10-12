@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Numerics;
 using System.Windows;
 using Anno1800IslandTool.Core.Terrain;
@@ -178,6 +178,8 @@ public partial class Terrain3DGpuWindow
         {
             ApplyRiverButton.IsEnabled = false;
             BeginToolHistoryAction();
+            var summary = BusyWork.RunOnUi(this, () =>
+            {
             var controlPoints = _pendingRiverPoints.Select(point => new GeneratedRiverPoint(
                 point.X,
                 TerrainHeightEncoding.LegacyFineHeightToWorldHeight(SceneYToDecodedHeight(point.Y)),
@@ -187,7 +189,8 @@ public partial class Terrain3DGpuWindow
             var points = BuildTerrainFollowingRiverPath(controlPoints);
             var slots = BuildManualRiverSlots(points, widthTiles);
             CarveRiverBed(points, widthTiles * 32d, depth);
-            var summary = _applyRiverToProject(new GpuRiverDefinition(points, widthTiles, depth, irrigationRadius, slots));
+            return _applyRiverToProject(new GpuRiverDefinition(points, widthTiles, depth, irrigationRadius, slots));
+            });
             _hasDirectProjectCommit = true;
             _pendingRiverPoints.Clear();
             _pendingRiverSlotClicks.Clear();

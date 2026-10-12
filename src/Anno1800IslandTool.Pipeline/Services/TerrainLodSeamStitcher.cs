@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Core.Models;
+using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;
 
 namespace Anno1800IslandTool.Pipeline.Services;
@@ -105,7 +105,7 @@ public sealed class TerrainLodSeamStitchReport
     public HashSet<TerrainPageKey> PagesTouched { get; } = new();
 
     public string ToDisplayText()
-        => $"Raccords LOD : {SeamsAdjusted} bord(s), {VerticesAdjusted} sommet(s), " +
-           $"{PagesTouched.Count} page(s), correction maximale {MaximumWorldAdjustment:0.###}.";
+        => Anno1800IslandTool.Core.Localization.TextCatalog.F($"Raccords LOD : {SeamsAdjusted} bord(s), {VerticesAdjusted} sommet(s), ") +
+           Anno1800IslandTool.Core.Localization.TextCatalog.F($"{PagesTouched.Count} page(s), correction maximale {MaximumWorldAdjustment:0.###}.");
 }
 

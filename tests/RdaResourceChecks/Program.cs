@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Pipeline.Services;
+using Anno1800IslandTool.Pipeline.Services;
 var tools=new IslandTools(Path.GetFullPath(args[0]), "unused", "unused");
 var cache=new RdaGameResources(new IslandToolProcess(tools));
 if (args[1] == "fixture")

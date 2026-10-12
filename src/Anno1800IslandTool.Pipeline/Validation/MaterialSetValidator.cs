@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Core.Models;
+using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Validation;
 using Anno1800IslandTool.Pipeline.Abstractions;
 
@@ -20,7 +20,7 @@ public sealed class MaterialSetValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.InvalidMaterialSet,
-                $"Le materialset '{project.MaterialSet.FileName}' ne contient aucun matériau.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"Le materialset '{project.MaterialSet.FileName}' ne contient aucun matériau."),
                 project.MaterialSet.FileName);
 
             return report;
@@ -34,7 +34,7 @@ public sealed class MaterialSetValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.DuplicateMaterialId,
-                $"Le materialset '{project.MaterialSet.FileName}' contient plusieurs entrées avec l'ID {duplicateId}.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"Le materialset '{project.MaterialSet.FileName}' contient plusieurs entrées avec l'ID {duplicateId}."),
                 project.MaterialSet.FileName);
         }
 
@@ -47,7 +47,7 @@ public sealed class MaterialSetValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.DuplicatePropReference,
-                $"Le PropGrid référence plusieurs fois '{duplicateProp}'.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"Le PropGrid référence plusieurs fois '{duplicateProp}'."),
                 project.Rd3dFilePath ?? "rd3d.xml");
         }
 

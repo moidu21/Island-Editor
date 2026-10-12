@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text.RegularExpressions;
 using Anno1800IslandTool.Core.Common;
 using Anno1800IslandTool.Core.Enums;
@@ -107,15 +107,15 @@ public sealed class MeshPageReader
 
             page.DecodeStatus = "Décodée";
             page.DecodeNotes =
-                $"Clusters décodés : {page.ParsedClusterCount}/{page.DeclaredClusterCount}, vertices={vertexCount}, indices={indexCount}, ground={groundCount}. " +
-                "Hypothèse de layout : [X, Y, Z, A, B, C, D, E] avec Y brut à l'index 1, DecodedHeight=((ushort)Y)-32767, et A..E comme attributs packés de vertex plutôt que de purs poids de matériau.";
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"Clusters décodés : {page.ParsedClusterCount}/{page.DeclaredClusterCount}, vertices={vertexCount}, indices={indexCount}, ground={groundCount}. ") +
+                Anno1800IslandTool.Core.Localization.TextCatalog.T("Hypothèse de layout : [X, Y, Z, A, B, C, D, E] avec Y brut à l'index 1, DecodedHeight=((ushort)Y)-32767, et A..E comme attributs packés de vertex plutôt que de purs poids de matériau.");
             return;
         }
 
         if (page.HasDecodedPayload && hasAnyVerticesTag)
         {
             page.DecodeStatus = "Vide";
-            page.DecodeNotes = $"La page a été lue mais ne contient aucun vertex exploitable. Clusters={page.ParsedClusterCount}, ground={groundCount}.";
+            page.DecodeNotes = Anno1800IslandTool.Core.Localization.TextCatalog.F($"La page a été lue mais ne contient aucun vertex exploitable. Clusters={page.ParsedClusterCount}, ground={groundCount}.");
             return;
         }
 
@@ -123,12 +123,12 @@ public sealed class MeshPageReader
         if (page.ContainsStructuredMeshPayload || hasVertexNumbers)
         {
             page.DecodeStatus = "Non décodée";
-            page.DecodeNotes = $"Structure mesh détectée mais aucun cluster exploitable n'a été reconstruit. Clusters attendus ≈ {page.DeclaredClusterCount}.";
+            page.DecodeNotes = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Structure mesh détectée mais aucun cluster exploitable n'a été reconstruit. Clusters attendus ≈ {page.DeclaredClusterCount}.");
             return;
         }
 
         page.DecodeStatus = "Inconnue";
-        page.DecodeNotes = "Le contenu de page ne ressemble pas à un payload mesh interprété standard, ou le détail des pages n'a pas été chargé.";
+        page.DecodeNotes = Anno1800IslandTool.Core.Localization.TextCatalog.T("Le contenu de page ne ressemble pas à un payload mesh interprété standard, ou le détail des pages n'a pas été chargé.");
     }
 
     private static void InferVertexLayout(MeshPage page)
@@ -158,7 +158,7 @@ public sealed class MeshPageReader
         }
 
         page.ProbableHeightComponentIndex = 1;
-        page.VertexLayoutHypothesis = "[X, Y, Z, A, B, C, D, E] ; Y brut index 1 ; DecodedHeight=((ushort)Y)-32767 ; A..E attributs packés à préserver";
+        page.VertexLayoutHypothesis = Anno1800IslandTool.Core.Localization.TextCatalog.T("[X, Y, Z, A, B, C, D, E] ; Y brut index 1 ; DecodedHeight=((ushort)Y)-32767 ; A..E attributs packés à préserver");
         page.CoordinateRanges =
             $"X={minX}..{maxX}, Yraw={minRawHeight}..{maxRawHeight}, Ydecoded={minDecodedHeight}..{maxDecodedHeight}, Z={minZ}..{maxZ}";
     }

@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using HelixToolkit;
 using HelixToolkit.Maths;
 using HelixToolkit.SharpDX;

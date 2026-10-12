@@ -1,4 +1,4 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
 using Anno1800IslandTool.Pipeline.Services;
 using Xunit;
 namespace Anno1800IslandTool.Tests;

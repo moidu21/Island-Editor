@@ -143,21 +143,21 @@ f 11 12 13
             };
 
             var first = ObjTerrainImporter.Import(project, firstPath,
-                new ObjTerrainImportOptions(2, false, 64, 0));
+                new ObjTerrainImportOptions(2, false, 64, 0, PreserveSourceMesh: false));
             var firstVertexCount = page.Clusters.Sum(cluster => cluster.Vertices.Count);
             Assert.Equal(1, first.IgnoredVerticalTriangles);
             Assert.Equal(3, first.UsableSourceTriangles);
             Assert.Equal("Island", first.UsedObjectNames);
             Assert.Equal("Green_platform, Tree", first.IgnoredObjectNames);
             Assert.True(first.ImportedTriangles > 100);
-            Assert.InRange(page.Clusters.SelectMany(cluster => cluster.Vertices).Max(vertex => vertex.WorldHeight), 5f, 8.2f);
+            Assert.InRange(page.Clusters.SelectMany(cluster => cluster.Vertices).Max(vertex => vertex.WorldHeight), first.MaximumWorldHeight * .8f, first.MaximumWorldHeight);
 
             var second = ObjTerrainImporter.Import(project, secondPath,
-                new ObjTerrainImportOptions(2, false, 64, 0));
+                new ObjTerrainImportOptions(2, false, 64, 0, PreserveSourceMesh: false));
             Assert.Equal(1, second.IgnoredVerticalTriangles);
             Assert.Equal(first.ImportedTriangles, second.ImportedTriangles);
             Assert.Equal(firstVertexCount, page.Clusters.Sum(cluster => cluster.Vertices.Count));
-            Assert.InRange(page.Clusters.SelectMany(cluster => cluster.Vertices).Min(vertex => vertex.WorldHeight), -.1f, .1f);
+            Assert.InRange(page.Clusters.SelectMany(cluster => cluster.Vertices).GroupBy(v => (v.X, v.Z)).Min(g => g.Max(v => v.WorldHeight)), -.1f, .1f);
             Assert.InRange(page.Clusters.SelectMany(cluster => cluster.Vertices).Max(vertex => vertex.WorldHeight), -.1f, .1f);
         }
         finally

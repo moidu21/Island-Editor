@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <ImplicitUsings>enable</ImplicitUsings>
     <TargetFramework>net8.0</TargetFramework>
@@ -16,5 +16,9 @@
     <EmbeddedResource Include="Resources\EnvironmentAssets.txt" />
     <EmbeddedResource Include="Resources\Mines\*" />
     <EmbeddedResource Include="Resources\VanillaEnvironmentProfiles.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SharpGLTF.Core" Version="1.0.6" />
   </ItemGroup>
 </Project>

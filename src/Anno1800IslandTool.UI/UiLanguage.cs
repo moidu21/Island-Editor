@@ -1,4 +1,4 @@
-﻿namespace Anno1800IslandTool.UI;
+namespace Anno1800IslandTool.UI;
 
 public enum UiLanguage
 {

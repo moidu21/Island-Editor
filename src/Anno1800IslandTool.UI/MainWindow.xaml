@@ -1,8 +1,8 @@
-﻿<Window x:Class="Anno1800IslandTool.UI.MainWindow"
+<Window x:Class="Anno1800IslandTool.UI.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering"
-        Title="Anno1800IslandTool v46.120 — matériaux carrelés et menus organisés"
+        Title="Anno1800IslandTool v46.156"
         Height="980"
         Width="1760"
         WindowStartupLocation="CenterScreen">
@@ -18,7 +18,7 @@
             <Button Padding="12,6" Margin="0,0,8,6" Click="OpenGameIsland_Click">Ouvrir une île du jeu</Button>
             <Button Padding="12,6" Margin="0,0,8,6" Click="ExportCompiledIsland_Click">Exporter l’île compilée</Button>
             <Button Width="180" Height="34" Click="OpenArchiveButton_Click">Ouvrir une archive ZIP</Button>
-            <Button Width="120" Height="34" Margin="8,0,0,0" Click="ValidateButton_Click">Revalider</Button>
+            <Button Width="120" Height="34" Margin="8,0,0,0" x:Name="RevalidateButton" Visibility="Collapsed" Click="ValidateButton_Click">Revalider</Button>
             <Button Width="120" Height="34" Margin="8,0,0,0" Click="ExportArchiveButton_Click">Exporter ZIP</Button>
             <Button Width="120" Height="34" Margin="8,0,0,0" x:Name="SaveReportButton" Visibility="Collapsed" Click="SaveLogButton_Click">Sauver rapport</Button>
             <Button Width="150" Height="34" Margin="8,0,0,0" Click="RegenerateTextsButton_Click">Régénérer textes</Button>
@@ -26,20 +26,20 @@
             <Button Width="170" Height="34" Margin="8,0,0,0" Click="OpenTerrain3DWindowButton_Click">Éditeur terrain GPU 3D</Button>
             <Button Width="175" Height="34" Margin="8,0,0,0" Click="OpenMaterialMapWindowButton_Click">Éditeur matériaux</Button>
             <Button Width="195" Height="34" Margin="8,0,0,0" x:Name="VegetationTintButton" Visibility="Collapsed" Click="OpenGlobalTintBaseWindowButton_Click">Teinte végétation</Button>
-            <CheckBox x:Name="ReadPayloadsCheckBox"
+            <CheckBox x:Name="ReadPayloadsCheckBox" Visibility="Collapsed"
                       Margin="16,8,0,0"
                       Content="Lire le détail des pages (plus lent)"
                       ToolTip="Charge mesh/normalmaps en mémoire pour l'édition 3D complète."
                       VerticalAlignment="Center"
                       IsChecked="True"/>
-            <CheckBox x:Name="MemorySaverCheckBox"
+            <CheckBox x:Name="MemorySaverCheckBox" Visibility="Collapsed"
                       Margin="12,8,0,0"
                       IsChecked="True"
                       Content="RAM économe"
                       ToolTip="v46.5 : décode directement les valeurs, limite les lots et évite les copies texte/binaires inutiles des pages. Décoche pour un compromis vitesse/RAM."
                       VerticalAlignment="Center"/>
             <TextBlock Margin="16,8,0,0"
-                       Text="v46.120 : bords libres et redimensionnement des cartes avec conservation du relief."
+                       Text="v46.156 : bords libres et redimensionnement des cartes avec conservation du relief."
                        FontWeight="SemiBold"/>
             <TextBlock Margin="16,8,0,0"
                        x:Name="LanguageSelectorLabel" Visibility="Collapsed" Text="Langue"
@@ -393,7 +393,7 @@
                             <TextBox x:Name="InternalNameTextBox" Grid.Column="1" Margin="8,4,8,4"/>
 
                             <TextBlock Grid.Row="1" Text="MapSize" VerticalAlignment="Center"/>
-                            <TextBox x:Name="MapSizeTextBox" Grid.Row="1" Grid.Column="1" Margin="8,4,8,4"/>
+                            <TextBox x:Name="MapSizeTextBox" TextChanged="MapSizeTextBox_TextChanged" Grid.Row="1" Grid.Column="1" Margin="8,4,8,4"/>
                             <CheckBox x:Name="SyncDerivedCheckBox" Grid.Row="1" Grid.Column="2" Content="Synchroniser RD3D/GameData" Margin="8,6,8,4" IsChecked="True"/>
 
                             <TextBlock Grid.Row="2" Text="ActiveMapGrid X / Y" VerticalAlignment="Center" ToolTip="Valeurs libres conservées à l'application des métadonnées et à l'export, même si la taille de carte change."/>

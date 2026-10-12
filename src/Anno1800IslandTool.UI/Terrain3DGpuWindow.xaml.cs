@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
 using System.Runtime.InteropServices;
@@ -27,12 +27,15 @@ namespace Anno1800IslandTool.UI;
 /// </summary>
 public partial class Terrain3DGpuWindow : Window
 {
+    private readonly bool _previewOnly;
+    private readonly TerrainMaterialMap? _previewMaterialMap;
+
     private const float OuterOceanSafetyWidthWorld = 256f;
     private const int UndoHistoryLimit = 20;
     private readonly IslandProject _project;
     private readonly IslandProjectEditor _materialSetEditor = new();
     private readonly EmbeddedMaterialSetLibrary _embeddedMaterialSets = new();
-    private readonly Func<IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, string>? _applyMaximumExpansion;
+    private readonly Func<IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, float, string>? _applyMaximumExpansion;
     private readonly Func<GpuBeachDefinition, IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, string>? _applyBeachToProject;
     private readonly Func<IReadOnlyList<bool>, IReadOnlyList<GpuFineTerrainStamp>, IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, string>? _applyFootprintToProject;
     private readonly Func<IReadOnlyList<GpuTreeInstance>, string>? _applyTreesToProject;
@@ -56,6 +59,32 @@ public partial class Terrain3DGpuWindow : Window
     private CancellationTokenSource? _loadCancellation;
     private bool _initializing = true;
     private bool _isPainting;
+    private readonly TerrainStrokePreview _strokePreview = new();
+    private readonly Dictionary<MeshVertex, TerrainPageKey> _strokePages = new(ReferenceEqualityComparer.Instance);
+    private bool _finishingStroke;
+    private GpuBrushMode _strokeMode;
+    private System.Windows.Threading.DispatcherTimer? _strokeRenderTimer;
+    private Vector3? _pendingStrokePoint;
+
+    private void QueueStrokePreview(Vector3 point)
+    {
+        _pendingStrokePoint = point;
+        if (_strokeRenderTimer is null)
+        {
+            _strokeRenderTimer = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Render)
+            { Interval = TimeSpan.FromMilliseconds(16) };
+            _strokeRenderTimer.Tick += (_, _) => FlushStrokePreview();
+        }
+        if (!_strokeRenderTimer.IsEnabled) _strokeRenderTimer.Start();
+    }
+
+    private void FlushStrokePreview()
+    {
+        _strokeRenderTimer?.Stop();
+        var point = _pendingStrokePoint;
+        _pendingStrokePoint = null;
+        if (_isPainting && point.HasValue) ApplyBrush(point.Value);
+    }
     private bool _committed;
     private int _changedVertexWrites;
     private TimeSpan _lastUploadDuration;
@@ -110,15 +139,18 @@ public partial class Terrain3DGpuWindow : Window
     public Terrain3DGpuWindow(
         IslandProject project,
         int preferredLod,
-        Func<IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, string>? applyMaximumExpansion = null,
+        Func<IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, float, string>? applyMaximumExpansion = null,
         Func<GpuBeachDefinition, IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, string>? applyBeachToProject = null,
         Func<IReadOnlyList<bool>, IReadOnlyList<GpuFineTerrainStamp>, IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, string>? applyFootprintToProject = null,
         Func<IReadOnlyList<GpuTreeInstance>, string>? applyTreesToProject = null,
         Func<GpuRiverDefinition, string>? applyRiverToProject = null,
         Func<int, IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)>, string>? validateEntireTerrain = null,
-        Func<GpuObjTerrainImportDefinition, string>? importObjTerrain = null)
+        Func<GpuObjTerrainImportDefinition, string>? importObjTerrain = null,
+        TerrainMaterialMap? previewMaterialMap = null)
     {
         _project = project ?? throw new ArgumentNullException(nameof(project));
+        _previewOnly = previewMaterialMap is not null;
+        _previewMaterialMap = previewMaterialMap?.Clone();
         _applyMaximumExpansion = applyMaximumExpansion;
         _applyBeachToProject = applyBeachToProject;
         _applyFootprintToProject = applyFootprintToProject;
@@ -132,6 +164,8 @@ public partial class Terrain3DGpuWindow : Window
         (_effectsManager, _adapterName) = CreateEffectsManager();
 
         InitializeComponent();
+        var importDebug = Environment.GetCommandLineArgs().Any(a => string.Equals(a, "-debug", StringComparison.OrdinalIgnoreCase));
+        ObjAdvancedGrid.Visibility = ObjResampleCheckBox.Visibility = importDebug ? Visibility.Visible : Visibility.Collapsed;
         MaterialSetSelectionCoordinator.SelectionChanged += MaterialSetSelectionCoordinator_SelectionChanged;
         PreviewKeyDown += Terrain3DGpuWindow_PreviewKeyDown;
         _brushPointerTrackingTimer = new System.Windows.Threading.DispatcherTimer(
@@ -140,6 +174,10 @@ public partial class Terrain3DGpuWindow : Window
             Interval = TimeSpan.FromMilliseconds(16)
         };
         _brushPointerTrackingTimer.Tick += BrushPointerTrackingTimer_Tick;
+        Activated += (_, _) => { if (!_previewOnly && IsLoaded) _brushPointerTrackingTimer.Start(); };
+        Deactivated += (_, _) => { _brushPointerTrackingTimer.Stop(); _hoverHitKey = null; };
+        GpuViewport.LostMouseCapture += (_, _) => { if (_isPainting && !_finishingStroke) FinishBrushStroke(); };
+        Deactivated += (_, _) => { if (_isPainting) FinishBrushStroke(); };
         GpuViewport.EffectsManager = _effectsManager;
         GpuViewport.Camera = new HxPerspectiveCamera
         {
@@ -184,12 +222,34 @@ public partial class Terrain3DGpuWindow : Window
         UpdateMaximumIslandSizeDisplay();
         UpdateNavigationBinding();
         PopulateLods(preferredLod);
+        if (_previewOnly)
+        {
+            EditingNavigationPanel.Visibility = Visibility.Collapsed;
+            ValidationButtonsPanel.Visibility = Visibility.Collapsed;
+            PreviewCloseButton.Visibility = Visibility.Visible;
+            foreach (System.Windows.Controls.TabItem tab in GpuToolTabs.Items)
+                if (!ReferenceEquals(tab, GamePreviewTab)) tab.Visibility = Visibility.Collapsed;
+            GpuToolTabs.SelectedItem = GamePreviewTab;
+            _committed = true; // Read-only viewer: there is no editing transaction to restore.
+        }
         _initializing = false;
         Loaded += async (_, _) =>
         {
             UiLocalizationManager.ApplyTo(this);
-            _brushPointerTrackingTimer.Start();
-            await ReloadGpuGeometryAsync();
+            if (!_previewOnly && IsActive) _brushPointerTrackingTimer.Start();
+            if (_previewOnly)
+            {
+                BusyWork.RunOperation(this, async () =>
+                {
+                    // Set the initial mode without starting an unawaited Checked handler.
+                    _initializing = true;
+                    try { GamePreviewCheck.IsChecked = true; }
+                    finally { _initializing = false; }
+                    await ReloadGpuGeometryAsync(); // Includes textures, scenery and GPU upload.
+                    await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Render);
+                });
+            }
+            else await ReloadGpuGeometryAsync();
             UiLocalizationManager.ApplyTo(this);
         };
     }
@@ -206,12 +266,16 @@ public partial class Terrain3DGpuWindow : Window
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
-        if (_isValidatingTerrain) e.Cancel = true;
+        if (_isValidatingTerrain || BusyWork.IsBusy) e.Cancel = true;
         base.OnClosing(e);
     }
 
     protected override void OnClosed(EventArgs e)
     {
+        _strokeRenderTimer?.Stop();
+        _pendingStrokePoint = null;
+        _strokePreview.Clear();
+        _strokePages.Clear();
         CloseGamePreview();
         MaterialSetSelectionCoordinator.SelectionChanged -= MaterialSetSelectionCoordinator_SelectionChanged;
         _brushPointerTrackingTimer.Stop();
@@ -250,14 +314,14 @@ public partial class Terrain3DGpuWindow : Window
         if (GpuMaterialSetComboBox.SelectedItem is string fileName)
         {
 
-            GpuMaterialSetStatusTextBlock.Text = $"Actif : {fileName}. Synchronisé avec l’éditeur de matériaux et le RD3D.";
+            GpuMaterialSetStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Actif : {fileName}. Synchronisé avec l’éditeur de matériaux et le RD3D.");
         }
     }
 
     private void GpuMaterialSetComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         RefreshGpuMaterialSetDisplay();
-        if (_initializing || !IsLoaded || GpuMaterialSetComboBox.SelectedItem is not string fileName)
+        if (BusyWork.IsBusy || _initializing || !IsLoaded || GpuMaterialSetComboBox.SelectedItem is not string fileName)
         {
             return;
         }
@@ -266,25 +330,29 @@ public partial class Terrain3DGpuWindow : Window
         {
             if (!_embeddedMaterialSets.TryRead(fileName, out var text))
             {
-                throw new InvalidOperationException($"Le materialset intégré {fileName} est introuvable.");
+                throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Le materialset intégré {fileName} est introuvable."));
             }
 
-            var report = _materialSetEditor.ReplaceMaterialSet(
+            BusyWork.RunOperation(this, async () =>
+            {
+            var report = BusyWork.Run(this, () => _materialSetEditor.ReplaceMaterialSet(
                 _project,
                 fileName,
                 text,
                 fileName,
-                updateRd3dReference: true);
+                updateRd3dReference: true));
             _hasDirectProjectCommit = true;
             _materialSetChanged = true;
-            GpuMaterialSetStatusTextBlock.Text = $"Actif : {fileName}. {report}";
+            GpuMaterialSetStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Actif : {fileName}. {report}");
             InitializeTreeBiomeDisplay();
+            await RefreshPendingSceneryAsync();
             MaterialSetSelectionCoordinator.Publish(_project, this);
-            if (GamePreviewCheck.IsChecked == true) _ = BuildGamePreviewAsync();
+            if (GamePreviewCheck.IsChecked == true) await BuildGamePreviewAsync();
+            });
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.ToString(), "Sélection du materialset", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.ToString(), Anno1800IslandTool.Core.Localization.TextCatalog.T("Sélection du materialset"), MessageBoxButton.OK, MessageBoxImage.Error);
             PopulateGpuMaterialSets();
         }
     }
@@ -311,6 +379,7 @@ public partial class Terrain3DGpuWindow : Window
             {
                 _initializing = wasInitializing;
             }
+            _ = RefreshPendingSceneryAsync();
             if (GamePreviewCheck.IsChecked == true) _ = BuildGamePreviewAsync();
         });
     }
@@ -356,10 +425,11 @@ public partial class Terrain3DGpuWindow : Window
         _loadCancellation = new CancellationTokenSource();
         var cancellationToken = _loadCancellation.Token;
         var lod = GetSelectedLod();
-        StatusTextBlock.Text = $"Préparation du LOD {lod} pour Direct3D 11...";
+        StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Préparation du LOD {lod} pour Direct3D 11...");
 
         try
         {
+            TerrainMemoryTrace.Write("GPU reload start");
             var stopwatch = Stopwatch.StartNew();
             var pages = _project.MeshPages.Values
                 .Where(page => page.Key.Lod == lod && MeshPageClassifier.CanEditGeometry(page))
@@ -413,8 +483,9 @@ public partial class Terrain3DGpuWindow : Window
             }
 
             TerrainModel.Geometry = _geometry;
+            TerrainMemoryTrace.Write("GPU buffers ready");
             RefreshGamePreviewGeometry();
-            if (GamePreviewCheck.IsChecked == true) _ = BuildGamePreviewAsync();
+            if (GamePreviewCheck.IsChecked == true) await BuildGamePreviewAsync();
             UpdateFootprintHitPlane();
             UpdateFootprintPreview();
             stopwatch.Stop();
@@ -433,7 +504,7 @@ public partial class Terrain3DGpuWindow : Window
         }
         catch (Exception ex)
         {
-            StatusTextBlock.Text = $"Échec Direct3D 11 : {ex.Message}. Fermez cette fenêtre pour revenir à l'éditeur WPF.";
+            StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Échec Direct3D 11 : {ex.Message}. Fermez cette fenêtre pour revenir à l'éditeur WPF.");
         }
     }
 
@@ -692,6 +763,7 @@ public partial class Terrain3DGpuWindow : Window
         }
 
         var mode = GetBrushMode();
+        _strokeMode = mode;
         BeginToolHistoryAction();
         _lastBrushPoint = args.HitTestResult.PointHit;
         _hasLastBrushPoint = true;
@@ -753,7 +825,7 @@ public partial class Terrain3DGpuWindow : Window
             _pickedHeight = QuantizeDecodedHeight(SceneYToDecodedHeight(args.HitTestResult.PointHit.Y));
             _hasPickedHeight = true;
             UpdatePickedHeightDisplay();
-            StatusTextBlock.Text = $"Hauteur cible prélevée : {_pickedHeight:0.###}. Choisissez Lisser ou Aplatir pour l'appliquer.";
+            StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Hauteur cible prélevée : {_pickedHeight:0.###}. Choisissez Lisser ou Aplatir pour l'appliquer.");
             e.Handled = true;
             return;
         }
@@ -802,6 +874,11 @@ public partial class Terrain3DGpuWindow : Window
             return;
         }
 
+        if (GetBrushMode() is GpuBrushMode.Raise or GpuBrushMode.Lower or GpuBrushMode.Smooth or GpuBrushMode.Flatten)
+        {
+            QueueStrokePreview(hit.PointHit);
+            return;
+        }
         var now = Stopwatch.GetTimestamp();
         if (_lastBrushUploadTimestamp != 0 && Stopwatch.GetElapsedTime(_lastBrushUploadTimestamp, now).TotalMilliseconds < 16.0)
         {
@@ -829,7 +906,7 @@ public partial class Terrain3DGpuWindow : Window
         var hit = FindEditableSurfaceHit(e.GetPosition(GpuViewport));
         if (hit is null)
         {
-            StatusTextBlock.Text = "Aucune surface de sélection trouvée sous le curseur.";
+            StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune surface de sélection trouvée sous le curseur.");
             return;
         }
 
@@ -909,6 +986,17 @@ public partial class Terrain3DGpuWindow : Window
 
     private void GpuViewport_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
+        FinishBrushStroke();
+    }
+
+    private void FinishBrushStroke()
+    {
+        if (_finishingStroke) return;
+        _finishingStroke = true;
+        try
+        {
+        FlushStrokePreview();
+        CommitBrushPreview();
         if (_isPainting)
         {
             _overlaySampler = null;
@@ -929,6 +1017,8 @@ public partial class Terrain3DGpuWindow : Window
             Mouse.Capture(null);
         }
         CompleteToolHistoryAction();
+        }
+        finally { _finishingStroke = false; }
     }
 
     private void GpuViewport_MouseLeave(object sender, MouseEventArgs e)
@@ -945,8 +1035,11 @@ public partial class Terrain3DGpuWindow : Window
         }
     }
 
+    private (Point Pointer, Point3D Position, Vector3D Look, Vector3D Up, double Fov, Size Size, object Geometry, long Revision, double Radius, GpuBrushPattern Pattern, GpuBrushMode Mode)? _hoverHitKey;
+
     private void BrushPointerTrackingTimer_Tick(object? sender, EventArgs e)
     {
+        if (!IsActive || !IsEnabled || BusyWork.IsBusy) { _hoverHitKey = null; return; }
         if (!IsLoaded || GetBrushMode() == GpuBrushMode.Navigation || TerrainModel.Geometry is null)
         {
             HideBrushOverlay();
@@ -962,8 +1055,14 @@ public partial class Terrain3DGpuWindow : Window
 
         // La surcouche se déplace immédiatement. Le calcul 3D qui suit ne peut
         // donc plus immobiliser visuellement la forme à son ancienne position.
+        var camera = GpuViewport.Camera as HxPerspectiveCamera;
+        var key = (pointer, camera?.Position ?? default, camera?.LookDirection ?? default,
+            camera?.UpDirection ?? default, camera?.FieldOfView ?? 0, GpuViewport.RenderSize,
+            (object)TerrainModel.Geometry!, _lastBrushUploadTimestamp, BrushRadiusSlider.Value, GetBrushPattern(), GetBrushMode());
+        if (!_isPainting && _hoverHitKey == key && BrushOverlayPolyline.Visibility == Visibility.Visible) return;
         UpdateBrushOverlay(pointer, null);
         var hit = FindEditableSurfaceHit(pointer);
+        _hoverHitKey = key;
         if (hit is null)
         {
             // La position visuelle ne doit jamais dépendre d'un hit-test : même
@@ -979,6 +1078,7 @@ public partial class Terrain3DGpuWindow : Window
 
     private void QueueBrushHoverRefresh()
     {
+        _hoverHitKey = null;
         if (_brushHoverRefreshQueued || GetBrushMode() == GpuBrushMode.Navigation) return;
         _brushHoverRefreshQueued = true;
         Dispatcher.BeginInvoke(new Action(() =>
@@ -1090,7 +1190,7 @@ public partial class Terrain3DGpuWindow : Window
             return;
         }
 
-        var mode = GetBrushMode();
+        var mode = _isPainting ? _strokeMode : GetBrushMode();
         if (mode == GpuBrushMode.Navigation)
         {
             return;
@@ -1124,7 +1224,7 @@ public partial class Terrain3DGpuWindow : Window
             ?? affectedByLod[0].Groups;
         var smoothTarget = _hasPickedHeight
             ? _pickedHeight
-            : selectedGroups.Average(group => group.SurfaceDecodedHeight);
+            : selectedGroups.Average(group => group.Vertices.Max(v => _strokePreview.ReadDecoded(v.Vertex)));
         var flattenTarget = _hasFlattenStrokeTarget
             ? _flattenStrokeTarget
             : _hasPickedHeight
@@ -1154,7 +1254,7 @@ public partial class Terrain3DGpuWindow : Window
                     continue;
                 }
 
-                var originalSurface = group.SurfaceDecodedHeight;
+                var originalSurface = group.Vertices.Max(v => _strokePreview.ReadDecoded(v.Vertex));
                 var target = mode switch
                 {
                     GpuBrushMode.Raise => originalSurface + (strength * weight),
@@ -1164,28 +1264,25 @@ public partial class Terrain3DGpuWindow : Window
                     _ => originalSurface
                 };
                 var decodedDelta = target - originalSurface;
-                var groupChanged = false;
+        
                 foreach (var reference in group.Vertices)
                 {
                     var vertex = reference.Vertex;
-                    var nextRaw = TerrainStructuralHeightEditor.MoveRawByDecodedDelta(vertex.Raw1, decodedDelta);
-                    if (nextRaw == vertex.Raw1) continue;
+                    var nextRaw = TerrainStructuralHeightEditor.MoveRawByDecodedDelta(_strokePreview.ReadRaw(vertex), decodedDelta);
+                    if (nextRaw == _strokePreview.ReadRaw(vertex)) continue;
 
-                    _originalRaw1.TryAdd(vertex, vertex.Raw1);
-                    vertex.Raw1 = nextRaw;
+                    _strokePreview.SetRaw(vertex, nextRaw);
+                    _strokePages[vertex] = reference.Page.Key;
                     changedByPage[reference.Page.Key] = changedByPage.TryGetValue(reference.Page.Key, out var count) ? count + 1 : 1;
-                    _changedVertexWrites++;
-                    groupChanged = true;
+
+
                     if (lod == GetSelectedLod() && _positionByVertex.TryGetValue(vertex, out var positionIndex))
                     {
                         changedGpuPositions.Add(positionIndex);
                     }
                 }
 
-                if (groupChanged)
-                {
-                    RecordChangedWorldPoint(lod, group.X, group.Z);
-                }
+
             }
         }
 
@@ -1198,24 +1295,41 @@ public partial class Terrain3DGpuWindow : Window
         {
             if (!_bindingsByPosition.TryGetValue(positionIndex, out var bindings) || bindings.Count == 0) continue;
             var source = bindings[0].Vertex;
-            _geometry.Positions[positionIndex] = new Vector3(source.X, DecodedHeightToSceneY(source.DecodedHeight), source.Z);
+            _geometry.Positions[positionIndex] = new Vector3(source.X, DecodedHeightToSceneY(_strokePreview.ReadDecoded(source)), source.Z);
             if (_geometry.Colors is not null && positionIndex < _geometry.Colors.Count)
-                _geometry.Colors[positionIndex] = HeightColor(source.DecodedHeight);
+                _geometry.Colors[positionIndex] = HeightColor(_strokePreview.ReadDecoded(source));
         }
         if (changedGpuPositions.Count > 0)
         {
+            _geometry.Normals = new Vector3Collection(ComputeVertexNormals(_geometry.Positions, _geometry.Indices));
             _geometry.UpdateVertices();
             _geometry.UpdateColors();
         }
         stopwatch.Stop();
         _lastUploadDuration = stopwatch.Elapsed;
-        foreach (var pair in changedByPage)
-        {
-            _project.HeightEditState.MarkMeshPageTouched(pair.Key, pair.Value);
-        }
-        _project.IsModified = true;
-        _project.ModifiedSections.Add("TerrainMeshGpuD3D11");
         StatusTextBlock.Text = BuildStatusText(_geometry.Positions.Count, (_geometry.Indices?.Count ?? 0) / 3, TimeSpan.Zero);
+    }
+
+    private void CommitBrushPreview()
+    {
+        var changedPages = new Dictionary<TerrainPageKey, int>();
+        foreach (var (vertex, raw) in _strokePreview.Changes)
+        {
+            _originalRaw1.TryAdd(vertex, vertex.Raw1);
+            vertex.Raw1 = raw;
+            var page = _strokePages[vertex];
+            changedPages[page] = changedPages.GetValueOrDefault(page) + 1;
+            RecordChangedWorldPoint(page.Lod, vertex.X, vertex.Z);
+            _changedVertexWrites++;
+        }
+        foreach (var (page, count) in changedPages) _project.HeightEditState.MarkMeshPageTouched(page, count);
+        if (changedPages.Count > 0)
+        {
+            _project.IsModified = true;
+            _project.ModifiedSections.Add("TerrainMeshGpuD3D11");
+        }
+        _strokePreview.Clear();
+        _strokePages.Clear();
     }
 
     private void EnsureHeightSpatialIndices()
@@ -1276,6 +1390,7 @@ public partial class Terrain3DGpuWindow : Window
 
     private void BrushToolListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_isPainting) FinishBrushStroke();
         RefreshActiveToolUi();
         if (GpuToolTabs is null) return;
         var mode=GetBrushMode();
@@ -1285,7 +1400,7 @@ public partial class Terrain3DGpuWindow : Window
         if(GpuToolTabs.SelectedItem is TabItem tab && tab.Content is ScrollViewer viewer && viewer.Content is StackPanel panel)
         foreach(var expander in panel.Children.OfType<Expander>())
         {
-            var title=expander.Header?.ToString()??"";
+            var title=Anno1800IslandTool.Core.Localization.TextCatalog.SourceOf(expander.Header?.ToString()??"");
             if(GpuToolTabs.SelectedIndex==1)expander.IsExpanded=mode==GpuBrushMode.Scenery?ReferenceEquals(expander,SceneryExpander):mode is GpuBrushMode.Clay or GpuBrushMode.Oil ? ReferenceEquals(expander,DepositsExpander) : mode==GpuBrushMode.Mine?title.StartsWith("Mines"):
                 mode==GpuBrushMode.Trees?title.Contains("arbres"):mode==GpuBrushMode.River?title.Contains("rivière"):ReferenceEquals(expander,BeachExpander);
             if(GpuToolTabs.SelectedIndex==2&&title.Contains("emprise"))expander.IsExpanded=true;
@@ -1319,32 +1434,32 @@ public partial class Terrain3DGpuWindow : Window
         }
         ActiveToolHelpTextBlock.Text = mode switch
         {
-            GpuBrushMode.Raise => "Monter : maintenez le bouton gauche sur l'île et déplacez la souris.",
-            GpuBrushMode.Lower => "Creuser : maintenez le bouton gauche sur l'île et déplacez la souris.",
+            GpuBrushMode.Raise => Anno1800IslandTool.Core.Localization.TextCatalog.T("Monter : maintenez le bouton gauche sur l'île et déplacez la souris."),
+            GpuBrushMode.Lower => Anno1800IslandTool.Core.Localization.TextCatalog.T("Creuser : maintenez le bouton gauche sur l'île et déplacez la souris."),
             GpuBrushMode.Smooth => _hasPickedHeight
-                ? $"Lisser : rapproche progressivement le terrain de la hauteur cible {_pickedHeight:0.###}."
-                : "Lisser : rapproche progressivement les hauteurs voisines. Prélevez une hauteur pour lisser vers un niveau précis.",
+                ? Anno1800IslandTool.Core.Localization.TextCatalog.F($"Lisser : rapproche progressivement le terrain de la hauteur cible {_pickedHeight:0.###}.")
+                : Anno1800IslandTool.Core.Localization.TextCatalog.T("Lisser : rapproche progressivement les hauteurs voisines. Prélevez une hauteur pour lisser vers un niveau précis."),
             GpuBrushMode.Flatten => _hasPickedHeight
-                ? $"Aplatir exactement : applique la hauteur cible {_pickedHeight:0.###} sur tout le disque."
-                : "Aplatir exactement : utilise le premier point touché et met tout le disque à cette hauteur.",
-            GpuBrushMode.PickHeight => "Prélever : cliquez une fois sur le terrain pour mémoriser cette hauteur.",
+                ? Anno1800IslandTool.Core.Localization.TextCatalog.F($"Aplatir exactement : applique la hauteur cible {_pickedHeight:0.###} sur tout le disque.")
+                : Anno1800IslandTool.Core.Localization.TextCatalog.T("Aplatir exactement : utilise le premier point touché et met tout le disque à cette hauteur."),
+            GpuBrushMode.PickHeight => Anno1800IslandTool.Core.Localization.TextCatalog.T("Prélever : cliquez une fois sur le terrain pour mémoriser cette hauteur."),
             GpuBrushMode.Beach => BeachAutoStraightCheckBox?.IsChecked == true
-                ? "Plage : cliquez près du contour vert. Le tronçon orange suit l’empreinte ; étirez ses carrés ou déplacez le losange cyan."
+                ? Anno1800IslandTool.Core.Localization.TextCatalog.T("Plage : cliquez près du contour vert. Le tronçon orange suit l’empreinte ; étirez ses carrés ou déplacez le losange cyan.")
                 : _beachSelectionStep == 0
-                    ? "Plage : cliquez la première extrémité du rivage à créer."
-                    : "Plage : cliquez la seconde extrémité ; le côté eau sera détecté depuis l’empreinte, y compris dans une baie.",
+                    ? Anno1800IslandTool.Core.Localization.TextCatalog.T("Plage : cliquez la première extrémité du rivage à créer.")
+                    : Anno1800IslandTool.Core.Localization.TextCatalog.T("Plage : cliquez la seconde extrémité ; le côté eau sera détecté depuis l’empreinte, y compris dans une baie."),
             GpuBrushMode.AddFootprint => FineTerrainExtensionCheckBox?.IsChecked == true
-                ? "Ajouter une zone : peignez directement la forme voulue. Seule la partie dessinée est relevée ; le reste du chunk demeure sous l’eau."
-                : "Ajouter une zone : peignez l’emprise autorisée, puis cliquez sur Appliquer l’emprise. Le nouveau terrain démarre sous l’eau.",
-            GpuBrushMode.RemoveFootprint => "Retirer une zone : peignez les parties à supprimer. Le mesh, les dérivés et le masque gameplay seront retirés à l’application.",
-            GpuBrushMode.Trees => "Arbres : cliquez ou peignez sur la terre. Le rayon, le motif et la densité déterminent la forêt créée.",
-            GpuBrushMode.MeshBeach => "Côte constructible : sélectionnez le rivage existant. Le relief et les matériaux ne sont pas modifiés.",
-            GpuBrushMode.Clay => "Argile : cliquez sur un terrain émergé pour ajouter un puits.",
-            GpuBrushMode.Oil => "Pétrole : cliquez pour ajouter un puits ; répétez pour former un gisement.",
-            GpuBrushMode.Scenery => "Décors : choisissez un modèle puis cliquez sur le terrain pour le poser.",
-            GpuBrushMode.Mine => "Mine : cliquez l’entrée, puis la montagne. Les deux points définissent l’orientation et la zone de travail.",
-            GpuBrushMode.River => "Rivière : cliquez les points dans l’ordre de l’écoulement. L’aperçu arrondit automatiquement les changements de direction.",
-            _ => "Déplacer : bouton gauche ou droit pour tourner, molette maintenue pour déplacer, roulette pour zoomer."
+                ? Anno1800IslandTool.Core.Localization.TextCatalog.T("Ajouter une zone : peignez directement la forme voulue. Seule la partie dessinée est relevée ; le reste du chunk demeure sous l’eau.")
+                : Anno1800IslandTool.Core.Localization.TextCatalog.T("Ajouter une zone : peignez l’emprise autorisée, puis cliquez sur Appliquer l’emprise. Le nouveau terrain démarre sous l’eau."),
+            GpuBrushMode.RemoveFootprint => Anno1800IslandTool.Core.Localization.TextCatalog.T("Retirer une zone : peignez les parties à supprimer. Le mesh, les dérivés et le masque gameplay seront retirés à l’application."),
+            GpuBrushMode.Trees => Anno1800IslandTool.Core.Localization.TextCatalog.T("Arbres : cliquez ou peignez sur la terre. Le rayon, le motif et la densité déterminent la forêt créée."),
+            GpuBrushMode.MeshBeach => Anno1800IslandTool.Core.Localization.TextCatalog.T("Côte constructible : sélectionnez le rivage existant. Le relief et les matériaux ne sont pas modifiés."),
+            GpuBrushMode.Clay => Anno1800IslandTool.Core.Localization.TextCatalog.T("Argile : cliquez sur un terrain émergé pour ajouter un puits."),
+            GpuBrushMode.Oil => Anno1800IslandTool.Core.Localization.TextCatalog.T("Pétrole : cliquez pour ajouter un puits ; répétez pour former un gisement."),
+            GpuBrushMode.Scenery => Anno1800IslandTool.Core.Localization.TextCatalog.T("Décors : choisissez un modèle puis cliquez sur le terrain pour le poser."),
+            GpuBrushMode.Mine => Anno1800IslandTool.Core.Localization.TextCatalog.T("Mine : cliquez l’entrée, puis la montagne. Les deux points définissent l’orientation et la zone de travail."),
+            GpuBrushMode.River => Anno1800IslandTool.Core.Localization.TextCatalog.T("Rivière : cliquez les points dans l’ordre de l’écoulement. L’aperçu arrondit automatiquement les changements de direction."),
+            _ => Anno1800IslandTool.Core.Localization.TextCatalog.T("Déplacer : bouton gauche ou droit pour tourner, molette maintenue pour déplacer, roulette pour zoomer.")
         };
     }
 
@@ -1413,19 +1528,51 @@ public partial class Terrain3DGpuWindow : Window
         };
     }
 
+    private static bool TryReadTargetHeight(string? text, out float height)
+    {
+        height = 0;
+        if (!TryParseFlexibleNumber(text?.Replace(',', '.'), out var value) ||
+            !double.IsFinite(value) || value < -32768 || value > 32767)
+            return false;
+        height = QuantizeDecodedHeight((float)value);
+        return true;
+    }
+
+    private void ApplyTargetHeightButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!TryReadTargetHeight(TargetHeightInputTextBox.Text, out var height))
+        {
+            StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Hauteur cible invalide : entrez un nombre entre -32768 et 32767.");
+            return;
+        }
+        _pickedHeight = height;
+        _hasPickedHeight = true;
+        UpdatePickedHeightDisplay();
+        RefreshActiveToolUi();
+        StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Hauteur cible : {_pickedHeight:0.###}. Utilisez Lisser ou Aplatir pour l'appliquer.");
+    }
+
+    private void TargetHeightInputTextBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter) return;
+        ApplyTargetHeightButton_Click(sender, e);
+        e.Handled = true;
+    }
+
     private void ClearPickedHeightButton_Click(object sender, RoutedEventArgs e)
     {
         _hasPickedHeight = false;
         UpdatePickedHeightDisplay();
         RefreshActiveToolUi();
-        StatusTextBlock.Text = "Hauteur cible effacée. Lisser utilise de nouveau la moyenne locale ; Aplatir utilise le premier point touché.";
+        StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Hauteur cible effacée. Lisser utilise de nouveau la moyenne locale ; Aplatir utilise le premier point touché.");
     }
 
     private void UpdatePickedHeightDisplay()
     {
+        TargetHeightInputTextBox.Text = _hasPickedHeight ? _pickedHeight.ToString("0.###", CultureInfo.CurrentCulture) : string.Empty;
         TargetHeightTextBlock.Text = _hasPickedHeight
-            ? $"Hauteur cible : {_pickedHeight:0.###}"
-            : "Aucune hauteur prélevée";
+            ? Anno1800IslandTool.Core.Localization.TextCatalog.F($"Hauteur cible : {_pickedHeight:0.###}")
+            : Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune hauteur prélevée");
     }
 
     private static double ReadBeachWidth(TextBox? textBox)
@@ -1494,8 +1641,8 @@ public partial class Terrain3DGpuWindow : Window
         BeachEndHandleModel.IsRendering = false;
         BeachMoveHandleModel.IsRendering = false;
         BeachSelectionTextBlock.Text = BeachAutoStraightCheckBox?.IsChecked == true
-            ? "Sélectionnez l’outil Plage, puis cliquez une fois près du bord extérieur ou d’un renfoncement."
-            : "Sélectionnez l’outil Plage, puis cliquez les deux extrémités du rivage.";
+            ? Anno1800IslandTool.Core.Localization.TextCatalog.T("Sélectionnez l’outil Plage, puis cliquez une fois près du bord extérieur ou d’un renfoncement.")
+            : Anno1800IslandTool.Core.Localization.TextCatalog.T("Sélectionnez l’outil Plage, puis cliquez les deux extrémités du rivage.");
         RefreshActiveToolUi();
         if (!_creatingCoast) CompleteToolHistoryAction();
     }
@@ -1538,8 +1685,8 @@ public partial class Terrain3DGpuWindow : Window
         var mapSize = Math.Max(_project.Root.MapSize, _project.Metadata.MapSize);
         var grid = _project.Root.ActiveMapGrid;
         IslandMaximumSizeTextBlock.Text = mapSize > 0
-            ? $"Taille maximale XML : {mapSize} × {mapSize} (grille active {grid.X} × {grid.Y})"
-            : $"Taille maximale selon RD3D : {_project.Rd3d.GridWidth} × {_project.Rd3d.GridHeight}";
+            ? Anno1800IslandTool.Core.Localization.TextCatalog.F($"Taille maximale XML : {mapSize} × {mapSize} (grille active {grid.X} × {grid.Y})")
+            : Anno1800IslandTool.Core.Localization.TextCatalog.F($"Taille maximale selon RD3D : {_project.Rd3d.GridWidth} × {_project.Rd3d.GridHeight}");
     }
 
     private async void ExpandIslandMaximumButton_Click(object sender, RoutedEventArgs e)
@@ -1547,18 +1694,25 @@ public partial class Terrain3DGpuWindow : Window
         var grid = _project.Root.ActiveMapGrid;
         if (grid.X <= 0 || grid.Y <= 0)
         {
-            StatusTextBlock.Text = "La grille maximale n’est pas définie dans le XML racine.";
+            StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("La grille maximale n’est pas définie dans le XML racine.");
             return;
         }
 
+        if (!TryReadTargetHeight(FineTerrainHeightTextBox.Text, out var newLandHeight))
+        {
+            StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Hauteur de nouvelle terre invalide : entrez un nombre entre -32768 et 32767.");
+            return;
+        }
         ExpandIslandMaximumButton.IsEnabled = false;
-        ExpandIslandMaximumButton.Content = "Création et chargement en cours…";
-        StatusTextBlock.Text = "Création du terrain sous-marin, application au projet et reconstruction du maillage DX11…";
+        ExpandIslandMaximumButton.Content = Anno1800IslandTool.Core.Localization.TextCatalog.T("Création et chargement en cours…");
+        StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Création du terrain à la hauteur choisie, application au projet et reconstruction du maillage DX11…");
         try
         {
+            BusyWork.RunOperation(this, async () =>
+            {
             var summary = _applyMaximumExpansion is null
-                ? "Extension maximale préparée."
-                : _applyMaximumExpansion(GetChangedWorldRegions());
+                ? Anno1800IslandTool.Core.Localization.TextCatalog.T("Extension maximale préparée.")
+                : BusyWork.RunOnUi(this, () => _applyMaximumExpansion(GetChangedWorldRegions(), newLandHeight));
             MaximumIslandExpansionRequested = true;
             _hasDirectProjectCommit = _applyMaximumExpansion is not null;
             InitializeFootprintMask();
@@ -1570,14 +1724,15 @@ public partial class Terrain3DGpuWindow : Window
             PopulateLods(selectedLod);
             _initializing = false;
             await ReloadGpuGeometryAsync();
-            ExpandIslandMaximumButton.Content = "Extension maximale créée et chargée";
+            ExpandIslandMaximumButton.Content = Anno1800IslandTool.Core.Localization.TextCatalog.T("Extension maximale créée et chargée");
             StatusTextBlock.Text = summary;
+            });
         }
         catch (Exception ex)
         {
             ExpandIslandMaximumButton.IsEnabled = true;
-            ExpandIslandMaximumButton.Content = "Réessayer l’extension maximale";
-            StatusTextBlock.Text = $"L’extension n’a pas pu être créée : {ex.Message}";
+            ExpandIslandMaximumButton.Content = Anno1800IslandTool.Core.Localization.TextCatalog.T("Réessayer l’extension maximale");
+            StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"L’extension n’a pas pu être créée : {ex.Message}");
         }
     }
 
@@ -1627,7 +1782,7 @@ public partial class Terrain3DGpuWindow : Window
         {
             _projectFootprintMask = Array.Empty<bool>();
             _workingFootprintMask = Array.Empty<bool>();
-            FootprintStatusTextBlock.Text = "ActiveMapGrid absent : dessin d’emprise indisponible.";
+            FootprintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("ActiveMapGrid absent : dessin d’emprise indisponible.");
             return;
         }
 
@@ -1714,8 +1869,8 @@ public partial class Terrain3DGpuWindow : Window
         var active = ActiveMapGridMaskCodec.CountActiveCells(_workingFootprintMask);
         var total = _workingFootprintMask.Length;
         FootprintStatusTextBlock.Text = total == 0
-            ? "Aucune grille d’emprise disponible."
-            : $"Emprise : {active:N0}/{total:N0} cellule(s) active(s){(_pendingFineTerrainStamps.Count > 0 ? $" — {_pendingFineTerrainStamps.Count:N0} empreinte(s) fine(s)" : string.Empty)}{(_footprintDirty ? " — dessin non appliqué" : string.Empty)}.";
+            ? Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune grille d’emprise disponible.")
+            : Anno1800IslandTool.Core.Localization.TextCatalog.F($"Emprise : {active:N0}/{total:N0} cellule(s) active(s){(_pendingFineTerrainStamps.Count > 0 ? Anno1800IslandTool.Core.Localization.TextCatalog.F($" — {_pendingFineTerrainStamps.Count:N0} empreinte(s) fine(s)") : string.Empty)}{(_footprintDirty ? Anno1800IslandTool.Core.Localization.TextCatalog.T(" — dessin non appliqué") : string.Empty)}.");
     }
 
     private void UpdateFootprintHitPlane()
@@ -1781,22 +1936,24 @@ public partial class Terrain3DGpuWindow : Window
     {
         if (!_footprintDirty)
         {
-            StatusTextBlock.Text = "L’emprise dessinée est déjà appliquée.";
+            StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("L’emprise dessinée est déjà appliquée.");
             return;
         }
         if (!ActiveMapGridMaskCodec.HasAnyActiveCell(_workingFootprintMask))
         {
-            StatusTextBlock.Text = "Conservez au moins une cellule active pour que l’île reste valide.";
+            StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Conservez au moins une cellule active pour que l’île reste valide.");
             return;
         }
 
         ApplyFootprintButton.IsEnabled = false;
-        StatusTextBlock.Text = "Application de l’emprise, suppression des zones inutiles et reconstruction des LOD…";
+        StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Application de l’emprise, suppression des zones inutiles et reconstruction des LOD…");
         try
         {
+            BusyWork.RunOperation(this, async () =>
+            {
             var summary = _applyFootprintToProject is null
-                ? "Emprise dessinée préparée."
-                : _applyFootprintToProject(_workingFootprintMask.ToArray(), _pendingFineTerrainStamps.ToArray(), GetChangedWorldRegions());
+                ? Anno1800IslandTool.Core.Localization.TextCatalog.T("Emprise dessinée préparée.")
+                : BusyWork.RunOnUi(this, () => _applyFootprintToProject(_workingFootprintMask.ToArray(), _pendingFineTerrainStamps.ToArray(), GetChangedWorldRegions()));
             _hasDirectProjectCommit = _applyFootprintToProject is not null;
             _projectFootprintMask = _workingFootprintMask.ToArray();
             _pendingFineTerrainStamps.Clear();
@@ -1805,10 +1962,11 @@ public partial class Terrain3DGpuWindow : Window
             await ReloadGpuGeometryAsync();
             UpdateFootprintStatus();
             StatusTextBlock.Text = summary;
+            });
         }
         catch (Exception ex)
         {
-            StatusTextBlock.Text = $"L’emprise n’a pas pu être appliquée : {ex.Message}";
+            StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"L’emprise n’a pas pu être appliquée : {ex.Message}");
         }
         finally
         {
@@ -1824,7 +1982,7 @@ public partial class Terrain3DGpuWindow : Window
         _footprintDirty = false;
         UpdateFootprintPreview();
         UpdateFootprintStatus();
-        StatusTextBlock.Text = "Dessin d’emprise annulé ; l’emprise actuellement appliquée est restaurée.";
+        StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Dessin d’emprise annulé ; l’emprise actuellement appliquée est restaurée.");
         CompleteToolHistoryAction();
     }
 
@@ -1836,22 +1994,22 @@ public partial class Terrain3DGpuWindow : Window
         if (_isValidatingTerrain) return;
         if (_originalRaw1.Count > 0 || _changedBoundsByLod.Count > 0 || _footprintDirty)
         {
-            StatusTextBlock.Text = "Validez d’abord les modifications en cours, puis relancez la réparation.";
+            StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Validez d’abord les modifications en cours, puis relancez la réparation.");
             return;
         }
         _isValidatingTerrain = true;
         _loadCancellation?.Cancel();
         EditorControlsPanel.IsEnabled = false;
         GpuViewport.IsEnabled = false;
-        StatusTextBlock.Text = "Réparation des pages de hauteur et de leurs bordures en cours…";
+        StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Réparation des pages de hauteur et de leurs bordures en cours…");
         try
         {
-            var count = await Task.Run(() => TerrainHeightPageRepair.Repair(_project));
+            var count = BusyWork.Run(this, () => TerrainHeightPageRepair.Repair(_project));
             _hasDirectProjectCommit = true;
             RebaseTransactionAfterDirectCommit();
-            StatusTextBlock.Text = $"{count} pages de hauteur recalculées. Fermez l’éditeur puis exportez le ZIP complet pour l’essai en jeu.";
+            StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"{count} pages de hauteur recalculées et grille de construction reconstruite. Fermez l’éditeur puis exportez le ZIP complet pour l’essai en jeu.");
         }
-        catch (Exception ex) { StatusTextBlock.Text = $"Réparation incomplète : {ex.Message}"; }
+        catch (Exception ex) { StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Réparation incomplète : {ex.Message}"); }
         finally
         {
             _isValidatingTerrain = false;
@@ -1871,17 +2029,19 @@ public partial class Terrain3DGpuWindow : Window
         try
         {
             if (_mineEntrance is not null)
-                throw new InvalidOperationException("Terminez le placement de la mine par un second clic, ou retirez le dernier placement.");
+                throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Terminez le placement de la mine par un second clic, ou retirez le dernier placement."));
             if (_validateEntireTerrain is null)
-                throw new InvalidOperationException("Le service de validation complète n’est pas disponible.");
-            StatusTextBlock.Text = "Validation complète de tous les LOD et dérivés en cours…";
+                throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Le service de validation complète n’est pas disponible."));
+            StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Validation complète de tous les LOD et dérivés en cours…");
             await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+            BusyWork.RunOperation(this, async () =>
+            {
             if (_footprintDirty)
             {
                 if (!ActiveMapGridMaskCodec.HasAnyActiveCell(_workingFootprintMask))
-                    throw new InvalidOperationException("Conservez au moins une cellule active dans l’empreinte.");
+                    throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Conservez au moins une cellule active dans l’empreinte."));
                 if (_applyFootprintToProject is null)
-                    throw new InvalidOperationException("Le service d’application de l’empreinte n’est pas disponible.");
+                    throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Le service d’application de l’empreinte n’est pas disponible."));
                 _applyFootprintToProject(_workingFootprintMask.ToArray(), _pendingFineTerrainStamps.ToArray(), GetChangedWorldRegions());
                 _hasDirectProjectCommit = true;
                 RebaseTransactionAfterDirectCommit();
@@ -1898,10 +2058,11 @@ public partial class Terrain3DGpuWindow : Window
             if (!closeAfterValidation) await ReloadGpuGeometryAsync();
             StatusTextBlock.Text = UiLocalizationManager.T("Terrain validé — prêt pour l’export ZIP depuis la fenêtre principale.");
             validated = true;
+            });
         }
         catch (Exception ex)
         {
-            StatusTextBlock.Text = $"Validation incomplète : {ex.Message}\nLa fenêtre reste ouverte ; l’export n’est pas déclaré prêt.";
+            StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Validation incomplète : {ex.Message}\nLa fenêtre reste ouverte ; l’export n’est pas déclaré prêt.");
         }
         finally
         {
@@ -1933,7 +2094,7 @@ public partial class Terrain3DGpuWindow : Window
         }
     }
 
-    private GpuBrushMode GetBrushMode() => BrushToolListBox.SelectedIndex switch
+    private GpuBrushMode GetBrushMode() => _previewOnly ? GpuBrushMode.Navigation : BrushToolListBox.SelectedIndex switch
     {
         1 => GpuBrushMode.Raise,
         2 => GpuBrushMode.Lower,
@@ -2124,11 +2285,11 @@ public partial class Terrain3DGpuWindow : Window
 
     private string BuildStatusText(int vertexCount, int triangleCount, TimeSpan loadDuration)
     {
-        var featureLevel = GpuViewport.RenderHost?.FeatureLevel.ToString() ?? "initialisation";
-        var load = loadDuration > TimeSpan.Zero ? $" | chargement {loadDuration.TotalMilliseconds:0} ms" : string.Empty;
-        var upload = _lastUploadDuration > TimeSpan.Zero ? $" | dernier upload dynamique {_lastUploadDuration.TotalMilliseconds:0.0} ms" : string.Empty;
+        var featureLevel = GpuViewport.RenderHost?.FeatureLevel.ToString() ?? Anno1800IslandTool.Core.Localization.TextCatalog.T("initialisation");
+        var load = loadDuration > TimeSpan.Zero ? Anno1800IslandTool.Core.Localization.TextCatalog.F($" | chargement {loadDuration.TotalMilliseconds:0} ms") : string.Empty;
+        var upload = _lastUploadDuration > TimeSpan.Zero ? Anno1800IslandTool.Core.Localization.TextCatalog.F($" | dernier upload dynamique {_lastUploadDuration.TotalMilliseconds:0.0} ms") : string.Empty;
         var welded = Math.Max(0, _sourceVertexCount - vertexCount);
-        return $"Direct3D 11 {featureLevel} | {_adapterName} | LOD {GetSelectedLod()} fusionné | relief normalisé | {_loadedPages.Count} pages | {vertexCount:N0} sommets GPU ({welded:N0} doublons soudés) | {triangleCount:N0} triangles{load}{upload} | écritures hauteur {_changedVertexWrites:N0}";
+        return Anno1800IslandTool.Core.Localization.TextCatalog.F($"Direct3D 11 {featureLevel} | {_adapterName} | LOD {GetSelectedLod()} fusionné | relief normalisé | {_loadedPages.Count} pages | {vertexCount:N0} sommets GPU ({welded:N0} doublons soudés) | {triangleCount:N0} triangles{load}{upload} | écritures hauteur {_changedVertexWrites:N0}");
     }
 
     private static (DefaultEffectsManager Manager, string AdapterName) CreateEffectsManager()
@@ -2140,7 +2301,7 @@ public partial class Terrain3DGpuWindow : Window
             try
             {
                 var selectedIndex = -1;
-                var selectedName = "adaptateur matériel Windows";
+                var selectedName = Anno1800IslandTool.Core.Localization.TextCatalog.T("adaptateur matériel Windows");
                 for (var index = 0; index < adapters.Length; index++)
                 {
                     var description = adapters[index].Description1;
@@ -2177,7 +2338,7 @@ public partial class Terrain3DGpuWindow : Window
         }
         catch
         {
-            return (new DefaultEffectsManager(), "adaptateur matériel Windows");
+            return (new DefaultEffectsManager(), Anno1800IslandTool.Core.Localization.TextCatalog.T("adaptateur matériel Windows"));
         }
     }
 
@@ -2186,6 +2347,7 @@ public partial class Terrain3DGpuWindow : Window
 
     private void CancelButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_previewOnly) { DialogResult = false; return; }
         RestoreTransaction();
         _committed = false;
         DialogResult = false;
@@ -2394,4 +2556,4 @@ public sealed record GpuObjTerrainImportDefinition(
     bool FitToActiveFootprint,
     int GridStepRaw,
     int SmoothingPasses,
-    float? SourceSeaLevel = null);
+    float? SourceSeaLevel = null, bool PreserveSourceMesh = true);

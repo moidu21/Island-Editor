@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Core.Models;
+using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Validation;
 using Anno1800IslandTool.Pipeline.Abstractions;
 
@@ -34,7 +34,7 @@ public sealed class GameplayStructureValidator : IValidator<IslandProject>
                 report.Add(
                     ValidationSeverity.Warning,
                     ValidationCode.MissingGameplayManager,
-                    $"Le bloc <{tag}> est absent du GameData interprété.",
+                    Anno1800IslandTool.Core.Localization.TextCatalog.F($"Le bloc <{tag}> est absent du GameData interprété."),
                     gameDataPath);
             }
         }
@@ -46,7 +46,7 @@ public sealed class GameplayStructureValidator : IValidator<IslandProject>
                 report.Add(
                     ValidationSeverity.Info,
                     ValidationCode.MissingGameplayManager,
-                    $"Le bloc avancé <{tag}> est absent de ce GameData interprété. Ce n'est pas forcément bloquant pour l'import/export, mais la future génération complète restera incomplète.",
+                    Anno1800IslandTool.Core.Localization.TextCatalog.F($"Le bloc avancé <{tag}> est absent de ce GameData interprété. Ce n'est pas forcément bloquant pour l'import/export, mais la future génération complète restera incomplète."),
                     gameDataPath);
             }
         }
@@ -57,7 +57,7 @@ public sealed class GameplayStructureValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.UnexpectedPlayableArea,
-                "PlayableArea paraît vide ou inversée.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.T("PlayableArea paraît vide ou inversée."),
                 gameDataPath);
         }
 
@@ -66,7 +66,7 @@ public sealed class GameplayStructureValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.SparseGameplayData,
-                "Aucune Area exploitable n'a été extraite du bloc AreaIDs.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune Area exploitable n'a été extraite du bloc AreaIDs."),
                 gameDataPath);
         }
 
@@ -75,7 +75,7 @@ public sealed class GameplayStructureValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.SparseGameplayData,
-                "Aucun point de spawn exploitable n'a été extrait du bloc SpawnAreaPoints.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun point de spawn exploitable n'a été extrait du bloc SpawnAreaPoints."),
                 gameDataPath);
         }
 
@@ -84,7 +84,7 @@ public sealed class GameplayStructureValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.SparseGameplayData,
-                "Aucun AreaLink n'a été lu. Certaines îles interprétées n'en contiennent pas, mais cela limite les futures opérations gameplay avancées.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun AreaLink n'a été lu. Certaines îles interprétées n'en contiennent pas, mais cela limite les futures opérations gameplay avancées."),
                 gameDataPath);
         }
 
@@ -98,7 +98,7 @@ public sealed class GameplayStructureValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.SuspiciousGameplayBlock,
-                "Le bloc RegrowManager est présent mais ne contient aucun bit exploitable dans <TreeMap>/<bits>.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.T("Le bloc RegrowManager est présent mais ne contient aucun bit exploitable dans <TreeMap>/<bits>."),
                 gameDataPath);
         }
 
@@ -123,7 +123,7 @@ public sealed class GameplayStructureValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.SuspiciousGameplayBlock,
-                $"Le bloc {description} a une taille {info.Width}x{info.Height}, attendue {expectedWidth}x{expectedHeight} d'après MapSize.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"Le bloc {description} a une taille {info.Width}x{info.Height}, attendue {expectedWidth}x{expectedHeight} d'après MapSize."),
                 gameDataPath);
         }
     }

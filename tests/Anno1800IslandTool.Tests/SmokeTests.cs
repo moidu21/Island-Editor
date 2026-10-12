@@ -1,4 +1,4 @@
-﻿
+
 using System.IO.Compression;
 using System.Text.RegularExpressions;
 using Anno1800IslandTool.Core.Common;
@@ -350,7 +350,7 @@ public sealed class SmokeTests
         new ProjectTextRegenerator().RegenerateGameDataText(project);
 
         var water = Regex.Match(project.RawContent.GameDataText!, @"<Water>(?<body>.*?)</Water>", RegexOptions.Singleline).Groups["body"].Value;
-        Assert.Contains("<bits>1</bits>", water);
+        Assert.Contains("<bits>1 0 0 0</bits>", water);
     }
 
     [Fact]

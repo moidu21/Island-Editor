@@ -1,4 +1,4 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
 using System.Text;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;
@@ -129,7 +129,7 @@ public sealed class IslandExporter : IIslandWriter
             CopiedEntries = 0,
             ReplacedEntries = coreWrites.Count + meshWrites.Count + normalWrites.Count + tintWrites.Count,
             AddedEntries = 1 + (project.HeightEditState?.HasEdits == true ? 2 : 0) + (meshWrites.Count > 0 ? 1 : 0) + (normalWrites.Count > 0 ? 1 : 0) + (tintWrites.Count > 0 ? 1 : 0),
-            Summary = $"Export ciblé terminé : {coreWrites.Count} fichier(s) core, {meshWrites.Count} mesh page(s), {normalWrites.Count} normalmap(s) et {tintWrites.Count} tintmap(s) écrites dans le patch ZIP.",
+            Summary = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Export ciblé terminé : {coreWrites.Count} fichier(s) core, {meshWrites.Count} mesh page(s), {normalWrites.Count} normalmap(s) et {tintWrites.Count} tintmap(s) écrites dans le patch ZIP."),
             ReplacedEntryPaths = coreWrites.Select(w => BuildTargetArchivePath(project, w.Path))
                 .Concat(meshWrites.Select(w => BuildTargetArchivePath(project, w.TargetPath)))
                 .Concat(normalWrites.Select(w => BuildTargetArchivePath(project, w.TargetPath)))
@@ -182,7 +182,7 @@ public sealed class IslandExporter : IIslandWriter
 
         if (string.IsNullOrWhiteSpace(project.Metadata.SourceArchivePath) || !File.Exists(project.Metadata.SourceArchivePath))
         {
-            throw new FileNotFoundException("Archive source introuvable pour l'export conservatif.", project.Metadata.SourceArchivePath);
+            throw new FileNotFoundException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Archive source introuvable pour l'export conservatif."), project.Metadata.SourceArchivePath);
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(outputArchivePath) ?? ".");
@@ -213,7 +213,7 @@ public sealed class IslandExporter : IIslandWriter
         foreach (var sourceEntry in sourceArchive.Entries)
         {
             var normalizedSourcePath = sourceEntry.FullName.Replace('\\', '/');
-            if (IsSuppressedTerrainPath(project, normalizedSourcePath))
+            if (GeneratedExportReports.Contains(normalizedSourcePath) || IsSuppressedTerrainPath(project, normalizedSourcePath))
             {
                 continue;
             }
@@ -360,12 +360,12 @@ public sealed class IslandExporter : IIslandWriter
             var entry = outputArchive.CreateEntry(path, CompressionLevel.Optimal);
             using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(false));
             writer.WriteLine("Anno1800IslandTool v42.1");
-            writer.WriteLine("Mode mesh : topologie source conservée ; en mode extension active, les LOD mesh éditables conservent leur topologie source et ajoutent les nouveaux triangles par cluster hors footprint.");
-            writer.WriteLine("X/Z : conservés depuis les vertices du mesh courant/importé/édité, jamais restaurés depuis la vanilla.");
-            writer.WriteLine("Indices : conservés depuis les clusters du mesh courant/importé/édité.");
-            writer.WriteLine("Vertices : mode conservateur = même nombre/ordre ; mode extension = vertices vanilla conservés + nouveaux vertices hors footprint, Raw1/Y depuis heightmap, UV cluster-local pour nouveaux vertices, Raw4..7 reconstruits depuis la heightmap.");
-            writer.WriteLine("Tintmaps : Valider tout le terrain synchronise les pages existantes et ajoute les pages DDS DXT1 nécessaires aux cellules actives du masque ActiveMapGrid.bits.");
-            writer.WriteLine("LOD0/LOD1 : aucune géométrie n'est injectée. Les LOD éditables restent LOD2..LOD8, avec page/cluster bounds fixes vanilla v43.5.");
+            writer.WriteLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Mode mesh : topologie source conservée ; en mode extension active, les LOD mesh éditables conservent leur topologie source et ajoutent les nouveaux triangles par cluster hors footprint."));
+            writer.WriteLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("X/Z : conservés depuis les vertices du mesh courant/importé/édité, jamais restaurés depuis la vanilla."));
+            writer.WriteLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Indices : conservés depuis les clusters du mesh courant/importé/édité."));
+            writer.WriteLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Vertices : mode conservateur = même nombre/ordre ; mode extension = vertices vanilla conservés + nouveaux vertices hors footprint, Raw1/Y depuis heightmap, UV cluster-local pour nouveaux vertices, Raw4..7 reconstruits depuis la heightmap."));
+            writer.WriteLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Tintmaps : Valider tout le terrain synchronise les pages existantes et ajoute les pages DDS DXT1 nécessaires aux cellules actives du masque ActiveMapGrid.bits."));
+            writer.WriteLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("LOD0/LOD1 : aucune géométrie n'est injectée. Les LOD éditables restent LOD2..LOD8, avec page/cluster bounds fixes vanilla v43.5."));
             addedEntries++;
             addedPaths.Add(path);
         }
@@ -410,7 +410,7 @@ public sealed class IslandExporter : IIslandWriter
             AddedEntries = addedEntries,
             AddedEntryPaths = addedPaths.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
             ReplacedEntryPaths = replacedPaths.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
-            Summary = $"Export terminé : {copiedEntries} entrée(s) copiée(s), {replacedEntries} remplacée(s), {addedEntries} ajoutée(s)."
+            Summary = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Export terminé : {copiedEntries} entrée(s) copiée(s), {replacedEntries} remplacée(s), {addedEntries} ajoutée(s).")
         };
     }
 
@@ -443,14 +443,14 @@ public sealed class IslandExporter : IIslandWriter
 
         if (errors.Count == 0)
         {
-            return "Export annulé : le projet contient des erreurs de validation.";
+            return Anno1800IslandTool.Core.Localization.TextCatalog.T("Export annulé : le projet contient des erreurs de validation.");
         }
 
         var suffix = report.ErrorCount > errors.Count
-            ? Environment.NewLine + $"... +{report.ErrorCount - errors.Count} autre(s) erreur(s). Ouvre le rapport de validation pour le détail complet."
+            ? Environment.NewLine + Anno1800IslandTool.Core.Localization.TextCatalog.F($"... +{report.ErrorCount - errors.Count} autre(s) erreur(s). Ouvre le rapport de validation pour le détail complet.")
             : string.Empty;
 
-        return "Export annulé : le projet contient des erreurs de validation :"
+        return Anno1800IslandTool.Core.Localization.TextCatalog.T("Export annulé : le projet contient des erreurs de validation :")
             + Environment.NewLine
             + string.Join(Environment.NewLine, errors)
             + suffix;
@@ -545,7 +545,7 @@ public sealed class IslandExporter : IIslandWriter
             }
         }
 
-        var tintSyncSummary = "Tintmaps source conservées : aucune édition géométrique.";
+        var tintSyncSummary = Anno1800IslandTool.Core.Localization.TextCatalog.T("Tintmaps source conservées : aucune édition géométrique.");
         var syncedTintMaps = shouldRegenerateTintMaps
             ? TerrainTintMapExportSynchronizer.BuildAllTintMapReplacements(project, out tintSyncSummary,
                 onlyMaterialRepairs: project.EmergedMaterialBounds is not null && project.HeightEditState?.HasGeometryEdits != true &&
@@ -600,9 +600,9 @@ public sealed class IslandExporter : IIslandWriter
     private static string BuildLocalNormalMapWriteSummary(IReadOnlyCollection<RegeneratedNormalMapWrite> writes)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("Récapitulatif des normalmaps interprétés générées localement");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Récapitulatif des normalmaps interprétés générées localement"));
         sb.AppendLine();
-        sb.AppendLine($"Nombre de pages: {writes.Count}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Nombre de pages: {writes.Count}"));
         sb.AppendLine();
 
         foreach (var write in writes.OrderBy(w => w.TargetPath, StringComparer.OrdinalIgnoreCase))
@@ -629,9 +629,9 @@ public sealed class IslandExporter : IIslandWriter
     private static string BuildLocalMeshWriteSummary(IReadOnlyCollection<RegeneratedMeshPageWrite> writes)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("Récapitulatif des mesh pages générées localement");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Récapitulatif des mesh pages générées localement"));
         sb.AppendLine();
-        sb.AppendLine($"Nombre de pages: {writes.Count}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Nombre de pages: {writes.Count}"));
         sb.AppendLine();
 
         foreach (var write in writes.OrderBy(w => w.TargetPath, StringComparer.OrdinalIgnoreCase))
@@ -651,7 +651,7 @@ public sealed class IslandExporter : IIslandWriter
             }
             if (write.Comparison is not null)
             {
-                sb.Append(" | vertices touchés ");
+                sb.Append(Anno1800IslandTool.Core.Localization.TextCatalog.T(" | vertices touchés "));
                 sb.Append(write.Comparison.ChangedVertexCount);
                 sb.Append('/');
                 sb.Append(write.Comparison.VertexCount);
@@ -667,9 +667,9 @@ public sealed class IslandExporter : IIslandWriter
     private static string BuildLocalTintWriteSummary(IReadOnlyCollection<RegeneratedTintMapWrite> writes)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("Récapitulatif des tintmaps générées localement");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Récapitulatif des tintmaps générées localement"));
         sb.AppendLine();
-        sb.AppendLine($"Nombre de pages: {writes.Count}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Nombre de pages: {writes.Count}"));
         sb.AppendLine();
 
         foreach (var write in writes.OrderBy(w => w.TargetPath, StringComparer.OrdinalIgnoreCase))
@@ -698,10 +698,10 @@ public sealed class IslandExporter : IIslandWriter
     {
         var state = project.HeightEditState;
         var sb = new StringBuilder();
-        sb.AppendLine("Rapport terrain dirty area");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Rapport terrain dirty area"));
         sb.AppendLine();
-        sb.AppendLine($"Projet : {project.Metadata.ProjectName}");
-        sb.AppendLine($"Seuil vérification hauteur : {thresholdWorldHeight.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Projet : {project.Metadata.ProjectName}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Seuil vérification hauteur : {thresholdWorldHeight.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}"));
         sb.AppendLine($"GameData heightmap : {project.GameData.TerrainHeightMap.Width}x{project.GameData.TerrainHeightMap.Height}");
         sb.AppendLine($"RD3D grid : {ResolveGridWidth(project)}x{ResolveGridHeight(project)}");
         sb.AppendLine();
@@ -711,27 +711,27 @@ public sealed class IslandExporter : IIslandWriter
         {
             var b = state.DirtySampleBounds.Value;
             var rd = ConvertSampleBoundsToRd3d(project, b);
-            sb.AppendLine("Zone modifiée :");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Zone modifiée :"));
             sb.AppendLine($"- Samples GameData X/Z : X={b.Left}..{b.Right}, Z={b.Top}..{b.Bottom}");
-            sb.AppendLine($"- Coordonnées RD3D X/Z : X={rd.minX.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}..{rd.maxX.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}, Z={rd.minZ.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}..{rd.maxZ.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}");
-            sb.AppendLine($"- Samples exacts dans le masque : {samples.Count}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"- Coordonnées RD3D X/Z : X={rd.minX.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}..{rd.maxX.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}, Z={rd.minZ.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}..{rd.maxZ.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}"));
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"- Samples exacts dans le masque : {samples.Count}"));
         }
         else
         {
-            sb.AppendLine("Zone modifiée : aucune dirty area GameData exacte enregistrée.");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Zone modifiée : aucune dirty area GameData exacte enregistrée."));
         }
 
         sb.AppendLine();
         if (samples.Count > 0)
         {
-            sb.AppendLine("Hauteur avant/après dans la zone modifiée :");
-            sb.AppendLine($"- Avant : raw {samples.Min(s => s.BeforeRaw).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}..{samples.Max(s => s.BeforeRaw).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)} | world {samples.Min(s => s.BeforeWorldHeight).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}..{samples.Max(s => s.BeforeWorldHeight).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}");
-            sb.AppendLine($"- Après : raw {samples.Min(s => s.AfterRaw).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}..{samples.Max(s => s.AfterRaw).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)} | world {samples.Min(s => s.AfterWorldHeight).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}..{samples.Max(s => s.AfterWorldHeight).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Hauteur avant/après dans la zone modifiée :"));
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"- Avant : raw {samples.Min(s => s.BeforeRaw).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}..{samples.Max(s => s.BeforeRaw).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)} | world {samples.Min(s => s.BeforeWorldHeight).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}..{samples.Max(s => s.BeforeWorldHeight).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}"));
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"- Après : raw {samples.Min(s => s.AfterRaw).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}..{samples.Max(s => s.AfterRaw).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)} | world {samples.Min(s => s.AfterWorldHeight).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}..{samples.Max(s => s.AfterWorldHeight).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}"));
             sb.AppendLine($"- Delta world : {samples.Min(s => s.AfterWorldHeight - s.BeforeWorldHeight).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}..{samples.Max(s => s.AfterWorldHeight - s.BeforeWorldHeight).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}");
         }
         else
         {
-            sb.AppendLine("Hauteur avant/après : aucun sample GameData touché dans le masque exact.");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Hauteur avant/après : aucun sample GameData touché dans le masque exact."));
         }
 
         var coverage = TerrainPageCoverage.BuildProjectCoverage(project);
@@ -763,28 +763,28 @@ public sealed class IslandExporter : IIslandWriter
         }
 
         sb.AppendLine();
-        sb.AppendLine($"Pages mesh touchées : {meshKeys.Count}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Pages mesh touchées : {meshKeys.Count}"));
         foreach (var key in meshKeys.OrderBy(k => k.Lod).ThenBy(k => k.X).ThenBy(k => k.Y))
         {
             var vertexText = state.MeshVerticesTouched.TryGetValue(key, out var vertices)
-                ? $" | vertices modifiés={vertices}"
+                ? Anno1800IslandTool.Core.Localization.TextCatalog.F($" | vertices modifiés={vertices}")
                 : string.Empty;
             sb.AppendLine($"- {key}{vertexText}");
         }
 
         sb.AppendLine();
-        sb.AppendLine($"Pages normalmap touchées : {normalKeys.Count}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Pages normalmap touchées : {normalKeys.Count}"));
         foreach (var key in normalKeys.OrderBy(k => k.Lod).ThenBy(k => k.X).ThenBy(k => k.Y))
         {
             sb.AppendLine($"- {key}");
         }
 
         sb.AppendLine();
-        sb.AppendLine($"GameData samples touchés : {samples.Count}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"GameData samples touchés : {samples.Count}"));
         if (samples.Count > 0)
         {
-            sb.AppendLine("Les samples exacts complets sont dans terrain-dirty-area-samples.csv.");
-            sb.AppendLine("Aperçu des 20 premiers samples :");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Les samples exacts complets sont dans terrain-dirty-area-samples.csv."));
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Aperçu des 20 premiers samples :"));
             foreach (var sample in samples.Take(20))
             {
                 sb.AppendLine($"- X={sample.X}, Z={sample.Z}, world {sample.BeforeWorldHeight.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)} -> {sample.AfterWorldHeight.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}");
@@ -793,18 +793,18 @@ public sealed class IslandExporter : IIslandWriter
 
         sb.AppendLine();
         var countAbove = state.CountSamplesAboveThreshold(thresholdWorldHeight);
-        sb.AppendLine("Vérification hauteur > seuil dans la zone modifiée uniquement :");
-        sb.AppendLine($"- Résultat : {(countAbove > 0 ? "OUI" : "NON")}");
-        sb.AppendLine($"- Samples au-dessus du seuil : {countAbove}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Vérification hauteur > seuil dans la zone modifiée uniquement :"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"- Résultat : {(countAbove > 0 ? Anno1800IslandTool.Core.Localization.TextCatalog.T("OUI") : Anno1800IslandTool.Core.Localization.TextCatalog.T("NON"))}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"- Samples au-dessus du seuil : {countAbove}"));
         if (state.TryGetAfterHeightMaximum(out var maxSample) && maxSample is not null)
         {
-            sb.AppendLine($"- Hauteur max après : {maxSample.AfterWorldHeight.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)} au sample X={maxSample.X}, Z={maxSample.Z}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"- Hauteur max après : {maxSample.AfterWorldHeight.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)} au sample X={maxSample.X}, Z={maxSample.Z}"));
         }
 
         if (state.RecentOperations.Count > 0)
         {
             sb.AppendLine();
-            sb.AppendLine("Opérations récentes :");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Opérations récentes :"));
             foreach (var operation in state.RecentOperations)
             {
                 sb.AppendLine("- " + operation);
@@ -866,28 +866,28 @@ public sealed class IslandExporter : IIslandWriter
     {
         var state = project.GroundObjectEditState;
         var sb = new StringBuilder();
-        sb.AppendLine("Récapitulatif GroundObjects / props / végétation v25");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Récapitulatif GroundObjects / props / végétation v25"));
         sb.AppendLine();
-        sb.AppendLine($"Projet : {project.Metadata.ProjectName}");
-        sb.AppendLine($"Opérations d'application : {state.TotalApplyOperations}");
-        sb.AppendLine($"GroundObjects actuels : {state.TotalGroundObjects}");
-        sb.AppendLine($"Pages mesh affectées : {state.AffectedPages}");
-        sb.AppendLine($"Clusters affectés : {state.AffectedClusters}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Projet : {project.Metadata.ProjectName}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Opérations d'application : {state.TotalApplyOperations}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"GroundObjects actuels : {state.TotalGroundObjects}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Pages mesh affectées : {state.AffectedPages}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Clusters affectés : {state.AffectedClusters}"));
         sb.AppendLine($"Vegetation : {state.VegetationCount}");
         sb.AppendLine($"Props : {state.PropCount}");
-        sb.AppendLine($"Décorations : {state.DecorationCount}");
-        sb.AppendLine($"Unknown / FileName vide : {state.UnknownCount}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Décorations : {state.DecorationCount}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Unknown / FileName vide : {state.UnknownCount}"));
         if (state.RecentOperations.Count > 0)
         {
             sb.AppendLine();
-            sb.AppendLine("Dernières opérations :");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Dernières opérations :"));
             foreach (var op in state.RecentOperations)
             {
                 sb.AppendLine("- " + op);
             }
         }
         sb.AppendLine();
-        sb.AppendLine("Pages mesh exportées par l'éditeur GroundObjects :");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Pages mesh exportées par l'éditeur GroundObjects :"));
         foreach (var write in project.LocalRegeneration?.GeneratedMeshPageWrites ?? Enumerable.Empty<RegeneratedMeshPageWrite>())
         {
             if (write.Summary.Contains("GroundObjects", StringComparison.OrdinalIgnoreCase))
@@ -903,27 +903,27 @@ public sealed class IslandExporter : IIslandWriter
     {
         var state = project.MaterialEditState;
         var sb = new StringBuilder();
-        sb.AppendLine("Récapitulatif peinture matériaux terrain v25");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Récapitulatif peinture matériaux terrain v25"));
         sb.AppendLine();
-        sb.AppendLine($"Projet : {project.Metadata.ProjectName}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Projet : {project.Metadata.ProjectName}"));
         sb.AppendLine($"Material map : {project.Rd3d.MaterialMap.Width}x{project.Rd3d.MaterialMap.Height}");
         sb.AppendLine($"MaterialIDBlockSize : {project.Rd3d.MaterialMap.MaterialIdBlockSize}");
-        sb.AppendLine($"Opérations de pinceau : {state.TotalPaintOperations}");
-        sb.AppendLine($"Cellules modifiées cumulées : {state.TotalCellsChanged}");
-        sb.AppendLine($"Blocs MaterialIDs2 modifiés cumulés : {state.TotalBlocksChanged}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Opérations de pinceau : {state.TotalPaintOperations}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Cellules modifiées cumulées : {state.TotalCellsChanged}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Blocs MaterialIDs2 modifiés cumulés : {state.TotalBlocksChanged}"));
         if (state.AffectedBounds is not null)
         {
             var b = state.AffectedBounds.Value;
-            sb.AppendLine($"Bounds touchées : left={b.Left}, top={b.Top}, right={b.Right}, bottom={b.Bottom}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Bounds touchées : left={b.Left}, top={b.Top}, right={b.Right}, bottom={b.Bottom}"));
         }
         if (state.MaterialIdsTouched.Count > 0)
         {
-            sb.AppendLine("Material IDs touchés : " + string.Join(", ", state.MaterialIdsTouched.OrderBy(x => x)));
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Material IDs touchés : ") + string.Join(", ", state.MaterialIdsTouched.OrderBy(x => x)));
         }
         if (state.RecentOperations.Count > 0)
         {
             sb.AppendLine();
-            sb.AppendLine("Dernières opérations :");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Dernières opérations :"));
             foreach (var op in state.RecentOperations)
             {
                 sb.AppendLine("- " + op);
@@ -941,14 +941,14 @@ public sealed class IslandExporter : IIslandWriter
         IReadOnlyCollection<RegeneratedTintMapWrite> tintWrites)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("Export ciblé des dérivés terrain");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Export ciblé des dérivés terrain"));
         sb.AppendLine();
-        sb.AppendLine($"Projet source : {project.Metadata.ProjectName}");
-        sb.AppendLine($"Archive source : {project.Metadata.SourceArchivePath}");
-        sb.AppendLine($"Filtre page : {(onlyPageKey.HasValue ? onlyPageKey.Value.ToString() : "aucun (toutes les pages générées)")}");
-        sb.AppendLine($"Mesh pages exportées : {meshWrites.Count}");
-        sb.AppendLine($"NormalMaps exportées : {normalWrites.Count}");
-        sb.AppendLine($"TintMaps exportées : {tintWrites.Count}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Projet source : {project.Metadata.ProjectName}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Archive source : {project.Metadata.SourceArchivePath}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Filtre page : {(onlyPageKey.HasValue ? onlyPageKey.Value.ToString() : Anno1800IslandTool.Core.Localization.TextCatalog.T("aucun (toutes les pages générées)"))}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Mesh pages exportées : {meshWrites.Count}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"NormalMaps exportées : {normalWrites.Count}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"TintMaps exportées : {tintWrites.Count}"));
         sb.AppendLine();
         if (meshWrites.Count > 0)
         {
@@ -990,20 +990,20 @@ public sealed class IslandExporter : IIslandWriter
         IReadOnlyCollection<string> addedPaths)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("Manifest export v25");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Manifest export v25"));
         sb.AppendLine();
-        sb.AppendLine($"Projet : {project.Metadata.ProjectName}");
-        sb.AppendLine($"Archive source : {project.Metadata.SourceArchivePath}");
-        sb.AppendLine($"Archive exportée : {outputArchivePath}");
-        sb.AppendLine($"Nom interne cible : {project.Metadata.IslandInternalName}");
-        sb.AppendLine($"Entrées copiées : {copiedEntries}");
-        sb.AppendLine($"Entrées remplacées : {replacedPaths.Count}");
-        sb.AppendLine($"Entrées ajoutées : {addedPaths.Count}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Projet : {project.Metadata.ProjectName}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Archive source : {project.Metadata.SourceArchivePath}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Archive exportée : {outputArchivePath}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Nom interne cible : {project.Metadata.IslandInternalName}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Entrées copiées : {copiedEntries}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Entrées remplacées : {replacedPaths.Count}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Entrées ajoutées : {addedPaths.Count}"));
         sb.AppendLine();
 
         if (project.ModifiedSections.Count > 0)
         {
-            sb.AppendLine("Sections modifiées :");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Sections modifiées :"));
             foreach (var section in project.ModifiedSections.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
             {
                 sb.AppendLine($"- {section}");
@@ -1013,7 +1013,7 @@ public sealed class IslandExporter : IIslandWriter
 
         if (replacedPaths.Count > 0)
         {
-            sb.AppendLine("Entrées remplacées :");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Entrées remplacées :"));
             foreach (var path in replacedPaths.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
             {
                 sb.AppendLine($"- {path}");
@@ -1023,7 +1023,7 @@ public sealed class IslandExporter : IIslandWriter
 
         if (addedPaths.Count > 0)
         {
-            sb.AppendLine("Entrées ajoutées :");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Entrées ajoutées :"));
             foreach (var path in addedPaths.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
             {
                 sb.AppendLine($"- {path}");

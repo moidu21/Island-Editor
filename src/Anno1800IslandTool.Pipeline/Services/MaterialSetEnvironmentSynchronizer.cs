@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;
@@ -48,7 +48,7 @@ public sealed class MaterialSetEnvironmentSynchronizer
         var report = new MaterialSetEnvironmentSyncReport { TargetBiome = targetBiome.ToString() };
         if (targetBiome == EnvironmentBiome.Unknown)
         {
-            report.Notes.Add("Biome non reconnu : les objets naturels existants ont été conservés.");
+            report.Notes.Add(Anno1800IslandTool.Core.Localization.TextCatalog.T("Biome non reconnu : les objets naturels existants ont été conservés."));
             return report;
         }
 
@@ -157,8 +157,8 @@ public sealed class MaterialSetEnvironmentSynchronizer
             }
         }
 
-        report.Notes.Add($"Catalogue assets.xml embarqué : {_catalog.Paths.Count} ressource(s) naturelle(s).");
-        report.Notes.Add($"Profil vanilla {targetBiome} : {_catalog.GetProfilePaths(targetBiome.ToString()).Count} ressource(s) autorisée(s).");
+        report.Notes.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Catalogue assets.xml embarqué : {_catalog.Paths.Count} ressource(s) naturelle(s)."));
+        report.Notes.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Profil vanilla {targetBiome} : {_catalog.GetProfilePaths(targetBiome.ToString()).Count} ressource(s) autorisée(s)."));
         return report;
     }
 
@@ -436,9 +436,9 @@ public sealed class MaterialSetEnvironmentSyncReport
                               PropGridInstancesRemoved > 0 || GroundObjectsUpdated > 0 || GroundObjectsRemoved > 0;
 
     public override string ToString()
-        => $"Biome {TargetBiome} : PropGrid {PropGridFileNamesUpdated} remplacée(s), {PropGridFileNamesRemoved + PropGridDuplicateFileNamesRemoved} retirée(s), " +
-           $"{PropGridInstancesReindexed} instance(s) réindexée(s), {PropGridInstancesRemoved} retirée(s) ; GroundObjects {GroundObjectsUpdated} remplacé(s), " +
-           $"{GroundObjectsRemoved} retiré(s) sur {AffectedMeshPages.Count} page(s). Prêt pour l’export.";
+        => Anno1800IslandTool.Core.Localization.TextCatalog.F($"Biome {TargetBiome} : PropGrid {PropGridFileNamesUpdated} remplacée(s), {PropGridFileNamesRemoved + PropGridDuplicateFileNamesRemoved} retirée(s), ") +
+           Anno1800IslandTool.Core.Localization.TextCatalog.F($"{PropGridInstancesReindexed} instance(s) réindexée(s), {PropGridInstancesRemoved} retirée(s) ; GroundObjects {GroundObjectsUpdated} remplacé(s), ") +
+           Anno1800IslandTool.Core.Localization.TextCatalog.F($"{GroundObjectsRemoved} retiré(s) sur {AffectedMeshPages.Count} page(s). Prêt pour l’export.");
 }
 
 internal sealed class EnvironmentAssetCatalog

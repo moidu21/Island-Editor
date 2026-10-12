@@ -1,4 +1,4 @@
-﻿namespace Anno1800IslandTool.Core.Models;
+namespace Anno1800IslandTool.Core.Models;
 
 public sealed class AreaDefinition
 {

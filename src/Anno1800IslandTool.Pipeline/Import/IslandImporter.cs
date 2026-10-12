@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.RegularExpressions;
 using Anno1800IslandTool.Core.Enums;
 using Anno1800IslandTool.Core.Models;
@@ -200,8 +200,8 @@ public sealed class IslandImporter : IIslandReader
                 {
                     Key = item.Key,
                     OriginalRelativePath = item.Path,
-                    DecodeStatus = "Non chargée",
-                    DecodeNotes = "Le détail des pages mesh n'a pas été chargé à l'import. Recharge le projet avec 'Lire le détail des pages' ou laisse la fenêtre terrain forcer le rechargement."
+                    DecodeStatus = Anno1800IslandTool.Core.Localization.TextCatalog.T("Non chargée"),
+                    DecodeNotes = Anno1800IslandTool.Core.Localization.TextCatalog.T("Le détail des pages mesh n'a pas été chargé à l'import. Recharge le projet avec 'Lire le détail des pages' ou laisse la fenêtre terrain forcer le rechargement.")
                 };
             }
 

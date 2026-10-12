@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Numerics;
 using System.Text.RegularExpressions;
 using Anno1800IslandTool.Core.Common;
@@ -18,9 +18,9 @@ public partial class Terrain3DWindow
         var width = (float)(_project.Rd3d.GridWidth > 0 ? _project.Rd3d.GridWidth : _project.Root.MapSize * 32);
         var height = (float)(_project.Rd3d.GridHeight > 0 ? _project.Rd3d.GridHeight : _project.Root.MapSize * 32);
         if (grid.X <= 0 || grid.Y <= 0 || map.Width < 2 || map.Height < 2 || !_project.Rd3d.MaterialMap.HasAnyData)
-            throw new InvalidOperationException("Heightmap, matériaux et empreinte sont nécessaires pour créer une plage.");
+            throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Heightmap, matériaux et empreinte sont nécessaires pour créer une plage."));
         if (GameDataAreaObjectsXmlEditor.Extract(_project.RawContent.GameDataText, "EditorObject").Containers.Count == 0)
-            throw new InvalidOperationException("Le groupe EditorObject nécessaire aux côtes de comptoir est absent.");
+            throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Le groupe EditorObject nécessaire aux côtes de comptoir est absent."));
         var profile = new OutwardBeachProfile(beach.LandWidth, beach.WaterWidth,
             TerrainHeightEncoding.LegacyFineHeightToWorldHeight(beach.BeachDecodedHeight),
             TerrainHeightEncoding.LegacyFineHeightToWorldHeight(beach.WaterDecodedHeight), beach.InnerWidth);
@@ -32,7 +32,7 @@ public partial class Terrain3DWindow
             var outer = point + span.Outward * (float)(profile.AddedLandWidth + profile.WaterWidth);
             if (outer.X < OuterOceanSafetyWidthWorld || outer.Y < OuterOceanSafetyWidthWorld ||
                 outer.X > width - OuterOceanSafetyWidthWorld || outer.Y > height - OuterOceanSafetyWidthWorld)
-                throw new InvalidOperationException("Espace insuffisant vers la mer avant la limite maximale de l’île. Réduisez les largeurs ou choisissez un autre tronçon ; aucune plage n’a été créée.");
+                throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Espace insuffisant vers la mer avant la limite maximale de l’île. Réduisez les largeurs ou choisissez un autre tronçon ; aucune plage n’a été créée."));
         }
         foreach (var region in pendingChangedRegions)
             UpdateCoarseFromEditedMeshRegion(region.Lod, region.MinX, region.MinZ, region.MaxX, region.MaxZ);
@@ -55,7 +55,7 @@ public partial class Terrain3DWindow
             var cz = Math.Clamp((int)(p.Y / height * grid.Y), 0, grid.Y - 1);
             next[cz * grid.X + cx] = true;
         }
-        if (edits.Count == 0) throw new InvalidOperationException("Aucune zone extérieure disponible le long de ce tronçon.");
+        if (edits.Count == 0) throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune zone extérieure disponible le long de ce tronçon."));
         InitializeChangedFootprintSamplesAsDeepWater(before, next, grid);
         foreach (var edit in edits) _editedCoarseSamples[edit.Index] = TerrainHeightEncoding.WorldHeightToGameDataRaw(edit.Height);
         _activeMapMask = next;
@@ -89,25 +89,25 @@ public partial class Terrain3DWindow
         RequestSceneRebuild(immediate: true);
         RefreshPropagationInfo();
         UpdateNormalPreview();
-        return $"Plage extérieure créée sur {spans.Sum(s => s.Length) / 32:0.#} cases de contour : {profile.AddedLandWidth / 32:0.#} cases de plateau ajoutées, raccord intérieur progressif de {profile.InnerBlendWidth / 32:0.#} cases. " +
-            $"{anchors} ancrage(s) de comptoir, {writes.Count} pages mesh, {normals.Count} normalmaps et {tints.Count} tintmaps recalculées. Les angles courts et les baies étroites restent à vérifier en jeu pour la place disponible.";
+        return Anno1800IslandTool.Core.Localization.TextCatalog.F($"Plage extérieure créée sur {spans.Sum(s => s.Length) / 32:0.#} cases de contour : {profile.AddedLandWidth / 32:0.#} cases de plateau ajoutées, raccord intérieur progressif de {profile.InnerBlendWidth / 32:0.#} cases. ") +
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"{anchors} ancrage(s) de comptoir, {writes.Count} pages mesh, {normals.Count} normalmaps et {tints.Count} tintmaps recalculées. Les angles courts et les baies étroites restent à vérifier en jeu pour la place disponible.");
     }
 
     private string ApplyMeshBeachFromGpu(GpuBeachDefinition beach,
         IReadOnlyList<(int Lod, double MinX, double MinZ, double MaxX, double MaxZ)> pendingChangedRegions)
     {
         if (beach.Contour is not { Count: > 0 } spans)
-            throw new InvalidOperationException("Aucune ligne de rivage n'a été trouvée dans le maillage.");
+            throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune ligne de rivage n'a été trouvée dans le maillage."));
         if (pendingChangedRegions.Count > 0)
-            throw new InvalidOperationException("Validez les retouches de terrain avant de définir une côte constructible.");
+            throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Validez les retouches de terrain avant de définir une côte constructible."));
         if (GameDataAreaObjectsXmlEditor.Extract(_project.RawContent.GameDataText, "EditorObject").Containers.Count == 0)
-            throw new InvalidOperationException("Le groupe EditorObject nécessaire aux côtes de comptoir est absent.");
+            throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Le groupe EditorObject nécessaire aux côtes de comptoir est absent."));
         // Only gameplay CoastLine objects are added. No height, material, mesh or texture write.
         var anchors = AddContourCoastObjects(beach with { LandWidth = 0 }, spans);
         _project.ModifiedSections.Add("GameData");
         _project.ModifiedSections.Add("PlayableCoastLine");
         _project.IsModified = true;
-        return $"Côte constructible ajoutée sur {spans.Sum(span => span.Length) / 32:0.#} cases : {anchors} ligne de côte. Relief et matériaux conservés.";
+        return Anno1800IslandTool.Core.Localization.TextCatalog.F($"Côte constructible ajoutée sur {spans.Sum(span => span.Length) / 32:0.#} cases : {anchors} ligne de côte. Relief et matériaux conservés.");
     }
 
     private void PaintMeshBeachMaterials(IReadOnlyList<CoastSpan> spans, OutwardBeachProfile profile, float width, float height)
@@ -134,7 +134,7 @@ public partial class Terrain3DWindow
         };
         result.AffectedMaterialIds.UnionWith(new[] { options.BeachMaterialId, options.ShallowWaterMaterialId, options.DeepWaterMaterialId });
         var editState = _project.MaterialEditState ?? new TerrainMaterialEditState();
-        editState.AddGeneratedOperation(result, "Plage suivant directement le maillage v46.34");
+        editState.AddGeneratedOperation(result, Anno1800IslandTool.Core.Localization.TextCatalog.T("Plage suivant directement le maillage v46.34"));
         _editor.ReplaceTerrainMaterialMap(_project, material, editState);
     }
 
@@ -163,7 +163,7 @@ public partial class Terrain3DWindow
             AffectedBounds = new RectI(0, 0, map.Width - 1, map.Height - 1) };
         result.AffectedMaterialIds.UnionWith(new[] { options.BeachMaterialId, options.ShallowWaterMaterialId, options.DeepWaterMaterialId });
         var state = _project.MaterialEditState ?? new TerrainMaterialEditState();
-        state.AddGeneratedOperation(result, "Plage extérieure suivant l’empreinte v46.20");
+        state.AddGeneratedOperation(result, Anno1800IslandTool.Core.Localization.TextCatalog.T("Plage extérieure suivant l’empreinte v46.20"));
         _editor.ReplaceTerrainMaterialMap(_project, map, state);
     }
 
@@ -307,7 +307,7 @@ public partial class Terrain3DWindow
         var result = new TerrainMaterialPaintResult { CellsChanged = changed, CellsVisited = material.Width * material.Height,
             AffectedBounds = new RectI(0, 0, material.Width - 1, material.Height - 1) };
         var state = _project.MaterialEditState ?? new TerrainMaterialEditState();
-        state.AddGeneratedOperation(result, "Restauration géographique des plages v46.22");
+        state.AddGeneratedOperation(result, Anno1800IslandTool.Core.Localization.TextCatalog.T("Restauration géographique des plages v46.22"));
         _editor.ReplaceTerrainMaterialMap(_project, material, state);
         return repairedAnchorCount;
     }

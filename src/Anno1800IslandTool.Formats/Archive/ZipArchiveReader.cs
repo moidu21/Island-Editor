@@ -1,4 +1,4 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
 using System.Text;
 
 namespace Anno1800IslandTool.Formats.Archive;
@@ -216,7 +216,7 @@ public sealed class ZipArchiveReader
         private ZipArchiveEntry FindEntry(RequestedPath path)
             => _entriesByPath.TryGetValue(path.Normalized, out var entry)
                 ? entry
-                : throw new FileNotFoundException($"Entrée ZIP introuvable : {path.Original}");
+                : throw new FileNotFoundException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Entrée ZIP introuvable : {path.Original}"));
 
         private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
     }
@@ -225,7 +225,7 @@ public sealed class ZipArchiveReader
     {
         if (entry.Length > int.MaxValue)
         {
-            throw new InvalidDataException($"Entrée ZIP trop volumineuse : {entry.FullName}");
+            throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Entrée ZIP trop volumineuse : {entry.FullName}"));
         }
 
         using var entryStream = entry.Open();

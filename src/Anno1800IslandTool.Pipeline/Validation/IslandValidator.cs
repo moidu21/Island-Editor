@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Core.Models;
+using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Validation;
 
 namespace Anno1800IslandTool.Pipeline.Validation;
@@ -22,14 +22,14 @@ public sealed class IslandValidator
         var report = new ValidationReport();
         if (project is null)
         {
-            report.Add(ValidationSeverity.Error, ValidationCode.ValidatorInternalError, "Projet nul : validation impossible.");
+            report.Add(ValidationSeverity.Error, ValidationCode.ValidatorInternalError, Anno1800IslandTool.Core.Localization.TextCatalog.T("Projet nul : validation impossible."));
             return report;
         }
 
         report.Add(
             ValidationSeverity.Info,
             ValidationCode.TerrainDiagnostic,
-            "Validator v30 : validation renforcée activée (matériaux non destructifs, IDs inconnus en warning, materialset implicite, LOD0/LOD1 protégés).");
+            Anno1800IslandTool.Core.Localization.TextCatalog.T("Validator v30 : validation renforcée activée (matériaux non destructifs, IDs inconnus en warning, materialset implicite, LOD0/LOD1 protégés)."));
 
         SafeMerge(report, "FilePresenceValidator", () => _filePresenceValidator.Validate(project));
         SafeMerge(report, "RawTextValidator", () => _rawTextValidator.Validate(project));
@@ -56,7 +56,7 @@ public sealed class IslandValidator
             report.Add(
                 ValidationSeverity.Error,
                 ValidationCode.ValidatorInternalError,
-                $"{validatorName} a échoué pendant la validation : {ex.GetType().Name} - {ex.Message}");
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"{validatorName} a échoué pendant la validation : {ex.GetType().Name} - {ex.Message}"));
         }
     }
 }

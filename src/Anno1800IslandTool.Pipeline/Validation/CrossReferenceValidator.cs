@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Core.Models;
+using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Validation;
 using Anno1800IslandTool.Pipeline.Abstractions;
 
@@ -17,7 +17,7 @@ public sealed class CrossReferenceValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.InconsistentRootMetadata,
-                $"Metadata.MapSize ({project.Metadata.MapSize}) diffère de Root.MapSize ({project.Root.MapSize}).");
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"Metadata.MapSize ({project.Metadata.MapSize}) diffère de Root.MapSize ({project.Root.MapSize})."));
         }
 
         if (!string.IsNullOrWhiteSpace(project.EffectiveMaterialSetName) && project.MaterialSet is null)
@@ -25,7 +25,7 @@ public sealed class CrossReferenceValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.MissingMaterialSet,
-                $"Le materialset effectif '{project.EffectiveMaterialSetName}' n'a pas été chargé. Si rd3d.xml ne déclare aucun MaterialSetFileName, terra_01.xml est le fallback vanilla implicite ; le fichier doit toutefois être fourni à l'outil pour une validation complète.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"Le materialset effectif '{project.EffectiveMaterialSetName}' n'a pas été chargé. Si rd3d.xml ne déclare aucun MaterialSetFileName, terra_01.xml est le fallback vanilla implicite ; le fichier doit toutefois être fourni à l'outil pour une validation complète."),
                 project.EffectiveMaterialSetName);
         }
 
@@ -35,7 +35,7 @@ public sealed class CrossReferenceValidator : IValidator<IslandProject>
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.InvalidMaterialSet,
-                $"Le materialset chargé est '{project.MaterialSet.FileName}' alors que le materialset effectif demandé est '{project.EffectiveMaterialSetName}'.");
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"Le materialset chargé est '{project.MaterialSet.FileName}' alors que le materialset effectif demandé est '{project.EffectiveMaterialSetName}'."));
         }
 
         return report;

@@ -1,0 +1,10 @@
+using System.Diagnostics;
+using System.Text.RegularExpressions;
+using Anno1800IslandTool.Core.Terrain;
+var xml="<Vertices>"+string.Concat(Enumerable.Repeat("-1 2.5 3.2 4 5 6 7 8 ",200000))+"</Vertices>";
+var sw=Stopwatch.StartNew(); long alloc=GC.GetAllocatedBytesForCurrentThread(); int old=0;
+for(int i=0;i<5;i++) foreach(Match block in Regex.Matches(xml,@"<Vertices>\s*(?<v>.*?)\s*</Vertices>",RegexOptions.Singleline|RegexOptions.IgnoreCase)) old+=Regex.Matches(block.Groups["v"].Value,@"-?\d+(?:[.,]\d+)?").Count/8;
+Console.WriteLine($"legacy: {sw.ElapsedMilliseconds} ms, {(GC.GetAllocatedBytesForCurrentThread()-alloc)/1048576} MiB, count={old}");
+sw.Restart();alloc=GC.GetAllocatedBytesForCurrentThread();var page=new RegeneratedMeshPageWrite{XmlText=xml}; int current=0;for(int i=0;i<5;i++)current+=page.GeneratedVertexCount;
+Console.WriteLine($"cached including creation/compression: {sw.ElapsedMilliseconds} ms, {(GC.GetAllocatedBytesForCurrentThread()-alloc)/1048576} MiB, count={current}");
+if(old!=current||page.XmlText!=xml)throw new Exception("Mismatch");

@@ -1,4 +1,4 @@
-﻿using System.Buffers.Binary;
+using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Text.Json;
 
@@ -8,11 +8,11 @@ public sealed class NativeIslandConverter(IslandTools tools, IslandToolProcess p
 {
     public static byte[] DecodeCtt(byte[] data)
     {
-        if (data.Length < 10 || !data.AsSpan(0,4).SequenceEqual("_CTT"u8)) throw new InvalidDataException("En-tête CTT invalide.");
+        if (data.Length < 10 || !data.AsSpan(0,4).SequenceEqual("_CTT"u8)) throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("En-tête CTT invalide."));
         using var input = new MemoryStream(data, 8, data.Length - 8);
         using var zlib = new ZLibStream(input, CompressionMode.Decompress); using var output = new MemoryStream(); zlib.CopyTo(output);
         var bytes = output.ToArray();
-        if (BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(4,4)) != bytes.Length) throw new InvalidDataException("Taille CTT incohérente.");
+        if (BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(4,4)) != bytes.Length) throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Taille CTT incohérente."));
         return bytes;
     }
     public static byte[] EncodeCtt(byte[] data)
@@ -26,26 +26,37 @@ public sealed class NativeIslandConverter(IslandTools tools, IslandToolProcess p
     private async Task ConvertAsync(IEnumerable<string> paths, string format, string? extension, IProgress<string>? progress, CancellationToken token)
     {
         var all = paths.ToArray();
-        for (int i=0; i<all.Length; i+=24)
+        var batches=NativeConversionBatches.Create(all);
+        var pageFamily=format is "tmc" or "ctt";
+        var workers=pageFamily && all.Length>0 ? NativeConversionBatches.WorkerCount(Environment.ProcessorCount,
+            GC.GetGCMemoryInfo().TotalAvailableMemoryBytes,all.Max(p=>new FileInfo(p).Length)) : 1;
+        var timer=System.Diagnostics.Stopwatch.StartNew();
+        progress?.Report(Anno1800IslandTool.Core.Localization.TextCatalog.F($"{(extension is null ? Anno1800IslandTool.Core.Localization.TextCatalog.T("Interprétation") : Anno1800IslandTool.Core.Localization.TextCatalog.T("Encodage"))} {format} : {all.Length} fichier(s), {workers} conversion(s) simultanée(s)"));
+        await NativeConversionBatches.RunAsync(batches,workers,async(batch,ct)=>
         {
-            token.ThrowIfCancellationRequested(); var batch = all.Skip(i).Take(24).ToArray();
+            ct.ThrowIfCancellationRequested();
             if(extension is not null) foreach(var path in batch)
             {
+                ct.ThrowIfCancellationRequested();
                 var xml=File.ReadAllText(path);
                 var prepared=PrepareFileDbXml(xml);
                 if(prepared!=xml)File.WriteAllText(path,prepared);
             }
-            progress?.Report($"{(extension is null ? "Interprétation" : "Encodage")} {format} : {Math.Min(i+24,all.Length)}/{all.Length}");
             var args = new List<string> { extension is null ? "decompress" : "compress", "-f" }; args.AddRange(batch);
             args.AddRange(["-i", Format(format), "-y"]);
             if(extension is not null) args.AddRange(["-c", "2", "-o", extension]);
-            await process.FileDbAsync(Path.GetDirectoryName(batch[0])!, args, token);
+            await process.FileDbAsync(Path.GetDirectoryName(batch[0])!, args, ct);
             foreach(var source in batch)
             {
                 var expected=Path.ChangeExtension(source,extension??"xml");
-                if(!File.Exists(expected)||new FileInfo(expected).Length==0)throw new InvalidDataException("Fichier non produit : "+expected);
+                if(!File.Exists(expected)||new FileInfo(expected).Length==0)throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Fichier non produit : ")+expected);
+                if(format=="ctt" && extension=="fdbr")
+                {
+                    ct.ThrowIfCancellationRequested();
+                    File.WriteAllBytes(Path.ChangeExtension(source,"ctt"),EncodeCtt(File.ReadAllBytes(expected)));
+                }
             }
-        }
+        },done=>progress?.Report(Anno1800IslandTool.Core.Localization.TextCatalog.F($"{(extension is null ? Anno1800IslandTool.Core.Localization.TextCatalog.T("Interprétation") : Anno1800IslandTool.Core.Localization.TextCatalog.T("Encodage"))} {format} : {done}/{all.Length} terminé(s) — {timer.Elapsed.TotalSeconds:0} s")),token);
     }
     // FileDBReader 3.0.3 reads XmlDocument.FirstChild instead of DocumentElement.
     // A declaration/leading comment otherwise produces a 40-byte empty binary
@@ -56,7 +67,7 @@ public sealed class NativeIslandConverter(IslandTools tools, IslandToolProcess p
         var doc=System.Xml.Linq.XDocument.Parse(xml,System.Xml.Linq.LoadOptions.PreserveWhitespace);
         foreach(var node in doc.DescendantNodes().Where(n=>n is System.Xml.Linq.XComment or System.Xml.Linq.XProcessingInstruction).ToArray())node.Remove();
         return doc.Root?.ToString(System.Xml.Linq.SaveOptions.DisableFormatting)
-            ?? throw new InvalidDataException("Document XML sans racine.");
+            ?? throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Document XML sans racine."));
     }
     public async Task<string> DecodeAsync(string infoPath, string sourceMap, string work, IProgress<string>? progress, CancellationToken token)
     {
@@ -73,7 +84,7 @@ public sealed class NativeIslandConverter(IslandTools tools, IslandToolProcess p
         var bundle=Path.Combine(decoded,name); Directory.CreateDirectory(bundle);
         await process.RdaAsync(decoded,["extract","-f",Path.ChangeExtension(infoPath,"a7m"),"-o",bundle,"--filter",".*","-y","-n"],token);
         foreach(var component in new[]{"rd3d","gamedata"})
-            if(!File.Exists(Path.Combine(bundle,component+".data")))throw new InvalidDataException("Composant A7M absent : "+component);
+            if(!File.Exists(Path.Combine(bundle,component+".data")))throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Composant A7M absent : ")+component);
         await ConvertAsync([Path.Combine(bundle,"rd3d.data")],"Island_RD3D",null,progress,token);
         await ConvertAsync([Path.Combine(bundle,"gamedata.data")],"Island_Gamedata_v3",null,progress,token);
         await ConvertAsync([Path.Combine(decoded,name+".a7minfo")],"a7minfo",null,progress,token);
@@ -91,39 +102,60 @@ public sealed class NativeIslandConverter(IslandTools tools, IslandToolProcess p
         token.ThrowIfCancellationRequested();
         string zip=Path.Combine(work,name+"__interpreted.zip"); ZipFile.CreateFromDirectory(decoded,zip,CompressionLevel.Fastest,false); return zip;
     }
+    public static void ExtractInterpretedArchive(string archivePath, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        using var archive = ZipFile.OpenRead(archivePath);
+        // Old editor ZIPs may contain repeated reports. They are not game data
+        // and are not needed by FileDBReader. Other collisions remain errors.
+        foreach (var entry in archive.Entries)
+        {
+            var relative = entry.FullName.Replace('\\', '/');
+            if (Anno1800IslandTool.Pipeline.Export.GeneratedExportReports.Contains(relative)) continue;
+            var target = GameIslandCatalog.SafePath(destination, relative);
+            if (relative.EndsWith('/')) { Directory.CreateDirectory(target); continue; }
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            entry.ExtractToFile(target, overwrite: false);
+        }
+    }
+
     public async Task<string> EncodeAsync(string interpretedZip, string work, IProgress<string>? progress, CancellationToken token)
     {
-        var input=Path.Combine(work,"input"); ZipFile.ExtractToDirectory(interpretedZip,input);
+        var input=Path.Combine(work,"input"); ExtractInterpretedArchive(interpretedZip,input);
         var rd3ds=Directory.GetFiles(input,"rd3d.xml",SearchOption.AllDirectories);
-        if(rd3ds.Length!=1)throw new InvalidDataException("L’archive doit contenir une seule variante d’île (un rd3d.xml).");
+        if(rd3ds.Length!=1)throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("L’archive doit contenir une seule variante d’île (un rd3d.xml)."));
         var bundle=Path.GetDirectoryName(rd3ds[0])!; var name=Path.GetFileName(bundle);var root=Path.GetDirectoryName(bundle)!;
         var info=Path.Combine(root,name+".xml");var game=Path.Combine(bundle,"gamedata.xml");
-        if(!File.Exists(info)||!File.Exists(game))throw new InvalidDataException("Root ou GameData absent de l’île interprétée.");
+        if(!File.Exists(info)||!File.Exists(game))throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Root ou GameData absent de l’île interprétée."));
         var output=Path.Combine(work,"compiled",name); Directory.CreateDirectory(output);
         await ConvertAsync([info],"a7minfo","a7minfo",progress,token);
         File.Copy(Path.ChangeExtension(info,"a7minfo"),Path.Combine(output,name+".a7minfo"));
+        var rootDefinition = new Anno1800IslandTool.Formats.Readers.IslandRootReader().Read(File.ReadAllText(info));
+        var rdDocument = System.Xml.Linq.XDocument.Load(rd3ds[0]);
+        if (IslandGridSynchronization.SynchronizeActiveMap(rdDocument, rootDefinition) | GlobalTintPaddingRepair.Apply(rdDocument))
+            File.WriteAllText(rd3ds[0], rdDocument.Root!.ToString());
         await ConvertAsync([rd3ds[0]],"Island_RD3D","data",progress,token);
         // Normalize legacy hex only in the staged export, never in the user's source.
         var gameDocument = System.Xml.Linq.XDocument.Load(game, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-        if (IrrigationGridValues.Normalize(gameDocument)) File.WriteAllText(game,gameDocument.Root!.ToString());
+        var gameChanged = IslandGridSynchronization.SynchronizeSpawnPoints(gameDocument, rootDefinition.MapSize);
+        if (IrrigationGridValues.Normalize(gameDocument) | WaterMaskEncoding.Normalize(gameDocument) | GeneratedCoastHeightRepair.Normalize(gameDocument) | gameChanged) File.WriteAllText(game,gameDocument.Root!.ToString());
         await ConvertAsync([game],"Island_Gamedata_v3","data",progress,token);
         var pack=Path.Combine(work,"pack");Directory.CreateDirectory(pack);
         var native=Path.Combine(root,"_anno1800islandtool","native-a7m");if(Directory.Exists(native))CopyTree(native,pack);
         foreach(var component in new[]{"rd3d.data","gamedata.data"})File.Copy(Path.Combine(bundle,component),Path.Combine(pack,component),true);
         var packArgs=new List<string>{"pack","-v","2","-f"};packArgs.AddRange(Directory.GetFileSystemEntries(pack).Select(Path.GetFileName)!);
         packArgs.AddRange(["-r","-o",Path.Combine(output,name+".a7m"),"-y","-n"]);await process.RdaAsync(pack,packArgs,token);
-        if(!File.Exists(Path.Combine(output,name+".a7m")))throw new InvalidDataException("A7M non produit.");
+        if(!File.Exists(Path.Combine(output,name+".a7m")))throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("A7M non produit."));
         var meshes=Directory.GetFiles(root,"*.xml",SearchOption.AllDirectories).Where(p=>p.Replace('\\','/').Contains("/meshes/",StringComparison.OrdinalIgnoreCase)).ToArray();
         var normals=Directory.GetFiles(root,"*.xml",SearchOption.AllDirectories).Where(p=>p.Replace('\\','/').Contains("/normalmaps/",StringComparison.OrdinalIgnoreCase)).ToArray();
         await ConvertAsync(meshes,"tmc","tmc",progress,token);
         await ConvertAsync(normals,"ctt","fdbr",progress,token);
-        foreach(var normal in normals){token.ThrowIfCancellationRequested(); File.WriteAllBytes(Path.ChangeExtension(normal,"ctt"),EncodeCtt(File.ReadAllBytes(Path.ChangeExtension(normal,"fdbr"))));}
         foreach(var file in Directory.GetFiles(root,"*",SearchOption.AllDirectories))
         {
             var rel=Path.GetRelativePath(root,file).Replace('\\','/');
             if(rel.StartsWith("_anno1800islandtool/",StringComparison.OrdinalIgnoreCase))continue;
             var ext=Path.GetExtension(file).ToLowerInvariant();
-            if(ext is not (".tmc" or ".ctt" or ".dds" or ".png" or ".a7me"))continue;
+            if(ext is not (".tmc" or ".ctt" or ".dds" or ".png" or ".a7me" or ".prp"))continue;
             var target=GameIslandCatalog.SafePath(output,rel);Directory.CreateDirectory(Path.GetDirectoryName(target)!);File.Copy(file,target,true);
         }
         foreach(var nameHelper in new[]{"addtoasset.xml","formaptemplate.xml","formaptemplate_filedb.xml"})

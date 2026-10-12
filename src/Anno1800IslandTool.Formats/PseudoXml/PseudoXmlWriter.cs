@@ -1,4 +1,4 @@
-﻿namespace Anno1800IslandTool.Formats.PseudoXml;
+namespace Anno1800IslandTool.Formats.PseudoXml;
 
 public sealed class PseudoXmlWriter
 {

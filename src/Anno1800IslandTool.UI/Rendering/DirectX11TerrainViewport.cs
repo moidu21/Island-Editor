@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
@@ -55,7 +55,7 @@ public sealed class DirectX11TerrainViewport : Grid
             try { EnsureDevice(); _error.Visibility = Visibility.Collapsed; QueueUpdate(); }
             catch (Exception error)
             {
-                _error.Text = "Affichage DirectX 11 indisponible : " + error.Message;
+                _error.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Affichage DirectX 11 indisponible : ") + error.Message;
                 _error.Visibility = Visibility.Visible;
             }
         };
@@ -63,7 +63,7 @@ public sealed class DirectX11TerrainViewport : Grid
         SizeChanged += (_, _) => UpdateCamera();
     }
 
-    public string RendererDescription => _effects is null ? "Direct3D 11 : en attente" : $"Direct3D 11 ({_effects.Device.FeatureLevel})";
+    public string RendererDescription => _effects is null ? Anno1800IslandTool.Core.Localization.TextCatalog.T("Direct3D 11 : en attente") : $"Direct3D 11 ({_effects.Device.FeatureLevel})";
 
     public Model3DGroup Scene
     {

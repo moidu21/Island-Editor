@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Anno1800IslandTool.Pipeline.Editing;
@@ -9,7 +9,7 @@ internal static class PseudoXmlSafety
     {
         if (string.IsNullOrWhiteSpace(text))
         {
-            return PseudoXmlValidationResult.Invalid("Le pseudo-XML est vide.");
+            return PseudoXmlValidationResult.Invalid(Anno1800IslandTool.Core.Localization.TextCatalog.T("Le pseudo-XML est vide."));
         }
 
         var input = text!;
@@ -25,7 +25,7 @@ internal static class PseudoXmlSafety
             {
                 if (HasNonWhitespace(input, index, input.Length))
                 {
-                    return PseudoXmlValidationResult.Invalid("Du texte a été trouvé hors du nœud racine.");
+                    return PseudoXmlValidationResult.Invalid(Anno1800IslandTool.Core.Localization.TextCatalog.T("Du texte a été trouvé hors du nœud racine."));
                 }
 
                 break;
@@ -33,12 +33,12 @@ internal static class PseudoXmlSafety
 
             if (depth == 0 && HasNonWhitespace(input, index, lt))
             {
-                return PseudoXmlValidationResult.Invalid("Du texte a été trouvé hors du nœud racine.");
+                return PseudoXmlValidationResult.Invalid(Anno1800IslandTool.Core.Localization.TextCatalog.T("Du texte a été trouvé hors du nœud racine."));
             }
 
             if (lt + 1 >= input.Length)
             {
-                return PseudoXmlValidationResult.Invalid("Balise incomplète en fin de document.");
+                return PseudoXmlValidationResult.Invalid(Anno1800IslandTool.Core.Localization.TextCatalog.T("Balise incomplète en fin de document."));
             }
 
             if (StartsWith(input, lt, "<!--"))
@@ -46,7 +46,7 @@ internal static class PseudoXmlSafety
                 var endComment = input.IndexOf("-->", lt + 4, StringComparison.Ordinal);
                 if (endComment < 0)
                 {
-                    return PseudoXmlValidationResult.Invalid("Commentaire pseudo-XML non fermé.");
+                    return PseudoXmlValidationResult.Invalid(Anno1800IslandTool.Core.Localization.TextCatalog.T("Commentaire pseudo-XML non fermé."));
                 }
 
                 index = endComment + 3;
@@ -58,7 +58,7 @@ internal static class PseudoXmlSafety
                 var endPi = input.IndexOf("?>", lt + 2, StringComparison.Ordinal);
                 if (endPi < 0)
                 {
-                    return PseudoXmlValidationResult.Invalid("Instruction de traitement non fermée.");
+                    return PseudoXmlValidationResult.Invalid(Anno1800IslandTool.Core.Localization.TextCatalog.T("Instruction de traitement non fermée."));
                 }
 
                 index = endPi + 2;
@@ -70,7 +70,7 @@ internal static class PseudoXmlSafety
                 var endCData = input.IndexOf("]]>", lt + 9, StringComparison.Ordinal);
                 if (endCData < 0)
                 {
-                    return PseudoXmlValidationResult.Invalid("Bloc CDATA non fermé.");
+                    return PseudoXmlValidationResult.Invalid(Anno1800IslandTool.Core.Localization.TextCatalog.T("Bloc CDATA non fermé."));
                 }
 
                 index = endCData + 3;
@@ -82,7 +82,7 @@ internal static class PseudoXmlSafety
                 var gt = input.IndexOf('>', lt + 2);
                 if (gt < 0)
                 {
-                    return PseudoXmlValidationResult.Invalid("Déclaration pseudo-XML non fermée.");
+                    return PseudoXmlValidationResult.Invalid(Anno1800IslandTool.Core.Localization.TextCatalog.T("Déclaration pseudo-XML non fermée."));
                 }
 
                 index = gt + 1;
@@ -92,13 +92,13 @@ internal static class PseudoXmlSafety
             var gtIndex = input.IndexOf('>', lt + 1);
             if (gtIndex < 0)
             {
-                return PseudoXmlValidationResult.Invalid("Balise non fermée.");
+                return PseudoXmlValidationResult.Invalid(Anno1800IslandTool.Core.Localization.TextCatalog.T("Balise non fermée."));
             }
 
             var rawTag = input.Substring(lt + 1, gtIndex - lt - 1).Trim();
             if (rawTag.Length == 0)
             {
-                return PseudoXmlValidationResult.Invalid("Balise vide.");
+                return PseudoXmlValidationResult.Invalid(Anno1800IslandTool.Core.Localization.TextCatalog.T("Balise vide."));
             }
 
             var isClosing = rawTag[0] == '/';
@@ -107,7 +107,7 @@ internal static class PseudoXmlSafety
             var tagName = isAnonymousClosing ? "/" : ExtractTagName(rawTag);
             if (string.IsNullOrWhiteSpace(tagName))
             {
-                return PseudoXmlValidationResult.Invalid("Nom de balise introuvable.");
+                return PseudoXmlValidationResult.Invalid(Anno1800IslandTool.Core.Localization.TextCatalog.T("Nom de balise introuvable."));
             }
 
             if (isClosing)
@@ -117,7 +117,7 @@ internal static class PseudoXmlSafety
                 depth--;
                 if (depth < 0)
                 {
-                    return PseudoXmlValidationResult.Invalid("Fermeture de balise inattendue.");
+                    return PseudoXmlValidationResult.Invalid(Anno1800IslandTool.Core.Localization.TextCatalog.T("Fermeture de balise inattendue."));
                 }
             }
             else if (!isSelfClosing)
@@ -127,7 +127,7 @@ internal static class PseudoXmlSafety
                     rootCount++;
                     if (rootCount > 1)
                     {
-                        return PseudoXmlValidationResult.Invalid("Plusieurs nœuds racine ont été détectés.");
+                        return PseudoXmlValidationResult.Invalid(Anno1800IslandTool.Core.Localization.TextCatalog.T("Plusieurs nœuds racine ont été détectés."));
                     }
 
                     rootName = tagName;
@@ -140,7 +140,7 @@ internal static class PseudoXmlSafety
                 rootCount++;
                 if (rootCount > 1)
                 {
-                    return PseudoXmlValidationResult.Invalid("Plusieurs nœuds racine ont été détectés.");
+                    return PseudoXmlValidationResult.Invalid(Anno1800IslandTool.Core.Localization.TextCatalog.T("Plusieurs nœuds racine ont été détectés."));
                 }
 
                 rootName = tagName;
@@ -151,12 +151,12 @@ internal static class PseudoXmlSafety
 
         if (depth != 0)
         {
-            return PseudoXmlValidationResult.Invalid("Le document contient des balises non fermées ou déséquilibrées.");
+            return PseudoXmlValidationResult.Invalid(Anno1800IslandTool.Core.Localization.TextCatalog.T("Le document contient des balises non fermées ou déséquilibrées."));
         }
 
         if (rootCount != 1)
         {
-            return PseudoXmlValidationResult.Invalid("Le document ne contient pas exactement un nœud racine.");
+            return PseudoXmlValidationResult.Invalid(Anno1800IslandTool.Core.Localization.TextCatalog.T("Le document ne contient pas exactement un nœud racine."));
         }
 
         return PseudoXmlValidationResult.Valid(rootName ?? string.Empty);
@@ -171,6 +171,11 @@ internal static class PseudoXmlSafety
         }
 
         return NormalizeLineEndings(fallback);
+    }
+
+    public static string EnsureSingleRootOrFallback(string? candidate, Func<string> fallback)
+    {
+        return NormalizeLineEndings(ValidateSingleRoot(candidate).IsValid ? candidate! : fallback());
     }
 
     public static string InsertBeforeOuterRootClosingTagOrAppend(string text, string fragment)
@@ -196,7 +201,29 @@ internal static class PseudoXmlSafety
     }
 
     public static string NormalizeLineEndings(string text)
-        => text.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", Environment.NewLine);
+    {
+        // Most generated pages already use the platform newline. Do not create
+        // two full-size copies just to convert CRLF to LF and back to CRLF.
+        int offset = 0;
+        while (offset < text.Length)
+        {
+            int found = text.AsSpan(offset).IndexOfAny('\r', '\n');
+            if (found < 0) return text;
+            offset += found;
+            if (Environment.NewLine == "\r\n")
+            {
+                if (text[offset] != '\r' || offset + 1 >= text.Length || text[offset + 1] != '\n') break;
+                offset += 2;
+            }
+            else
+            {
+                if (text[offset] != '\n') break;
+                offset++;
+            }
+        }
+        if (offset >= text.Length) return text;
+        return text.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", Environment.NewLine);
+    }
 
     public static string? TryReadOuterRootTagName(string text)
     {

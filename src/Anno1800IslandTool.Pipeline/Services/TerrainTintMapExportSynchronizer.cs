@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Text;
 using Anno1800IslandTool.Core.Common;
 using Anno1800IslandTool.Core.Models;
@@ -34,13 +34,13 @@ public static class TerrainTintMapExportSynchronizer
 
         if (existingTintPages.Count == 0)
         {
-            summary = "Aucune tintmap source disponible pour déterminer chemins/dimensions.";
+            summary = Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune tintmap source disponible pour déterminer chemins/dimensions.");
             return replacements;
         }
 
         if (project.Rd3d.MaterialMap.Width <= 0 || project.Rd3d.MaterialMap.Height <= 0 || !project.Rd3d.MaterialMap.HasAnyData)
         {
-            summary = "Synchronisation tintmaps v42.8 ignorée : MaterialMap RD3D absente ou vide.";
+            summary = Anno1800IslandTool.Core.Localization.TextCatalog.T("Synchronisation tintmaps v42.8 ignorée : MaterialMap RD3D absente ou vide.");
             return replacements;
         }
 
@@ -62,17 +62,20 @@ public static class TerrainTintMapExportSynchronizer
                 && target.SampleBounds.Top <= dirty.Bottom + 1).ToList();
         if (targets.Count == 0)
         {
-            summary = "Synchronisation tintmaps v43.1 : aucune page tintmap ne recoupe le masque actif.";
+            summary = Anno1800IslandTool.Core.Localization.TextCatalog.T("Synchronisation tintmaps v43.1 : aucune page tintmap ne recoupe le masque actif.");
             return replacements;
         }
 
         var rebuiltByLod = new ConcurrentDictionary<int, int>();
-        Parallel.ForEach(targets, CpuParallelOptions, target =>
+        Parallel.ForEach(targets, new ParallelOptions { MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount, 1, 2) },
+            () => new TintBuffers(), (target, loop, buffers) =>
         {
-            var pixels = BuildTintPixelsForPage(project, target.SampleBounds, target.Width, target.Height);
+            var pixels = BuildTintPixelsForPage(project, target.SampleBounds, target.Width, target.Height, buffers.Pixels);
+            buffers.Pixels = pixels;
             var repaired = project.EmergedTintPages.Contains(target.Key);
-            if (!repaired && TryDecodeDxt1DdsToBgra32(target.ReferenceDdsBytes, out var refWidth, out var refHeight, out var referencePixels))
+            if (!repaired && TryDecodeDxt1DdsToBgra32(target.ReferenceDdsBytes, out var refWidth, out var refHeight, out var referencePixels, buffers.Reference))
             {
+                buffers.Reference = referencePixels;
                 var syntheticWeight = target.AlreadyExists ? 0.72f : 0.64f;
                 BlendTintPixelsWithReference(pixels, target.Width, target.Height, referencePixels, refWidth, refHeight, syntheticWeight);
             }
@@ -80,25 +83,33 @@ public static class TerrainTintMapExportSynchronizer
             var dds = BuildDxt1Dds(target.Width, target.Height, pixels);
             replacements[target.RelativePath.Replace('\\', '/')] = dds;
             rebuiltByLod.AddOrUpdate(target.Key.Lod, 1, (_, current) => current + 1);
-        });
+            return buffers;
+        }, _ => { });
 
         var sb = new StringBuilder();
-        sb.AppendLine("Synchronisation tintmaps v43.1");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Synchronisation tintmaps v43.1"));
         sb.AppendLine();
-        sb.AppendLine("Cause traitée : après flatten/édition large, les tintmaps vanilla existantes deviennent stale et ne doivent plus être préservées telles quelles.");
-        sb.AppendLine("Méthode : reconstruire toutes les pages tintmap actives depuis MaterialMap + height/slope, encoder les pixels en YCC/pow2 comme les shaders terrain l'attendent, puis les stabiliser par blend avec la page vanilla/nearest afin de réduire les défauts de vue lointaine.");
-        sb.AppendLine($"Tintmaps sources existantes : {existingTintPages.Count}");
-        sb.AppendLine($"Tintmaps attendues selon masque actif/flags : {expectedTotal}");
-        sb.AppendLine($"Tintmaps existantes reconstruites : {existingTargetCount}");
-        sb.AppendLine($"Tintmaps manquantes créées : {missingTargetCount}");
-        sb.AppendLine($"Tintmaps remplacées/exportées : {replacements.Count}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Cause traitée : après flatten/édition large, les tintmaps vanilla existantes deviennent stale et ne doivent plus être préservées telles quelles."));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Méthode : reconstruire toutes les pages tintmap actives depuis MaterialMap + height/slope, encoder les pixels en YCC/pow2 comme les shaders terrain l'attendent, puis les stabiliser par blend avec la page vanilla/nearest afin de réduire les défauts de vue lointaine."));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Tintmaps sources existantes : {existingTintPages.Count}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Tintmaps attendues selon masque actif/flags : {expectedTotal}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Tintmaps existantes reconstruites : {existingTargetCount}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Tintmaps manquantes créées : {missingTargetCount}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Tintmaps remplacées/exportées : {replacements.Count}"));
         foreach (var pair in rebuiltByLod.OrderBy(p => p.Key))
         {
-            sb.AppendLine($"- LOD {pair.Key} : {pair.Value} page(s)");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"- LOD {pair.Key} : {pair.Value} page(s)"));
         }
 
         summary = sb.ToString().TrimEnd();
         return replacements;
+    }
+
+    // Buffers belong to one worker and are overwritten completely for each page.
+    private sealed class TintBuffers
+    {
+        public byte[] Pixels = Array.Empty<byte>();
+        public byte[] Reference = Array.Empty<byte>();
     }
 
     private readonly record struct TintPageMaterialTarget(TerrainPageKey Key, string RelativePath, RectI SampleBounds, int Width, int Height, bool AlreadyExists, byte[] ReferenceDdsBytes);
@@ -143,7 +154,7 @@ public static class TerrainTintMapExportSynchronizer
                     {
                         var width = existing.Width > 0 ? existing.Width : defaultPageSize;
                         var height = existing.Height > 0 ? existing.Height : defaultPageSize;
-                        targets.Add(new TintPageMaterialTarget(key, existing.OriginalRelativePath, bounds, width, height, true, existing.RawDdsBytes.ToArray()));
+                        targets.Add(new TintPageMaterialTarget(key, existing.OriginalRelativePath, bounds, width, height, true, existing.RawDdsBytes));
                         existingCount++;
                         continue;
                     }
@@ -151,7 +162,7 @@ public static class TerrainTintMapExportSynchronizer
                     var source = FindNearestTintSource(existingPages, key);
                     var missingWidth = source?.Width > 0 ? source.Width : defaultPageSize;
                     var missingHeight = source?.Height > 0 ? source.Height : defaultPageSize;
-                    targets.Add(new TintPageMaterialTarget(key, BuildTintMapPath(pathPrefix, key), bounds, missingWidth, missingHeight, false, source?.RawDdsBytes.ToArray() ?? Array.Empty<byte>()));
+                    targets.Add(new TintPageMaterialTarget(key, BuildTintMapPath(pathPrefix, key), bounds, missingWidth, missingHeight, false, source?.RawDdsBytes ?? Array.Empty<byte>()));
                     missingCount++;
                 }
             }
@@ -287,11 +298,12 @@ public static class TerrainTintMapExportSynchronizer
         };
     }
 
-    private static byte[] BuildTintPixelsForPage(IslandProject project, RectI sampleBounds, int width, int height)
+    private static byte[] BuildTintPixelsForPage(IslandProject project, RectI sampleBounds, int width, int height, byte[] reusable)
     {
         var materialMap = project.Rd3d.MaterialMap;
         var heightMap = project.GameData.TerrainHeightMap;
-        var pixels = new byte[Math.Max(1, width) * Math.Max(1, height) * 4];
+        var length = Math.Max(1, width) * Math.Max(1, height) * 4;
+        var pixels = reusable.Length == length ? reusable : new byte[length];
 
         var spanX = Math.Max(1e-5, sampleBounds.Right - sampleBounds.Left + 1.0);
         var spanY = Math.Max(1e-5, sampleBounds.Bottom - sampleBounds.Top + 1.0);
@@ -317,8 +329,9 @@ public static class TerrainTintMapExportSynchronizer
                 var hB = TerrainHeightEncoding.SampleCoarseHeightMapWorld(heightMap, sampleX, sampleY + 1.0);
                 var slope = MathF.Max(MathF.Abs(hR - hL), MathF.Abs(hB - hT));
 
-                var cell = materialMap.GetCell(materialX, materialY);
-                var tint = ComputeTintFromMaterialCell(cell, h, slope, sampleX, sampleY);
+                uint ids = materialMap.PackedMaterialIds.Length == 0 ? 0 : materialMap.PackedMaterialIds[materialMap.GetMaterialIdBlockIndex(materialX, materialY)];
+                uint weights = materialMap.PackedMaterialAlphas.Length == 0 ? 0 : materialMap.PackedMaterialAlphas[materialMap.GetAlphaIndex(materialX, materialY)];
+                var tint = ComputeTintFromMaterialCell(ids, weights, h, slope, sampleX, sampleY);
                 var encodedTint = EncodeTintColorForDds(tint.R, tint.G, tint.B);
 
                 var pixel = ((y * width) + x) * 4;
@@ -332,7 +345,7 @@ public static class TerrainTintMapExportSynchronizer
         return pixels;
     }
 
-    private static (float R, float G, float B) ComputeTintFromMaterialCell(TerrainMaterialCell cell, float height, float slope, double sampleX, double sampleY)
+    private static (float R, float G, float B) ComputeTintFromMaterialCell(uint packedIds, uint packedWeights, float height, float slope, double sampleX, double sampleY)
     {
         var totalWeight = 0f;
         var waterWeight = 0f;
@@ -340,10 +353,12 @@ public static class TerrainTintMapExportSynchronizer
         var grassWeight = 0f;
         var rockWeight = 0f;
 
-        for (var i = 0; i < TerrainMaterialPackEncoding.SlotCount && i < cell.MaterialIds.Length && i < cell.AlphaWeights.Length; i++)
+        int dominant = 0, bestWeight = -1;
+        for (var i = 0; i < TerrainMaterialPackEncoding.SlotCount; i++)
         {
-            var id = TerrainMaterialPackEncoding.ClampSlot(cell.MaterialIds[i]);
-            var weight = TerrainMaterialPackEncoding.ClampSlot(cell.AlphaWeights[i]);
+            var id = (int)((packedIds >> (i * 5)) & 31);
+            var weight = (int)((packedWeights >> (i * 5)) & 31);
+            if (weight > bestWeight) { bestWeight = weight; dominant = id; }
             if (id <= 0 || weight <= 0)
             {
                 continue;
@@ -370,7 +385,6 @@ public static class TerrainTintMapExportSynchronizer
 
         if (totalWeight <= 0f)
         {
-            var dominant = TerrainMaterialPackEncoding.ClampSlot(cell.DominantMaterialId);
             totalWeight = 1f;
             if (IsWaterMaterial(dominant)) waterWeight = 1f;
             else if (IsBeachMaterial(dominant)) beachWeight = 1f;
@@ -536,7 +550,7 @@ public static class TerrainTintMapExportSynchronizer
     private static byte BlendByte(byte synthetic, byte reference, float syntheticWeight, float referenceWeight)
         => (byte)Math.Clamp((int)MathF.Round((synthetic * syntheticWeight) + (reference * referenceWeight)), 0, 255);
 
-    private static bool TryDecodeDxt1DdsToBgra32(byte[] dds, out int width, out int height, out byte[] pixelsBgra32)
+    private static bool TryDecodeDxt1DdsToBgra32(byte[] dds, out int width, out int height, out byte[] pixelsBgra32, byte[] reusable)
     {
         width = 0;
         height = 0;
@@ -568,7 +582,8 @@ public static class TerrainTintMapExportSynchronizer
         var localWidth = width;
         var localHeight = height;
         var localBlocksWide = blocksWide;
-        var decodedPixels = new byte[localWidth * localHeight * 4];
+        var length = localWidth * localHeight * 4;
+        var decodedPixels = reusable.Length == length ? reusable : new byte[length];
         Parallel.For(0, blocksHigh, CpuParallelOptions, by =>
         {
             var palette = new byte[4 * 4];
@@ -614,7 +629,7 @@ public static class TerrainTintMapExportSynchronizer
 
     private static void FillDxt1PaletteBgra(ushort color0, ushort color1, byte[] palette)
     {
-        var rgb = new byte[6];
+        Span<byte> rgb = stackalloc byte[6];
         Rgb565ToRgb(color0, rgb, 0);
         Rgb565ToRgb(color1, rgb, 3);
         palette[0] = rgb[2]; palette[1] = rgb[1]; palette[2] = rgb[0]; palette[3] = 255;

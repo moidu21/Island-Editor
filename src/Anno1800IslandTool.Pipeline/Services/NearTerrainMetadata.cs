@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Core.Models;
+using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;
 namespace Anno1800IslandTool.Pipeline.Services;
 public static class NearTerrainMetadata
@@ -42,7 +42,7 @@ public static class NearTerrainMetadata
                     page.Clusters.Add(new MeshCluster{UsedMaterialBits=unchecked((int)bits)});
                 }
                 p.MeshPages.Add(key,page);
-                writes.Add(new RegeneratedMeshPageWrite{Key=key,TargetPath=page.OriginalRelativePath,XmlText=new MeshPageXmlWriter().WriteFullPageFromModel(page),Summary="UsedMaterialBits : nouvelle page proche, sans vertices, indices ni GroundObjects clones"});
+                writes.Add(new RegeneratedMeshPageWrite{Key=key,TargetPath=page.OriginalRelativePath,XmlText=new MeshPageXmlWriter().WriteFullPageFromModel(page),Summary=Anno1800IslandTool.Core.Localization.TextCatalog.T("UsedMaterialBits : nouvelle page proche, sans vertices, indices ni GroundObjects clones")});
             }
         }
         if(writes.Count>0){p.LocalRegeneration??=new TerrainLocalRegenerationState();p.LocalRegeneration.GeneratedMeshPageWrites.AddRange(writes);}

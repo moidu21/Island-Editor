@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Core.Models;
+using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;
 
 namespace Anno1800IslandTool.Pipeline.Services;
@@ -67,9 +67,6 @@ public sealed class MeshBackedHeightSampler
         // Une jupe vanilla partage X/Z avec la surface mais se trouve plus bas. Elle
         // ne doit jamais participer à l'interpolation du relief. Le maximum par X/Z
         // reste valable avant et après restauration des jupes aplaties.
-        var surfaceHeightByPosition = sourceVertices
-            .GroupBy(vertex => (vertex.X, vertex.Z))
-            .ToDictionary(group => group.Key, group => group.Max(vertex => vertex.WorldHeight));
         var allVertices = sourceVertices
             .GroupBy(vertex => (vertex.X, vertex.Z))
             .Select(group => group.OrderByDescending(vertex => vertex.WorldHeight).First())
@@ -105,10 +102,9 @@ public sealed class MeshBackedHeightSampler
                 var a = cluster.Vertices[ia];
                 var b = cluster.Vertices[ib];
                 var c = cluster.Vertices[ic];
-                // Les jupes sont des coutures verticales, pas une deuxième surface.
-                if (IsBelowSurface(a, surfaceHeightByPosition) ||
-                    IsBelowSurface(b, surfaceHeightByPosition) ||
-                    IsBelowSurface(c, surfaceHeightByPosition)) continue;
+                // A lower duplicate X/Z is not necessarily a skirt: clipping and
+                // quantization can give adjacent surface triangles slightly different
+                // heights. Reject only vertical (zero projected area) triangles below.
                 var triangle = new SurfaceTriangle(a.X, a.Z, a.WorldHeight, b.X, b.Z, b.WorldHeight, c.X, c.Z, c.WorldHeight);
                 if (Math.Abs(triangle.Determinant) < 1e-9) continue;
                 var min = ToCell(Math.Min(a.X, Math.Min(b.X, c.X)), Math.Min(a.Z, Math.Min(b.Z, c.Z)), TriangleCellSize);
@@ -123,10 +119,6 @@ public sealed class MeshBackedHeightSampler
         }
         return sampler;
     }
-
-    private static bool IsBelowSurface(MeshVertex vertex, IReadOnlyDictionary<(int X, int Z), float> surfaceHeightByPosition)
-        => surfaceHeightByPosition.TryGetValue((vertex.X, vertex.Z), out var surfaceHeight) &&
-           vertex.WorldHeight < surfaceHeight - (1f / 512f);
 
     public bool TrySample(double x, double z, out float height)
     {

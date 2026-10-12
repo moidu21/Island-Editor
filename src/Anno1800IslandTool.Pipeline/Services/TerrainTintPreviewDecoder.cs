@@ -1,4 +1,4 @@
-﻿namespace Anno1800IslandTool.Pipeline.Services;
+namespace Anno1800IslandTool.Pipeline.Services;
 
 /// <summary>Décodage de prévisualisation des tintmaps DXT1 Anno (Y/Cb/Cr compressé pow2).</summary>
 public static class TerrainTintPreviewDecoder

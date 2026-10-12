@@ -1,4 +1,4 @@
-﻿namespace Anno1800IslandTool.Core.Terrain;
+namespace Anno1800IslandTool.Core.Terrain;
 
 /// <summary>Add a lower opaque layer without evicting any neighbour's paint.</summary>
 public static class TerrainMaterialUnderlay
@@ -7,6 +7,22 @@ public static class TerrainMaterialUnderlay
     {
         var bx = x / map.MaterialIdBlockSize;
         var by = y / map.MaterialIdBlockSize;
+        // The usual case already has the base in its palette. Avoid two small
+        // array allocations for every terrain texel during painting/export.
+        if (map.PackedMaterialIds.Length == map.ExpectedPackedMaterialIdCount &&
+            map.PackedMaterialAlphas.Length == map.ExpectedPackedAlphaCount)
+        {
+            uint packed = map.PackedMaterialIds[map.GetMaterialIdBlockIndex(x, y)];
+            for (int s = 0; s < 6; s++)
+            {
+                if (((packed >> (s * 5)) & 31) != baseId) continue;
+                int index = map.GetAlphaIndex(x, y);
+                uint mask = 31u << (s * 5), before = map.PackedMaterialAlphas[index];
+                if ((before & mask) == mask) return false;
+                map.PackedMaterialAlphas[index] = (before | mask) & 0x3fffffffu;
+                return true;
+            }
+        }
         var ids = map.GetMaterialIdBlock(bx, by);
         var slot = Array.IndexOf(ids, baseId);
         if (slot < 0)

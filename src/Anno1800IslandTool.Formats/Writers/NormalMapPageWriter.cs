@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.RegularExpressions;
 using Anno1800IslandTool.Core.Terrain;
 
@@ -94,7 +94,9 @@ public sealed class NormalMapPageWriter
             sb.Append(text, cursor, match.Index - cursor);
             sb.Append(match.Groups[1].Value);
             sb.Append(values[replacedCount]);
-            sb.Append(match.Groups[3].Value);
+            // Named captures are numbered after unnamed ones in .NET.
+            // Group 2 is </map>; group 3 is the old named "value" payload.
+            sb.Append(match.Groups[2].Value);
             cursor = match.Index + match.Length;
             replacedCount++;
         }

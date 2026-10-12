@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Core.Common;
+using Anno1800IslandTool.Core.Common;
 
 namespace Anno1800IslandTool.Core.Terrain;
 
@@ -22,7 +22,7 @@ public static class TerrainMaterialPainter
         if (options.Mode == TerrainMaterialBrushMode.StampPickedCell && options.CellPattern is null)
         {
             var missingPattern = new TerrainMaterialPaintResult();
-            missingPattern.Messages.Add("Aucune cellule pickup n'est disponible pour le mode StampPickedCell.");
+            missingPattern.Messages.Add(Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune cellule pickup n'est disponible pour le mode StampPickedCell."));
             return missingPattern;
         }
 

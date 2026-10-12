@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using Anno1800IslandTool.Core.Common;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;
@@ -10,6 +10,27 @@ namespace Anno1800IslandTool.Tests;
 
 public class CoastAndSurfaceTests
 {
+    [Fact]
+    public void Quantized_Surface_Duplicate_Must_Not_Delete_A_Mountain_Triangle()
+    {
+        // Native 2040_test_2_5: this triangle was discarded because another
+        // clipped triangle has a vertex nine raw height steps above vertex 1.
+        var project = FlatProject();
+        var c = project.MeshPages[new(2,0,0)].Clusters[0];
+        c.Vertices = new()
+        {
+            new() { Raw0=16192, Raw1=63645, Raw2=21611 },
+            new() { Raw0=16256, Raw1=63359, Raw2=21611 },
+            new() { Raw0=16192, Raw1=61322, Raw2=21548 },
+            new() { Raw0=16256, Raw1=63368, Raw2=21611 },
+            new() { Raw0=16192, Raw1=63604, Raw2=21611 }
+        };
+        c.Indices = new() { 0,1,2, 0,4,1 };
+        var sampler = MeshBackedHeightSampler.Create(project,2)!;
+        Assert.True(sampler.TrySample(16224,21600,out var height));
+        Assert.Equal(118.4703f,height,3);
+    }
+
     private static IslandProject FlatProject()
     {
         var vertices = new List<MeshVertex>

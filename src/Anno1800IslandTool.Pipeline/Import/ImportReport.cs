@@ -1,4 +1,4 @@
-﻿namespace Anno1800IslandTool.Pipeline.Import;
+namespace Anno1800IslandTool.Pipeline.Import;
 
 public sealed class ImportReport
 {

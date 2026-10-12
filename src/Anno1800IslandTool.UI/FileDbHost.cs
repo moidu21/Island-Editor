@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Reflection;
 using System.Runtime.Loader;
 
@@ -16,7 +16,7 @@ internal static class FileDbHost
             var file=Path.GetFullPath(args[1]);var directory=Path.GetDirectoryName(file)!;
             var context=new AssemblyLoadContext("FileDBReader",false);
             context.Resolving+=(_,name)=>File.Exists(Path.Combine(directory,name.Name+".dll"))?context.LoadFromAssemblyPath(Path.Combine(directory,name.Name+".dll")):null;
-            var entry=context.LoadFromAssemblyPath(file).EntryPoint ?? throw new InvalidDataException("FileDBReader entry point missing.");
+            var entry=context.LoadFromAssemblyPath(file).EntryPoint ?? throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("FileDBReader entry point missing."));
             var result=entry.Invoke(null,[args.Skip(2).ToArray()]);
             if(result is Task<int> intTask)return intTask.GetAwaiter().GetResult();
             if(result is Task task)task.GetAwaiter().GetResult();

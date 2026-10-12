@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Core.Enums;
+using Anno1800IslandTool.Core.Enums;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Validation;
 
@@ -20,7 +20,7 @@ public sealed class GroundObjectValidator
 
         if (all.Count == 0)
         {
-            report.Add(ValidationSeverity.Info, ValidationCode.GroundObjectDiagnostic, "[Info] GroundObjects : aucun objet de sol/prop/végétation décodé dans les pages mesh chargées. Coche la lecture détaillée des pages pour les éditer.");
+            report.Add(ValidationSeverity.Info, ValidationCode.GroundObjectDiagnostic, Anno1800IslandTool.Core.Localization.TextCatalog.T("[Info] GroundObjects : aucun objet de sol/prop/végétation décodé dans les pages mesh chargées. Coche la lecture détaillée des pages pour les éditer."));
             return report;
         }
 
@@ -30,14 +30,14 @@ public sealed class GroundObjectValidator
         report.Add(
             ValidationSeverity.Info,
             ValidationCode.GroundObjectDiagnostic,
-            $"[OK] GroundObjects : {all.Count} objet(s) sur {pages} page(s) mesh. Vegetation={CountKind(byKind, GroundObjectKind.Vegetation)}, Prop={CountKind(byKind, GroundObjectKind.Prop)}, Decoration={CountKind(byKind, GroundObjectKind.Decoration)}, Unknown={CountKind(byKind, GroundObjectKind.Unknown)}, LOD0/LOD1={lowLod}.");
+            Anno1800IslandTool.Core.Localization.TextCatalog.F($"[OK] GroundObjects : {all.Count} objet(s) sur {pages} page(s) mesh. Vegetation={CountKind(byKind, GroundObjectKind.Vegetation)}, Prop={CountKind(byKind, GroundObjectKind.Prop)}, Decoration={CountKind(byKind, GroundObjectKind.Decoration)}, Unknown={CountKind(byKind, GroundObjectKind.Unknown)}, LOD0/LOD1={lowLod}."));
 
         foreach (var item in all.Where(x => string.IsNullOrWhiteSpace(x.Object.ObjectFileName)).Take(12))
         {
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.GroundObjectInvalid,
-                $"GroundObject sans FileName sur LOD {item.Page.Key.Lod}, page {item.Page.Key.X}x{item.Page.Key.Y}, cluster {item.ClusterIndex}.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"GroundObject sans FileName sur LOD {item.Page.Key.Lod}, page {item.Page.Key.X}x{item.Page.Key.Y}, cluster {item.ClusterIndex}."),
                 item.Page.OriginalRelativePath);
         }
 
@@ -47,7 +47,7 @@ public sealed class GroundObjectValidator
             report.Add(
                 ValidationSeverity.Warning,
                 ValidationCode.GroundObjectInvalid,
-                $"GroundObject hors étendue approximative de l'île : {item.Object.ObjectFileName} à {item.Object.PositionXZ.X:0.###}, {item.Object.PositionXZ.Y:0.###} pour MapSize={extent}.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"GroundObject hors étendue approximative de l'île : {item.Object.ObjectFileName} à {item.Object.PositionXZ.X:0.###}, {item.Object.PositionXZ.Y:0.###} pour MapSize={extent}."),
                 item.Page.OriginalRelativePath);
         }
 
@@ -56,7 +56,7 @@ public sealed class GroundObjectValidator
             report.Add(
                 ValidationSeverity.Info,
                 ValidationCode.GroundObjectDiagnostic,
-                $"[Info] Page LOD{page.Key.Lod} avec GroundObjects et vertices : conservée comme page metadata/coverage/ground objects, sans édition vertex.",
+                Anno1800IslandTool.Core.Localization.TextCatalog.F($"[Info] Page LOD{page.Key.Lod} avec GroundObjects et vertices : conservée comme page metadata/coverage/ground objects, sans édition vertex."),
                 page.OriginalRelativePath);
         }
 

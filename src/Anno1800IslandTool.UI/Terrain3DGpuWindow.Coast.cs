@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using System.Windows;
 using Anno1800IslandTool.Core.Terrain;
 using HelixToolkit;
@@ -28,7 +28,7 @@ public partial class Terrain3DGpuWindow
     {
         if (GetBrushMode() == GpuBrushMode.MeshBeach)
         {
-            return FootprintCoast.BuildFromMesh(_loadedPages);
+            return FootprintCoast.BuildFromMesh(_loadedPages, waterLevel: 104f / 256f);
         }
         var grid = _project.Root.ActiveMapGrid;
         return FootprintCoast.Build(_workingFootprintMask, grid.X, grid.Y,
@@ -131,8 +131,8 @@ public partial class Terrain3DGpuWindow
         BeachEndHandleModel.Geometry = BuildBeachHandleGeometry(_beachEndPoint, size, false);
         BeachMoveHandleModel.Geometry = BuildBeachHandleGeometry(OverlayPoint(mid), size, true);
         BeachSelectionTextBlock.Text = GetBrushMode() == GpuBrushMode.MeshBeach
-            ? $"Tronçon orange : {_coastLength / 32:0.#} cases sur la ligne d'eau du maillage. Carrés : étirer ; losange cyan : déplacer. Relief et matériaux conservés."
-            : $"Tronçon orange : {_coastLength / 32:0.#} cases le long du contour. Carrés : étirer ; losange cyan : déplacer. La plage sera ajoutée vers l’extérieur.";
+            ? Anno1800IslandTool.Core.Localization.TextCatalog.F($"Tronçon orange : {_coastLength / 32:0.#} cases sur la ligne d'eau du maillage. Carrés : étirer ; losange cyan : déplacer. Relief et matériaux conservés.")
+            : Anno1800IslandTool.Core.Localization.TextCatalog.F($"Tronçon orange : {_coastLength / 32:0.#} cases le long du contour. Carrés : étirer ; losange cyan : déplacer. La plage sera ajoutée vers l’extérieur.");
     }
 
     private void ApplyBeachButton_Click(object sender, RoutedEventArgs e)
@@ -140,7 +140,7 @@ public partial class Terrain3DGpuWindow
         if (_creatingCoast || _selectedCoast is null || !_hasBeachStartPoint || !_hasBeachEndPoint) return;
         if (_footprintDirty)
         {
-            StatusTextBlock.Text = "Appliquez d’abord l’empreinte dessinée, puis sélectionnez le nouveau contour pour la plage.";
+            StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Appliquez d’abord l’empreinte dessinée, puis sélectionnez le nouveau contour pour la plage.");
             return;
         }
         if (_applyBeachToProject is null) return;
@@ -158,15 +158,19 @@ public partial class Terrain3DGpuWindow
         _creatingCoast = true;
         try
         {
-            StatusTextBlock.Text = "Ajout des données de côte constructible…";
-            var summary = _applyBeachToProject(definition, GetChangedWorldRegions());
+            StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Ajout des données de côte constructible…");
+            BusyWork.RunOperation(this, async () =>
+            {
+            var summary = BusyWork.RunOnUi(this, () => _applyBeachToProject(definition, GetChangedWorldRegions()));
             _hasDirectProjectCommit = true;
             RebaseTransactionAfterDirectCommit();
             ResetBeachButton_Click(sender, e);
             _selectedCoast = null;
+            await ReloadGpuGeometryAsync();
             StatusTextBlock.Text = summary;
+            });
         }
-        catch (Exception ex) { StatusTextBlock.Text = $"La création de plage a échoué : {ex.Message}"; }
+        catch (Exception ex) { StatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"La création de plage a échoué : {ex.Message}"); }
         finally { _creatingCoast = false; }
     }
 }

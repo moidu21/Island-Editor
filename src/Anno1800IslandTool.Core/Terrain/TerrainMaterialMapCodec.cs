@@ -1,4 +1,4 @@
-﻿namespace Anno1800IslandTool.Core.Terrain;
+namespace Anno1800IslandTool.Core.Terrain;
 
 /// <summary>
 /// Codec haut niveau pour MaterialIDs2 / MaterialAlphas2.
@@ -53,7 +53,7 @@ public static class TerrainMaterialMapCodec
         ArgumentNullException.ThrowIfNull(cells);
         if (cells.Count < width * height)
         {
-            throw new ArgumentException($"Il faut au moins {width * height} cellules pour encoder {width}x{height}.", nameof(cells));
+            throw new ArgumentException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Il faut au moins {width * height} cellules pour encoder {width}x{height}."), nameof(cells));
         }
 
         var map = new TerrainMaterialMap

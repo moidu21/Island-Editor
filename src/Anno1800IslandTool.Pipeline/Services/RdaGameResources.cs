@@ -1,4 +1,4 @@
-﻿using System.Security.Cryptography;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -50,12 +50,12 @@ public sealed class RdaGameResources(IslandToolProcess process)
             if (!File.Exists(marker) || File.ReadAllText(marker).Trim() != MetadataVersion)
             {
                 // Definitions only. Large DDS/RDM resources are fetched on demand below.
-                await ExtractAsync(archives, target, MetadataFilter, progress, token, "Définitions RDA");
+                await ExtractAsync(archives, target, MetadataFilter, progress, token, Anno1800IslandTool.Core.Localization.TextCatalog.T("Définitions RDA"));
                 token.ThrowIfCancellationRequested();
                 File.WriteAllText(marker, MetadataVersion);
             }
             var root = Path.Combine(target, "data");
-            if (GameDataTextureResolver.NormalizeDataRoot(root) is null) throw new InvalidDataException("Les archives ne contiennent pas les définitions de matériaux attendues.");
+            if (GameDataTextureResolver.NormalizeDataRoot(root) is null) throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Les archives ne contiennent pas les définitions de matériaux attendues."));
             ActiveDataRoot = root;
             return root;
         }
@@ -80,7 +80,7 @@ public sealed class RdaGameResources(IslandToolProcess process)
     {
         var archives = GameIslandCatalog.Archives(gameFolder);
         var target = Path.GetDirectoryName(root)!;
-        if (Path.GetFileName(target) != Signature(archives)) throw new IOException("Les archives ont changé. Actualisez les ressources du jeu.");
+        if (Path.GetFileName(target) != Signature(archives)) throw new IOException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Les archives ont changé. Actualisez les ressources du jeu."));
         await Gate.WaitAsync(token);
         try
         {
@@ -111,7 +111,7 @@ public sealed class RdaGameResources(IslandToolProcess process)
             for (int batch = 0; batch < batches.Count; batch++)
             {
                 var (names, filter) = batches[batch];
-                await ExtractAsync(archives, target, filter, progress, token, "Textures et modèles RDA", batch * archives.Length, batches.Count * archives.Length);
+                await ExtractAsync(archives, target, filter, progress, token, Anno1800IslandTool.Core.Localization.TextCatalog.T("Textures et modèles RDA"), batch * archives.Length, batches.Count * archives.Length);
                 completed.UnionWith(names);
                 File.WriteAllLines(manifest + ".tmp", completed.Order(StringComparer.OrdinalIgnoreCase));
                 File.Move(manifest + ".tmp", manifest, true);
@@ -143,7 +143,7 @@ public sealed class RdaGameResources(IslandToolProcess process)
             var filter = BuildResourceFilter(batch);
             // Leave headroom for executable, archive and output paths on Windows.
             if (filter.Length <= 24000) { result.Add((batch, filter)); return; }
-            if (batch.Length == 1) throw new InvalidDataException("Chemin de ressource trop long.");
+            if (batch.Length == 1) throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Chemin de ressource trop long."));
             Add(batch[..(batch.Length / 2)]); Add(batch[(batch.Length / 2)..]);
         }
         Add(names);

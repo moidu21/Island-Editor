@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Xml.Linq;
 using Anno1800IslandTool.Core.Terrain;
 
@@ -15,6 +15,12 @@ public static class TerrainWaterMapSynchronizer
         XDocument doc;
         try { doc = XDocument.Parse(text, LoadOptions.PreserveWhitespace); }
         catch (System.Xml.XmlException) { return text; }
+        return Synchronize(doc, map) ? doc.ToString(SaveOptions.DisableFormatting) : text;
+    }
+
+    internal static bool Synchronize(XDocument doc, CoarseHeightMap map)
+    {
+        if (map.Width < 2 || map.Height < 2 || map.Samples.Length < (long)map.Width * map.Height) return false;
         var changed = false;
         foreach (var name in new[] { "WaterInfos", "WaterFlow" })
         foreach (var node in doc.Descendants(name))
@@ -23,13 +29,9 @@ public static class TerrainWaterMapSynchronizer
                 !int.TryParse(node.Element("height")?.Value, out var height) || width <= 0 || height <= 0) continue;
             var values = node.Element("map");
             if (values is null) continue;
-            var tokens = values.Value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-            if ((long)width * height * 2 != tokens.Length) continue;
-            var old = new int[tokens.Length];
-            var valid = true;
-            for (var i = 0; i < old.Length; i++)
-                if (!int.TryParse(tokens[i], NumberStyles.Integer, CultureInfo.InvariantCulture, out old[i])) { valid = false; break; }
-            if (!valid) continue;
+            long wordCount = (long)width * height * 2;
+            if (wordCount > int.MaxValue || !Anno1800IslandTool.Core.Common.IntegerGridText.TryRead(
+                    values.Value, (int)wordCount, out var old)) continue;
             var count = width * height;
             var heights = new float[count];
             var ocean = new bool[count];
@@ -55,7 +57,7 @@ public static class TerrainWaterMapSynchronizer
                 foreach (var j in Neighbors(currentDistance))
                     if (distance[j] == int.MaxValue) { distance[j] = distance[currentDistance] + 1; queue.Enqueue(j); }
 
-            var data = new int[tokens.Length];
+            var data = new int[old.Length];
             var rootWidth = double.TryParse(doc.Descendants("GridWidth").FirstOrDefault()?.Value,
                 NumberStyles.Float, CultureInfo.InvariantCulture, out var rawWidth) ? rawWidth / 32 : (map.Width - 1) / 2d;
             var cellsPerBand = Math.Max(1, 16 / Math.Max(.001, rootWidth / width));
@@ -88,7 +90,7 @@ public static class TerrainWaterMapSynchronizer
                 if (i < count - width) yield return i + width;
             }
         }
-        return changed ? doc.ToString(SaveOptions.DisableFormatting) : text;
+        return changed;
     }
     private static int Byte(double value) => (int)Math.Round(Math.Clamp(value, 0, 1) * 255);
     private static int Pack(int low, int high) => unchecked((short)(low | high << 8));

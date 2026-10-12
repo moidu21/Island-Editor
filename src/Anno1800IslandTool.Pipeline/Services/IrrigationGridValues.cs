@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Xml.Linq;
 
 namespace Anno1800IslandTool.Pipeline.Services;
@@ -27,7 +27,7 @@ public static class IrrigationGridValues
         {
             var values = Parse(node.Value);
             if (values.Length != 1024)
-                throw new InvalidDataException("Bloc d’irrigation invalide : 1024 octets attendus.");
+                throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Bloc d’irrigation invalide : 1024 octets attendus."));
             var normalized = Format(values);
             if (node.Value != normalized) { node.Value = normalized; changed = true; }
         }

@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Core.Common;
+using Anno1800IslandTool.Core.Common;
 
 namespace Anno1800IslandTool.Core.Terrain;
 
@@ -51,7 +51,7 @@ public sealed class TerrainMaterialEditState
         var idText = options.Mode == TerrainMaterialBrushMode.StampPickedCell && options.CellPattern is not null
             ? $"pickup={string.Join(",", options.CellPattern.ActiveMaterialIds)}"
             : $"id={options.MaterialId}";
-        RecentOperations.Add($"{options.Mode} {idText} rayon={options.ClampedRadius} force={options.ClampedStrength} cellules={result.CellsChanged} blocs={result.BlocksChanged}");
+        RecentOperations.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"{options.Mode} {idText} rayon={options.ClampedRadius} force={options.ClampedStrength} cellules={result.CellsChanged} blocs={result.BlocksChanged}"));
         while (RecentOperations.Count > 50)
         {
             RecentOperations.RemoveAt(0);
@@ -92,7 +92,7 @@ public sealed class TerrainMaterialEditState
             }
         }
 
-        RecentOperations.Add($"{operationLabel} cellules={result.CellsChanged} blocs={result.BlocksChanged}");
+        RecentOperations.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"{operationLabel} cellules={result.CellsChanged} blocs={result.BlocksChanged}"));
         foreach (var message in result.Messages.Take(3))
         {
             RecentOperations.Add("  " + message);

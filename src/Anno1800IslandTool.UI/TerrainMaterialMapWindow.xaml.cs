@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Windows;
@@ -80,8 +80,8 @@ public partial class TerrainMaterialMapWindow : Window
         BrushModeComboBox.SelectedItem = TerrainMaterialBrushMode.Blend;
 
         RefreshMaterialMapDisplay(refreshTables: true);
-        CellDetailsTextBox.Text = "Aucune cellule sélectionnée.";
-        PickupStatusTextBlock.Text = "Pickup : aucun. Clic droit sur la carte pour prélever une cellule complète.";
+        CellDetailsTextBox.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune cellule sélectionnée.");
+        PickupStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Pickup : aucun. Clic droit sur la carte pour prélever une cellule complète.");
     }
 
     protected override void OnClosed(EventArgs e)
@@ -153,7 +153,7 @@ public partial class TerrainMaterialMapWindow : Window
 
     private void ApplySelectedEmbeddedMaterialSet()
     {
-        if (_isApplyingEmbeddedMaterialSet || EmbeddedMaterialSetComboBox.SelectedItem is not string fileName)
+        if (BusyWork.IsBusy || _isApplyingEmbeddedMaterialSet || EmbeddedMaterialSetComboBox.SelectedItem is not string fileName)
         {
             return;
         }
@@ -167,7 +167,7 @@ public partial class TerrainMaterialMapWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.ToString(), "Chargement du materialset intégré", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.ToString(), Anno1800IslandTool.Core.Localization.TextCatalog.T("Chargement du materialset intégré"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -192,10 +192,12 @@ public partial class TerrainMaterialMapWindow : Window
     {
         if (!_embeddedMaterialSets.TryRead(fileName, out var text))
         {
-            throw new InvalidOperationException($"Le materialset intégré {fileName} est introuvable.");
+            throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Le materialset intégré {fileName} est introuvable."));
         }
 
-        var environmentReport = _editor.ReplaceMaterialSet(_project, fileName, text, fileName, updateRd3dReference: true);
+        return BusyWork.RunOnUi(this, () =>
+        {
+        var environmentReport = BusyWork.Run(this, () => _editor.ReplaceMaterialSet(_project, fileName, text, fileName, updateRd3dReference: true));
         var matchingName = GetEmbeddedMaterialSetNames().FirstOrDefault(name =>
             string.Equals(name, fileName, StringComparison.OrdinalIgnoreCase));
         if (matchingName is not null && !Equals(EmbeddedMaterialSetComboBox.SelectedItem, matchingName))
@@ -219,7 +221,8 @@ public partial class TerrainMaterialMapWindow : Window
         ProjectApplied?.Invoke(this, EventArgs.Empty);
         MaterialSetSelectionCoordinator.Publish(_project, this);
         var gamePath = $"data/config/engine/material_sets/{fileName}";
-        return $"Materialset intégré chargé : {fileName}. Le RD3D pointera vers {gamePath} à l’export. {environmentReport}";
+        return Anno1800IslandTool.Core.Localization.TextCatalog.F($"Materialset intégré chargé : {fileName}. Le RD3D pointera vers {gamePath} à l’export. {environmentReport}");
+        });
     }
 
 
@@ -274,7 +277,7 @@ public partial class TerrainMaterialMapWindow : Window
     }
 
     internal string GetMaterialSetStatusForLargeWindow()
-        => $"{BuildMaterialSetPathStatus()} ({_materialsById.Count} matériaux, {_paletteRows.Count(r => r.IsTerrain)} terrain Type=0)";
+        => Anno1800IslandTool.Core.Localization.TextCatalog.F($"{BuildMaterialSetPathStatus()} ({_materialsById.Count} matériaux, {_paletteRows.Count(r => r.IsTerrain)} terrain Type=0)");
 
     private void InvalidateCoastTransitionBase()
     {
@@ -323,8 +326,8 @@ public partial class TerrainMaterialMapWindow : Window
     {
         var dialog = new OpenFileDialog
         {
-            Title = "Sélectionner un materialset Anno 1800",
-            Filter = "Materialset XML (*.xml)|*.xml|Tous les fichiers (*.*)|*.*",
+            Title = Anno1800IslandTool.Core.Localization.TextCatalog.T("Sélectionner un materialset Anno 1800"),
+            Filter = Anno1800IslandTool.Core.Localization.TextCatalog.T("Materialset XML (*.xml)|*.xml|Tous les fichiers (*.*)|*.*"),
             CheckFileExists = true,
             Multiselect = false
         };
@@ -344,7 +347,7 @@ public partial class TerrainMaterialMapWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.ToString(), "Chargement du materialset", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.ToString(), Anno1800IslandTool.Core.Localization.TextCatalog.T("Chargement du materialset"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -355,13 +358,15 @@ public partial class TerrainMaterialMapWindow : Window
     {
         if (string.IsNullOrWhiteSpace(path))
         {
-            throw new ArgumentException("Chemin materialset vide.", nameof(path));
+            throw new ArgumentException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Chemin materialset vide."), nameof(path));
         }
 
         var text = File.ReadAllText(path);
         var fileName = Path.GetFileName(path);
 
-        var environmentReport = _editor.ReplaceMaterialSet(_project, fileName, text, path, updateRd3dReference: updateRd3dReference);
+        return BusyWork.RunOnUi(this, () =>
+        {
+        var environmentReport = BusyWork.Run(this, () => _editor.ReplaceMaterialSet(_project, fileName, text, path, updateRd3dReference: updateRd3dReference));
         ResetMaterialHistory();
         RefreshMaterialSetPaletteFromProject();
         RefreshMaterialMapDisplay(refreshTables: true);
@@ -372,10 +377,11 @@ public partial class TerrainMaterialMapWindow : Window
         var objectCount = _paletteRows.Count(r => !r.IsTerrain);
         var gameMaterialSetPath = $"data/config/engine/material_sets/{fileName}";
         var message = updateRd3dReference
-            ? $"Materialset chargé : {fileName}. rd3d.xml pointera vers {gameMaterialSetPath} à l'export."
-            : $"Materialset chargé : {fileName}. rd3d.xml n'a pas été modifié.";
+            ? Anno1800IslandTool.Core.Localization.TextCatalog.F($"Materialset chargé : {fileName}. rd3d.xml pointera vers {gameMaterialSetPath} à l'export.")
+            : Anno1800IslandTool.Core.Localization.TextCatalog.F($"Materialset chargé : {fileName}. rd3d.xml n'a pas été modifié.");
 
-        return $"{message} {terrainCount} matériau(x) terrain Type=0 disponible(s), {objectCount} autre(s). Les palettes de peinture et de topologie sont actualisées. {environmentReport}";
+        return Anno1800IslandTool.Core.Localization.TextCatalog.F($"{message} {terrainCount} matériau(x) terrain Type=0 disponible(s), {objectCount} autre(s). Les palettes de peinture et de topologie sont actualisées. {environmentReport}");
+        });
     }
 
     private void MaterialMapImage_MouseMove(object sender, MouseEventArgs e)
@@ -400,7 +406,7 @@ public partial class TerrainMaterialMapWindow : Window
         }
 
         var cell = _workingMap.GetCell(x, y);
-        ImageHintTextBlock.Text = $"Survol : x={x}, y={y}, dominant ID={cell.DominantMaterialId}, poids={cell.DominantWeight}/31. Clique pour inspecter, clic droit pour pickup, ou active peinture.";
+        ImageHintTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Survol : x={x}, y={y}, dominant ID={cell.DominantMaterialId}, poids={cell.DominantWeight}/31. Clique pour inspecter, clic droit pour pickup, ou active peinture.");
     }
 
     private void MaterialMapImage_MouseLeave(object sender, MouseEventArgs e)
@@ -480,7 +486,7 @@ public partial class TerrainMaterialMapWindow : Window
     {
         if (PaintMaterialComboBox.SelectedItem is MaterialPaletteRow row)
         {
-            PaintStatusTextBlock.Text = $"Matériau sélectionné : ID {row.Id} | {row.Label}";
+            PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Matériau sélectionné : ID {row.Id} | {row.Label}");
         }
     }
 
@@ -498,24 +504,32 @@ public partial class TerrainMaterialMapWindow : Window
     {
         try
         {
-            var fixedZeroCoverage = TerrainMaterialMapCoverageSanitizer.EnsureNoZeroCoverageTexels(_workingMap);
-            _editor.ReplaceTerrainMaterialMap(_project, _workingMap.Clone(), _editState);
-            var usedBitsPages = _editor.ResynchronizeMeshUsedMaterialBitsFromMaterialMap(_project);
-            IslandPreviewImages.Refresh(_project);
+            int fixedZeroCoverage = 0, usedBitsPages = 0;
+            BusyWork.RunOperation(this, async () =>
+            {
+            fixedZeroCoverage = TerrainMaterialMapCoverageSanitizer.EnsureNoZeroCoverageTexels(_workingMap);
+            usedBitsPages = BusyWork.Run(this, () => {
+                _editor.ReplaceTerrainMaterialMap(_project, _workingMap.Clone(), _editState);
+                var pages = _editor.ResynchronizeMeshUsedMaterialBitsFromMaterialMap(_project);
+                IslandPreviewImages.Refresh(_project);
+                return pages;
+            });
             ProjectApplied?.Invoke(this, EventArgs.Empty);
             ResetMaterialHistory();
             InvalidateCoastTransitionBase();
             SummaryTextBox.Text = BuildSummaryText(_project, _workingMap, _editState);
-            PaintStatusTextBlock.Text = $"Peinture appliquée au projet. L'export ZIP remplacera rd3d.xml avec MaterialIDs2 / MaterialAlphas2, puis régénérera les tintmaps depuis cette MaterialMap. UsedMaterialBits resynchronisés sur {usedBitsPages} page(s) mesh. Texels sans coverage corrigés : {fixedZeroCoverage}.";
+            PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Peinture appliquée au projet. L'export ZIP remplacera rd3d.xml avec MaterialIDs2 / MaterialAlphas2, puis régénérera les tintmaps depuis cette MaterialMap. UsedMaterialBits resynchronisés sur {usedBitsPages} page(s) mesh. Texels sans coverage corrigés : {fixedZeroCoverage}.");
             _largeWindow?.RefreshFromParentData(refreshPalette: false);
+            if (_largeWindow is not null) await _largeWindow.CompletePendingRefreshAsync();
+            });
             if (showMessage)
             {
-                MessageBox.Show(this, $"Material map appliquée au projet. UsedMaterialBits resynchronisés sur {usedBitsPages} page(s) mesh. Texels sans coverage corrigés : {fixedZeroCoverage}. L'export ZIP écrira rd3d.xml, les mesh pages nécessaires et les tintmaps finales depuis cette MaterialMap.", "Peinture matériaux", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(this, Anno1800IslandTool.Core.Localization.TextCatalog.F($"Material map appliquée au projet. UsedMaterialBits resynchronisés sur {usedBitsPages} page(s) mesh. Texels sans coverage corrigés : {fixedZeroCoverage}. L'export ZIP écrira rd3d.xml, les mesh pages nécessaires et les tintmaps finales depuis cette MaterialMap."), Anno1800IslandTool.Core.Localization.TextCatalog.T("Peinture matériaux"), MessageBoxButton.OK, MessageBoxImage.Information);
             }
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.ToString(), "Peinture matériaux", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.ToString(), Anno1800IslandTool.Core.Localization.TextCatalog.T("Peinture matériaux"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -534,10 +548,21 @@ public partial class TerrainMaterialMapWindow : Window
         // v39: la fenêtre matériaux agrandie peut rester ouverte pendant qu'une validation
         // terrain 3D met à jour project.Rd3d.MaterialMap. On recharge automatiquement
         // depuis le projet tant qu'il n'y a pas d'édition matériau locale non appliquée.
+        var terrainChanged = !ReferenceEquals(_observedTerrainText, _project.RawContent.GameDataText)
+            || !ReferenceEquals(_observedRd3dText, _project.RawContent.Rd3dText);
         if (_editState.HasEdits)
         {
-            status = "Rafraîchissement depuis le projet ignoré : la copie matériaux contient des modifications non appliquées. Utilise Réinitialiser la copie pour forcer le rechargement.";
-            return false;
+            if (!terrainChanged)
+            {
+                status = Anno1800IslandTool.Core.Localization.TextCatalog.T("Peinture locale conservée : terrain inchangé.");
+                return false;
+            }
+            _observedTerrainText = _project.RawContent.GameDataText;
+            _observedRd3dText = _project.RawContent.Rd3dText;
+            InvalidateCoastTransitionBase();
+            // Refresh the terrain without discarding unapplied paint or undo history.
+            status = Anno1800IslandTool.Core.Localization.TextCatalog.T("Relief actualisé ; peinture locale non appliquée conservée.");
+            return true;
         }
 
         var current = _project.Rd3d.MaterialMap;
@@ -548,7 +573,7 @@ public partial class TerrainMaterialMapWindow : Window
             && current.PackedMaterialIds.AsSpan().SequenceEqual(_workingMap.PackedMaterialIds)
             && current.PackedMaterialAlphas.AsSpan().SequenceEqual(_workingMap.PackedMaterialAlphas))
         {
-            status = "Carte et terrain inchangés.";
+            status = Anno1800IslandTool.Core.Localization.TextCatalog.T("Carte et terrain inchangés.");
             return false;
         }
         _observedTerrainText = _project.RawContent.GameDataText;
@@ -561,9 +586,9 @@ public partial class TerrainMaterialMapWindow : Window
         BrushPreviewEllipse.Visibility = Visibility.Collapsed;
         MaterialMapImage.Source = BuildDominantMaterialBitmap(_workingMap, BuildActiveMaterialCellPredicate(_workingMap));
         SummaryTextBox.Text = BuildSummaryText(_project, _workingMap, _editState);
-        PaintStatusTextBlock.Text = "Carte matériaux rechargée depuis le projet courant.";
-        CellDetailsTextBox.Text = "Image actualisée depuis project.Rd3d.MaterialMap.";
-        status = "Carte matériaux actualisée depuis le projet courant.";
+        PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Carte matériaux rechargée depuis le projet courant.");
+        CellDetailsTextBox.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Image actualisée depuis project.Rd3d.MaterialMap.");
+        status = Anno1800IslandTool.Core.Localization.TextCatalog.T("Carte matériaux actualisée depuis le projet courant.");
         return true;
     }
 
@@ -574,8 +599,8 @@ public partial class TerrainMaterialMapWindow : Window
         _editState = new TerrainMaterialEditState();
         InvalidateCoastTransitionBase();
         RefreshMaterialMapDisplay(refreshTables: true);
-        CellDetailsTextBox.Text = "Copie de travail réinitialisée depuis le projet.";
-        PaintStatusTextBlock.Text = "Aucune peinture appliquée.";
+        CellDetailsTextBox.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Copie de travail réinitialisée depuis le projet.");
+        PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune peinture appliquée.");
         CompleteMaterialHistoryAction();
     }
 
@@ -589,8 +614,8 @@ public partial class TerrainMaterialMapWindow : Window
         _pickedCellPattern = null;
         UsePickedCellBrushCheckBox.IsChecked = false;
         PickupNextClickCheckBox.IsChecked = false;
-        PickupStatusTextBlock.Text = "Pickup : aucun. Clic droit sur la carte pour prélever une cellule complète.";
-        PaintStatusTextBlock.Text = "Pickup effacé.";
+        PickupStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Pickup : aucun. Clic droit sur la carte pour prélever une cellule complète.");
+        PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Pickup effacé.");
     }
 
     private void PickupCell(int x, int y)
@@ -601,8 +626,8 @@ public partial class TerrainMaterialMapWindow : Window
         BrushModeComboBox.SelectedItem = TerrainMaterialBrushMode.StampPickedCell;
 
         var activeIds = FormatMaterialIds(_pickedCellPattern.MaterialIds);
-        PickupStatusTextBlock.Text = $"Pickup : cellule {x},{y} | dominant ID {_pickedCellPattern.DominantMaterialId} | slots {activeIds}.";
-        PaintStatusTextBlock.Text = "Pickup prêt : active la peinture puis clique/glisse pour repeindre cette combinaison de slots.";
+        PickupStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Pickup : cellule {x},{y} | dominant ID {_pickedCellPattern.DominantMaterialId} | slots {activeIds}.");
+        PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Pickup prêt : active la peinture puis clique/glisse pour repeindre cette combinaison de slots.");
         CellDetailsTextBox.Text = BuildPickedCellDetails(_pickedCellPattern);
         ImageHintTextBlock.Text = PickupStatusTextBlock.Text;
     }
@@ -615,13 +640,13 @@ public partial class TerrainMaterialMapWindow : Window
         MaterialPaletteRow? material = PaintMaterialComboBox.SelectedItem as MaterialPaletteRow;
         if (!usePickup && material is null)
         {
-            PaintStatusTextBlock.Text = "Aucun matériau terrain sélectionné.";
+            PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucun matériau terrain sélectionné.");
             return;
         }
 
         if (usePickup && _pickedCellPattern is null)
         {
-            PaintStatusTextBlock.Text = "Aucune cellule pickup. Fais un clic droit sur la carte, ou coche Pickup puis clique une cellule.";
+            PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune cellule pickup. Fais un clic droit sur la carte, ou coche Pickup puis clique une cellule.");
             return;
         }
 
@@ -645,7 +670,7 @@ public partial class TerrainMaterialMapWindow : Window
             var label = usePickup
                 ? $"pickup {_pickedCellPattern!.SourceX},{_pickedCellPattern.SourceY} [{FormatMaterialIds(_pickedCellPattern.MaterialIds)}]"
                 : $"ID {options.MaterialId}";
-            PaintStatusTextBlock.Text = $"{options.Mode} {label} à {x},{y} : {result.CellsChanged} cellule(s), {result.BlocksChanged} bloc(s). Total cellules modifiées: {_editState.TotalCellsChanged}.";
+            PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"{options.Mode} {label} à {x},{y} : {result.CellsChanged} cellule(s), {result.BlocksChanged} bloc(s). Total cellules modifiées: {_editState.TotalCellsChanged}.");
             ImageHintTextBlock.Text = PaintStatusTextBlock.Text;
         }
         else if (result.Messages.Count > 0)
@@ -827,8 +852,12 @@ public partial class TerrainMaterialMapWindow : Window
     {
         options.NormalizeThresholds();
         var previewMap = _workingMap.Clone();
-        var result = TerrainCoastTransitionPainter.ApplyHeightToMaterialTransition(previewMap, _project.GameData.TerrainHeightMap, options, out var stats, activeMaterialCellPredicate: BuildWritableMaterialCellPredicate(previewMap));
-        status = $"Vue seuils : {result.CellsChanged} cellule(s), {result.BlocksChanged} bloc(s). {BuildCoastStatsText(stats)}";
+        var predicate = BuildWritableMaterialCellPredicate(previewMap);
+        var (result, stats) = BusyWork.Run(this, () => {
+            var painted = TerrainCoastTransitionPainter.ApplyHeightToMaterialTransition(previewMap, _project.GameData.TerrainHeightMap, options, out var measured, activeMaterialCellPredicate: predicate);
+            return (painted, measured);
+        });
+        status = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Vue seuils : {result.CellsChanged} cellule(s), {result.BlocksChanged} bloc(s). {BuildCoastStatsText(stats)}");
         details = BuildCoastPreviewDetails(options, result, stats);
         return BuildDominantMaterialBitmap(previewMap, BuildActiveMaterialCellPredicate(previewMap));
     }
@@ -840,18 +869,22 @@ public partial class TerrainMaterialMapWindow : Window
         options = ReadCoastTransitionOptions();
         _coastTransitionBaseMap ??= _workingMap.Clone();
         _workingMap = _coastTransitionBaseMap.Clone();
-        var result = TerrainCoastTransitionPainter.ApplyHeightToMaterialTransition(_workingMap, _project.GameData.TerrainHeightMap, options, out var stats, activeMaterialCellPredicate: BuildWritableMaterialCellPredicate(_workingMap));
+        var predicate = BuildWritableMaterialCellPredicate(_workingMap);
+        var (result, stats) = BusyWork.Run(this, () => {
+            var painted = TerrainCoastTransitionPainter.ApplyHeightToMaterialTransition(_workingMap, _project.GameData.TerrainHeightMap, options, out var measured, activeMaterialCellPredicate: predicate);
+            return (painted, measured);
+        });
         var fixedZeroCoverage = TerrainMaterialMapCoverageSanitizer.EnsureNoZeroCoverageTexels(_workingMap, BuildActiveMaterialCellPredicate(_workingMap));
         if (fixedZeroCoverage > 0)
         {
-            result.Messages.Add($"v43.7 : {fixedZeroCoverage} texel(s) MaterialAlphas2 sans coverage ont été corrigés après transition.");
+            result.Messages.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"v43.7 : {fixedZeroCoverage} texel(s) MaterialAlphas2 sans coverage ont été corrigés après transition."));
         }
         _editState = new TerrainMaterialEditState();
-        _editState.AddGeneratedOperation(result, "Transition hauteur->matériau côte/plage/eau depuis vue agrandie");
+        _editState.AddGeneratedOperation(result, Anno1800IslandTool.Core.Localization.TextCatalog.T("Transition hauteur->matériau côte/plage/eau depuis vue agrandie"));
         RefreshMaterialMapDisplay(refreshTables: true);
-        status = $"Appliqué à la copie depuis une base fixe : {result.CellsChanged} cellule(s), {result.BlocksChanged} bloc(s). {BuildCoastStatsText(stats)}";
+        status = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Appliqué à la copie depuis une base fixe : {result.CellsChanged} cellule(s), {result.BlocksChanged} bloc(s). {BuildCoastStatsText(stats)}");
         CoastStatusTextBlock.Text = status;
-        PaintStatusTextBlock.Text = "Image Matériaux/peinture recalculée depuis les seuils hauteur sur une base fixe. Les clics répétés ne s'empilent plus. Clique ensuite sur Appliquer au projet pour l'export ZIP.";
+        PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Image Matériaux/peinture recalculée depuis les seuils hauteur sur une base fixe. Les clics répétés ne s'empilent plus. Clique ensuite sur Appliquer au projet pour l'export ZIP.");
         CompleteMaterialHistoryAction();
         return BuildCoastPreviewDetails(options, result, stats);
     }
@@ -870,8 +903,12 @@ public partial class TerrainMaterialMapWindow : Window
         options.Normalize();
         var previewMap = _workingMap.Clone();
         ConfigureTopologyContext(options);
-        var result = TerrainTopologyMaterialPainter.Apply(previewMap, _project.GameData.TerrainHeightMap, options, out var stats, activeMaterialCellPredicate: BuildWritableMaterialCellPredicate(previewMap));
-        status = FormatTopologyText("Vue topologie : {0} cellule(s), {1} bloc(s). {2}", result.CellsChanged, result.BlocksChanged, BuildTopologyStatsText(stats));
+        var writable = BuildWritableMaterialCellPredicate(previewMap);
+            var (result, stats) = BusyWork.Run(this, () => {
+                var painted = TerrainTopologyMaterialPainter.Apply(previewMap, _project.GameData.TerrainHeightMap, options, out var statistics, activeMaterialCellPredicate: writable);
+                return (painted, statistics);
+            });
+        status = FormatTopologyText(Anno1800IslandTool.Core.Localization.TextCatalog.T("Vue topologie : {0} cellule(s), {1} bloc(s). {2}"), result.CellsChanged, result.BlocksChanged, BuildTopologyStatsText(stats));
         details = BuildTopologyDetails(options, result, stats);
         return BuildDominantMaterialBitmap(previewMap, BuildActiveMaterialCellPredicate(previewMap));
     }
@@ -886,16 +923,20 @@ public partial class TerrainMaterialMapWindow : Window
             options = ReadTopologyOptions();
             _topologyPaintBaseMap ??= _workingMap.Clone();
             _workingMap = _topologyPaintBaseMap.Clone();
-            var result = TerrainTopologyMaterialPainter.Apply(_workingMap, _project.GameData.TerrainHeightMap, options, out var stats, activeMaterialCellPredicate: BuildWritableMaterialCellPredicate(_workingMap));
+            var writable = BuildWritableMaterialCellPredicate(_workingMap);
+            var (result, stats) = BusyWork.Run(this, () => {
+                var painted = TerrainTopologyMaterialPainter.Apply(_workingMap, _project.GameData.TerrainHeightMap, options, out var statistics, activeMaterialCellPredicate: writable);
+                return (painted, statistics);
+            });
             var fixedZeroCoverage = TerrainMaterialMapCoverageSanitizer.EnsureNoZeroCoverageTexels(_workingMap, BuildActiveMaterialCellPredicate(_workingMap));
             if (fixedZeroCoverage > 0)
             {
-                result.Messages.Add(FormatTopologyText("{0} texel(s) sans couverture corrigé(s) après peinture topologique.", fixedZeroCoverage));
+                result.Messages.Add(FormatTopologyText(Anno1800IslandTool.Core.Localization.TextCatalog.T("{0} texel(s) sans couverture corrigé(s) après peinture topologique."), fixedZeroCoverage));
             }
             _editState = new TerrainMaterialEditState();
-            _editState.AddGeneratedOperation(result, "Peinture automatique par topologie depuis vue agrandie");
+            _editState.AddGeneratedOperation(result, Anno1800IslandTool.Core.Localization.TextCatalog.T("Peinture automatique par topologie depuis vue agrandie"));
             RefreshMaterialMapDisplay(refreshTables: true);
-            status = FormatTopologyText("Appliqué à la copie : {0} cellule(s), {1} bloc(s). {2}", result.CellsChanged, result.BlocksChanged, BuildTopologyStatsText(stats));
+            status = FormatTopologyText(Anno1800IslandTool.Core.Localization.TextCatalog.T("Appliqué à la copie : {0} cellule(s), {1} bloc(s). {2}"), result.CellsChanged, result.BlocksChanged, BuildTopologyStatsText(stats));
             TopologyStatusTextBlock.Text = status;
             PaintStatusTextBlock.Text = UiLocalizationManager.T("Image recalculée depuis la pente et la courbure locales. Clique ensuite sur Appliquer au projet pour préparer l’export ZIP.");
             CompleteMaterialHistoryAction();
@@ -987,8 +1028,8 @@ public partial class TerrainMaterialMapWindow : Window
         var isNearWater = TerrainCoastTransitionPainter.IsNearWaterForMaterialCell(_project.GameData.TerrainHeightMap, _workingMap, x, y, options.WaterLineHeight);
         var materialId = ClassifyCoastPreviewMaterialId(worldHeight, slope, isNearWater, options, out var classLabel);
         return materialId >= 0
-            ? $"Seuils : x={x}, y={y}, h={worldHeight:0.###}, pente={slope:0.###}, classe={classLabel}, ID prévu={materialId}."
-            : $"Seuils : x={x}, y={y}, h={worldHeight:0.###}, pente={slope:0.###}, aucune classe peinte.";
+            ? Anno1800IslandTool.Core.Localization.TextCatalog.F($"Seuils : x={x}, y={y}, h={worldHeight:0.###}, pente={slope:0.###}, classe={classLabel}, ID prévu={materialId}.")
+            : Anno1800IslandTool.Core.Localization.TextCatalog.F($"Seuils : x={x}, y={y}, h={worldHeight:0.###}, pente={slope:0.###}, aucune classe peinte.");
     }
 
     private string BuildCoastCellDetails(int x, int y, TerrainCoastTransitionOptions options)
@@ -1005,35 +1046,35 @@ public partial class TerrainMaterialMapWindow : Window
         options.NormalizeThresholds();
         if (options.PaintRockOnSteepSlopes && worldHeight > options.BeachMaxHeight && slope >= options.RockSlopeThreshold && options.RockMaterialId >= 0)
         {
-            classLabel = "roche pente";
+            classLabel = Anno1800IslandTool.Core.Localization.TextCatalog.T("roche pente");
             return TerrainMaterialPackEncoding.ClampSlot(options.RockMaterialId);
         }
 
         if (worldHeight <= options.DeepWaterMaxHeight && options.PaintDeepWater)
         {
-            classLabel = "eau profonde";
+            classLabel = Anno1800IslandTool.Core.Localization.TextCatalog.T("eau profonde");
             return TerrainMaterialPackEncoding.ClampSlot(options.DeepWaterMaterialId);
         }
 
         if (worldHeight <= options.WaterLineHeight && options.PaintShallowWater)
         {
-            classLabel = "eau faible";
+            classLabel = Anno1800IslandTool.Core.Localization.TextCatalog.T("eau faible");
             return TerrainMaterialPackEncoding.ClampSlot(options.ShallowWaterMaterialId);
         }
 
         if (worldHeight <= options.BeachMaxHeight && isNearWater && options.PaintBeach)
         {
-            classLabel = "plage côtière";
+            classLabel = Anno1800IslandTool.Core.Localization.TextCatalog.T("plage côtière");
             return TerrainMaterialPackEncoding.ClampSlot(options.BeachMaterialId);
         }
 
         if (worldHeight <= options.LowLandMaxHeight && options.PaintLowLand)
         {
-            classLabel = "terre basse";
+            classLabel = Anno1800IslandTool.Core.Localization.TextCatalog.T("terre basse");
             return TerrainMaterialPackEncoding.ClampSlot(options.LowLandMaterialId);
         }
 
-        classLabel = "ignorée";
+        classLabel = Anno1800IslandTool.Core.Localization.TextCatalog.T("ignorée");
         return -1;
     }
     private void RefreshCoastMaterialSelectors()
@@ -1087,17 +1128,21 @@ public partial class TerrainMaterialMapWindow : Window
         {
             var options = ReadCoastTransitionOptions();
             var previewMap = _workingMap.Clone();
-            var result = TerrainCoastTransitionPainter.ApplyHeightToMaterialTransition(previewMap, _project.GameData.TerrainHeightMap, options, out var stats, activeMaterialCellPredicate: BuildWritableMaterialCellPredicate(previewMap));
+            var predicate = BuildWritableMaterialCellPredicate(previewMap);
+            var (result, stats) = BusyWork.Run(this, () => {
+                var painted = TerrainCoastTransitionPainter.ApplyHeightToMaterialTransition(previewMap, _project.GameData.TerrainHeightMap, options, out var measured, activeMaterialCellPredicate: predicate);
+                return (painted, measured);
+            });
             _isShowingCoastPreview = true;
             BrushPreviewEllipse.Visibility = Visibility.Collapsed;
             MaterialMapImage.Source = BuildDominantMaterialBitmap(previewMap, BuildActiveMaterialCellPredicate(previewMap));
-            CoastStatusTextBlock.Text = $"Prévisualisation : {result.CellsChanged} cellule(s), {result.BlocksChanged} bloc(s). {BuildCoastStatsText(stats)}";
-            PaintStatusTextBlock.Text = "Prévisualisation affichée seulement. Utilise Rafraîchir stats pour revenir à la copie actuelle, ou Mets à jour l’image peinture depuis seuils.";
+            CoastStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Prévisualisation : {result.CellsChanged} cellule(s), {result.BlocksChanged} bloc(s). {BuildCoastStatsText(stats)}");
+            PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Prévisualisation affichée seulement. Utilise Rafraîchir stats pour revenir à la copie actuelle, ou Mets à jour l’image peinture depuis seuils.");
             CellDetailsTextBox.Text = BuildCoastPreviewDetails(options, result, stats);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.ToString(), "Transition côte/plage/eau", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.ToString(), Anno1800IslandTool.Core.Localization.TextCatalog.T("Transition côte/plage/eau"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -1110,24 +1155,28 @@ public partial class TerrainMaterialMapWindow : Window
             var options = ReadCoastTransitionOptions();
             _coastTransitionBaseMap ??= _workingMap.Clone();
             _workingMap = _coastTransitionBaseMap.Clone();
-            var result = TerrainCoastTransitionPainter.ApplyHeightToMaterialTransition(_workingMap, _project.GameData.TerrainHeightMap, options, out var stats, activeMaterialCellPredicate: BuildWritableMaterialCellPredicate(_workingMap));
+            var predicate = BuildWritableMaterialCellPredicate(_workingMap);
+            var (result, stats) = BusyWork.Run(this, () => {
+                var painted = TerrainCoastTransitionPainter.ApplyHeightToMaterialTransition(_workingMap, _project.GameData.TerrainHeightMap, options, out var measured, activeMaterialCellPredicate: predicate);
+                return (painted, measured);
+            });
             var fixedZeroCoverage = TerrainMaterialMapCoverageSanitizer.EnsureNoZeroCoverageTexels(_workingMap, BuildActiveMaterialCellPredicate(_workingMap));
             if (fixedZeroCoverage > 0)
             {
-                result.Messages.Add($"v43.7 : {fixedZeroCoverage} texel(s) MaterialAlphas2 sans coverage ont été corrigés après transition.");
+                result.Messages.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"v43.7 : {fixedZeroCoverage} texel(s) MaterialAlphas2 sans coverage ont été corrigés après transition."));
             }
             _editState = new TerrainMaterialEditState();
-            _editState.AddGeneratedOperation(result, "Transition hauteur->matériau côte/plage/eau");
+            _editState.AddGeneratedOperation(result, Anno1800IslandTool.Core.Localization.TextCatalog.T("Transition hauteur->matériau côte/plage/eau"));
             RefreshMaterialMapDisplay(refreshTables: true);
-            CoastStatusTextBlock.Text = $"Appliqué à la copie depuis une base fixe : {result.CellsChanged} cellule(s), {result.BlocksChanged} bloc(s). {BuildCoastStatsText(stats)}";
-            PaintStatusTextBlock.Text = "Image Matériaux/peinture recalculée depuis les seuils hauteur sur une base fixe. Les clics répétés ne s'empilent plus. Clique ensuite sur Appliquer au projet pour l'export ZIP.";
+            CoastStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Appliqué à la copie depuis une base fixe : {result.CellsChanged} cellule(s), {result.BlocksChanged} bloc(s). {BuildCoastStatsText(stats)}");
+            PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.T("Image Matériaux/peinture recalculée depuis les seuils hauteur sur une base fixe. Les clics répétés ne s'empilent plus. Clique ensuite sur Appliquer au projet pour l'export ZIP.");
             CellDetailsTextBox.Text = BuildCoastPreviewDetails(options, result, stats);
             CompleteMaterialHistoryAction();
         }
         catch (Exception ex)
         {
             CancelMaterialHistoryAction();
-            MessageBox.Show(this, ex.ToString(), "Transition côte/plage/eau", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.ToString(), Anno1800IslandTool.Core.Localization.TextCatalog.T("Transition côte/plage/eau"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -1269,11 +1318,15 @@ public partial class TerrainMaterialMapWindow : Window
         {
             var options = ReadTopologyOptions();
             var previewMap = _workingMap.Clone();
-            var result = TerrainTopologyMaterialPainter.Apply(previewMap, _project.GameData.TerrainHeightMap, options, out var stats, activeMaterialCellPredicate: BuildWritableMaterialCellPredicate(previewMap));
+            var writable = BuildWritableMaterialCellPredicate(previewMap);
+            var (result, stats) = BusyWork.Run(this, () => {
+                var painted = TerrainTopologyMaterialPainter.Apply(previewMap, _project.GameData.TerrainHeightMap, options, out var statistics, activeMaterialCellPredicate: writable);
+                return (painted, statistics);
+            });
             _isShowingCoastPreview = true;
             BrushPreviewEllipse.Visibility = Visibility.Collapsed;
             MaterialMapImage.Source = BuildDominantMaterialBitmap(previewMap, BuildActiveMaterialCellPredicate(previewMap));
-            TopologyStatusTextBlock.Text = FormatTopologyText("Prévisualisation : {0} cellule(s). {1}", result.CellsChanged, BuildTopologyStatsText(stats));
+            TopologyStatusTextBlock.Text = FormatTopologyText(Anno1800IslandTool.Core.Localization.TextCatalog.T("Prévisualisation : {0} cellule(s). {1}"), result.CellsChanged, BuildTopologyStatsText(stats));
             PaintStatusTextBlock.Text = UiLocalizationManager.T("Prévisualisation topologique affichée seulement. Utilise Rafraîchir stats pour revenir à la copie actuelle.");
             CellDetailsTextBox.Text = BuildTopologyDetails(options, result, stats);
         }
@@ -1292,16 +1345,20 @@ public partial class TerrainMaterialMapWindow : Window
             var options = ReadTopologyOptions();
             _topologyPaintBaseMap ??= _workingMap.Clone();
             _workingMap = _topologyPaintBaseMap.Clone();
-            var result = TerrainTopologyMaterialPainter.Apply(_workingMap, _project.GameData.TerrainHeightMap, options, out var stats, activeMaterialCellPredicate: BuildWritableMaterialCellPredicate(_workingMap));
+            var writable = BuildWritableMaterialCellPredicate(_workingMap);
+            var (result, stats) = BusyWork.Run(this, () => {
+                var painted = TerrainTopologyMaterialPainter.Apply(_workingMap, _project.GameData.TerrainHeightMap, options, out var statistics, activeMaterialCellPredicate: writable);
+                return (painted, statistics);
+            });
             var fixedZeroCoverage = TerrainMaterialMapCoverageSanitizer.EnsureNoZeroCoverageTexels(_workingMap, BuildActiveMaterialCellPredicate(_workingMap));
             if (fixedZeroCoverage > 0)
             {
-                result.Messages.Add(FormatTopologyText("{0} texel(s) sans couverture corrigé(s) après peinture topologique.", fixedZeroCoverage));
+                result.Messages.Add(FormatTopologyText(Anno1800IslandTool.Core.Localization.TextCatalog.T("{0} texel(s) sans couverture corrigé(s) après peinture topologique."), fixedZeroCoverage));
             }
             _editState = new TerrainMaterialEditState();
-            _editState.AddGeneratedOperation(result, "Peinture automatique par topologie");
+            _editState.AddGeneratedOperation(result, Anno1800IslandTool.Core.Localization.TextCatalog.T("Peinture automatique par topologie"));
             RefreshMaterialMapDisplay(refreshTables: true);
-            TopologyStatusTextBlock.Text = FormatTopologyText("Appliqué à la copie : {0} cellule(s). {1}", result.CellsChanged, BuildTopologyStatsText(stats));
+            TopologyStatusTextBlock.Text = FormatTopologyText(Anno1800IslandTool.Core.Localization.TextCatalog.T("Appliqué à la copie : {0} cellule(s). {1}"), result.CellsChanged, BuildTopologyStatsText(stats));
             PaintStatusTextBlock.Text = UiLocalizationManager.T("Image recalculée depuis la pente et la courbure locales. Clique ensuite sur Appliquer au projet pour préparer l’export ZIP.");
             CellDetailsTextBox.Text = BuildTopologyDetails(options, result, stats);
             CompleteMaterialHistoryAction();
@@ -1317,16 +1374,16 @@ public partial class TerrainMaterialMapWindow : Window
     {
         var sb = new StringBuilder();
         sb.AppendLine(UiLocalizationManager.T("Peinture automatique par topologie (sans altitude absolue)"));
-        sb.AppendLine(TopologyProfileLabel + (options.UseNativeCells ? " — cellules multicouches" : " — matériaux simples"));
-        sb.AppendLine("Pentes en unités du monde ; rayon en cases. Les rivières et plages protégées restent intactes.");
-        sb.AppendLine(FormatTopologyText("Plat : ID {0} | pente <= {1:0.###}", options.FlatMaterialId, options.FlatSlopeMaximum));
-        sb.AppendLine(FormatTopologyText("Pente douce : ID {0}", options.GentleSlopeMaterialId));
-        sb.AppendLine(FormatTopologyText("Pente forte : ID {0} | pente >= {1:0.###}", options.SteepSlopeMaterialId, options.SteepSlopeMinimum));
-        sb.AppendLine(FormatTopologyText("Crête convexe : ID {0} | courbure >= {1:0.###}", options.RidgeMaterialId, options.CurvatureSensitivity));
-        sb.AppendLine(FormatTopologyText("Creux concave : ID {0} | courbure <= -{1:0.###}", options.HollowMaterialId, options.CurvatureSensitivity));
-        sb.AppendLine(FormatTopologyText("Rayon d’analyse : {0} | force={1}/31 | eau/plages préservées={2}", options.AnalysisRadius, options.ClampedStrength, UiLocalizationManager.T(options.PreserveExistingWaterAndBeach ? "oui" : "non")));
+        sb.AppendLine(TopologyProfileLabel + (options.UseNativeCells ? Anno1800IslandTool.Core.Localization.TextCatalog.T(" — cellules multicouches") : Anno1800IslandTool.Core.Localization.TextCatalog.T(" — matériaux simples")));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Pentes en unités du monde ; rayon en cases. Les rivières et plages protégées restent intactes."));
+        sb.AppendLine(FormatTopologyText(Anno1800IslandTool.Core.Localization.TextCatalog.T("Plat : ID {0} | pente <= {1:0.###}"), options.FlatMaterialId, options.FlatSlopeMaximum));
+        sb.AppendLine(FormatTopologyText(Anno1800IslandTool.Core.Localization.TextCatalog.T("Pente douce : ID {0}"), options.GentleSlopeMaterialId));
+        sb.AppendLine(FormatTopologyText(Anno1800IslandTool.Core.Localization.TextCatalog.T("Pente forte : ID {0} | pente >= {1:0.###}"), options.SteepSlopeMaterialId, options.SteepSlopeMinimum));
+        sb.AppendLine(FormatTopologyText(Anno1800IslandTool.Core.Localization.TextCatalog.T("Crête convexe : ID {0} | courbure >= {1:0.###}"), options.RidgeMaterialId, options.CurvatureSensitivity));
+        sb.AppendLine(FormatTopologyText(Anno1800IslandTool.Core.Localization.TextCatalog.T("Creux concave : ID {0} | courbure <= -{1:0.###}"), options.HollowMaterialId, options.CurvatureSensitivity));
+        sb.AppendLine(FormatTopologyText(Anno1800IslandTool.Core.Localization.TextCatalog.T("Rayon d’analyse : {0} | force={1}/31 | eau/plages préservées={2}"), options.AnalysisRadius, options.ClampedStrength, UiLocalizationManager.T(options.PreserveExistingWaterAndBeach ? "oui" : "non")));
         sb.AppendLine(BuildTopologyStatsText(stats));
-        sb.AppendLine(FormatTopologyText("Cellules changées : {0}, blocs MaterialIDs2 changés : {1}", result.CellsChanged, result.BlocksChanged));
+        sb.AppendLine(FormatTopologyText(Anno1800IslandTool.Core.Localization.TextCatalog.T("Cellules changées : {0}, blocs MaterialIDs2 changés : {1}"), result.CellsChanged, result.BlocksChanged));
         foreach (var message in result.Messages)
         {
             if (!message.StartsWith("Peinture topologique :", StringComparison.Ordinal))
@@ -1338,7 +1395,7 @@ public partial class TerrainMaterialMapWindow : Window
     }
 
     private static string BuildTopologyStatsText(TerrainTopologyMaterialStats stats)
-        => FormatTopologyText("zones : plats={0}, douces={1}, fortes={2}, crêtes={3}, creux={4}, préservées={5}, ignorées={6}", stats.FlatCells, stats.GentleSlopeCells, stats.SteepSlopeCells, stats.RidgeCells, stats.HollowCells, stats.PreservedCells, stats.SkippedCells);
+        => FormatTopologyText(Anno1800IslandTool.Core.Localization.TextCatalog.T("zones : plats={0}, douces={1}, fortes={2}, crêtes={3}, creux={4}, préservées={5}, ignorées={6}"), stats.FlatCells, stats.GentleSlopeCells, stats.SteepSlopeCells, stats.RidgeCells, stats.HollowCells, stats.PreservedCells, stats.SkippedCells);
 
     private static string FormatTopologyText(string source, params object[] values)
         => string.Format(CultureInfo.CurrentCulture, UiLocalizationManager.T(source), values);
@@ -1354,21 +1411,21 @@ public partial class TerrainMaterialMapWindow : Window
     private string BuildCoastPreviewDetails(TerrainCoastTransitionOptions options, TerrainMaterialPaintResult result, TerrainCoastTransitionStats stats)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("Transition hauteur -> matériau v43.1 mask-safe");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Transition hauteur -> matériau v43.1 mask-safe"));
         sb.AppendLine();
-        sb.AppendLine($"Eau profonde : ID {options.DeepWaterMaterialId} | h <= {options.DeepWaterMaxHeight:0.###} | {GetMaterialLabel(options.DeepWaterMaterialId)}");
-        sb.AppendLine($"Eau faible    : ID {options.ShallowWaterMaterialId} | h <= {options.WaterLineHeight:0.###} | {GetMaterialLabel(options.ShallowWaterMaterialId)}");
-        sb.AppendLine($"Plage côtière : ID {options.BeachMaterialId} | h <= {options.BeachMaxHeight:0.###} + distance eau <= {options.CoastBandCells} cellules | {GetMaterialLabel(options.BeachMaterialId)}");
-        sb.AppendLine($"Terre basse   : ID {options.LowLandMaterialId} | h <= {options.LowLandMaxHeight:0.###} | {GetMaterialLabel(options.LowLandMaterialId)}");
-        sb.AppendLine($"Roche pente   : ID {options.RockMaterialId} | pente >= {options.RockSlopeThreshold:0.###} | actif={options.PaintRockOnSteepSlopes} | {GetMaterialLabel(options.RockMaterialId)}");
-        sb.AppendLine($"Mode : {(options.UseBlend ? "blend" : "replace dominant")}, force={options.ClampedStrength}/31, empreintes cellules={(options.UseCellPatternTemplates ? "oui" : "non")}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Eau profonde : ID {options.DeepWaterMaterialId} | h <= {options.DeepWaterMaxHeight:0.###} | {GetMaterialLabel(options.DeepWaterMaterialId)}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Eau faible    : ID {options.ShallowWaterMaterialId} | h <= {options.WaterLineHeight:0.###} | {GetMaterialLabel(options.ShallowWaterMaterialId)}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Plage côtière : ID {options.BeachMaterialId} | h <= {options.BeachMaxHeight:0.###} + distance eau <= {options.CoastBandCells} cellules | {GetMaterialLabel(options.BeachMaterialId)}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Terre basse   : ID {options.LowLandMaterialId} | h <= {options.LowLandMaxHeight:0.###} | {GetMaterialLabel(options.LowLandMaterialId)}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Roche pente   : ID {options.RockMaterialId} | pente >= {options.RockSlopeThreshold:0.###} | actif={options.PaintRockOnSteepSlopes} | {GetMaterialLabel(options.RockMaterialId)}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Mode : {(options.UseBlend ? "blend" : Anno1800IslandTool.Core.Localization.TextCatalog.T("replace dominant"))}, force={options.ClampedStrength}/31, empreintes cellules={(options.UseCellPatternTemplates ? Anno1800IslandTool.Core.Localization.TextCatalog.T("oui") : Anno1800IslandTool.Core.Localization.TextCatalog.T("non"))}"));
         sb.AppendLine();
         sb.AppendLine(BuildCoastStatsText(stats));
-        sb.AppendLine($"Cellules changées : {result.CellsChanged}, blocs MaterialIDs2 changés : {result.BlocksChanged}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Cellules changées : {result.CellsChanged}, blocs MaterialIDs2 changés : {result.BlocksChanged}"));
         if (result.AffectedBounds is not null)
         {
             var b = result.AffectedBounds.Value;
-            sb.AppendLine($"Bounds touchées : {b.Left},{b.Top} -> {b.Right},{b.Bottom}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Bounds touchées : {b.Left},{b.Top} -> {b.Right},{b.Bottom}"));
         }
         foreach (var message in result.Messages)
         {
@@ -1379,25 +1436,25 @@ public partial class TerrainMaterialMapWindow : Window
     }
 
     private static string BuildCoastStatsText(TerrainCoastTransitionStats stats)
-        => $"zones: eau profonde={stats.DeepWaterCells}, eau faible={stats.ShallowWaterCells}, plage côtière={stats.BeachCells}, terre basse={stats.LowLandCells}, roche={stats.RockCells}, ignorées={stats.SkippedCells}";
+        => Anno1800IslandTool.Core.Localization.TextCatalog.F($"zones: eau profonde={stats.DeepWaterCells}, eau faible={stats.ShallowWaterCells}, plage côtière={stats.BeachCells}, terre basse={stats.LowLandCells}, roche={stats.RockCells}, ignorées={stats.SkippedCells}");
     private string BuildSummaryText(IslandProject project, TerrainMaterialMap map, TerrainMaterialEditState editState)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"Île : {project.Metadata.IslandInternalName}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Île : {project.Metadata.IslandInternalName}"));
         sb.AppendLine($"Material map : {map.Width} x {map.Height}");
         sb.AppendLine($"MaterialIDBlockSize : {map.MaterialIdBlockSize}");
-        sb.AppendLine($"MaterialIDs2 : {map.PackedMaterialIds.Length} valeurs, attendu {map.ExpectedPackedMaterialIdCount}");
-        sb.AppendLine($"MaterialAlphas2 : {map.PackedMaterialAlphas.Length} valeurs, attendu {map.ExpectedPackedAlphaCount}");
-        sb.AppendLine($"MaterialSet : {project.MaterialSet?.FileName ?? project.Rd3d.MaterialSetFileName ?? "terra_01.xml implicite"} ({_materialsById.Count} matériaux lus, {_paletteRows.Count(r => r.IsTerrain)} terrain Type=0)");
-        sb.AppendLine($"Peinture copie de travail : opérations={editState.TotalPaintOperations}, cellules={editState.TotalCellsChanged}, blocs MaterialIDs2={editState.TotalBlocksChanged}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"MaterialIDs2 : {map.PackedMaterialIds.Length} valeurs, attendu {map.ExpectedPackedMaterialIdCount}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"MaterialAlphas2 : {map.PackedMaterialAlphas.Length} valeurs, attendu {map.ExpectedPackedAlphaCount}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"MaterialSet : {project.MaterialSet?.FileName ?? project.Rd3d.MaterialSetFileName ?? Anno1800IslandTool.Core.Localization.TextCatalog.T("terra_01.xml implicite")} ({_materialsById.Count} matériaux lus, {_paletteRows.Count(r => r.IsTerrain)} terrain Type=0)"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Peinture copie de travail : opérations={editState.TotalPaintOperations}, cellules={editState.TotalCellsChanged}, blocs MaterialIDs2={editState.TotalBlocksChanged}"));
         if (editState.AffectedBounds is not null)
         {
             var b = editState.AffectedBounds.Value;
-            sb.AppendLine($"Bounds touchées : {b.Left},{b.Top} -> {b.Right},{b.Bottom}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Bounds touchées : {b.Left},{b.Top} -> {b.Right},{b.Bottom}"));
         }
         if (_pickedCellPattern is not null)
         {
-            sb.AppendLine($"Pickup actif : cellule {_pickedCellPattern.SourceX},{_pickedCellPattern.SourceY} | dominant ID {_pickedCellPattern.DominantMaterialId} | slots {FormatMaterialIds(_pickedCellPattern.MaterialIds)}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Pickup actif : cellule {_pickedCellPattern.SourceX},{_pickedCellPattern.SourceY} | dominant ID {_pickedCellPattern.DominantMaterialId} | slots {FormatMaterialIds(_pickedCellPattern.MaterialIds)}"));
         }
         return sb.ToString();
     }
@@ -1448,9 +1505,9 @@ public partial class TerrainMaterialMapWindow : Window
     private string BuildPickedCellDetails(TerrainMaterialCellPattern pattern)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"Pickup cellule source : x={pattern.SourceX}, y={pattern.SourceY}");
-        sb.AppendLine($"Slot dominant : {pattern.DominantSlot}, Material ID={pattern.DominantMaterialId}, poids={pattern.DominantWeight}/31");
-        sb.AppendLine("Cette empreinte sera repeinte avec le mode StampPickedCell : slots MaterialIDs2 + alphas MaterialAlphas2.");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Pickup cellule source : x={pattern.SourceX}, y={pattern.SourceY}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Slot dominant : {pattern.DominantSlot}, Material ID={pattern.DominantMaterialId}, poids={pattern.DominantWeight}/31"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Cette empreinte sera repeinte avec le mode StampPickedCell : slots MaterialIDs2 + alphas MaterialAlphas2."));
         sb.AppendLine();
 
         for (var i = 0; i < TerrainMaterialPackEncoding.SlotCount; i++)
@@ -1473,13 +1530,13 @@ public partial class TerrainMaterialMapWindow : Window
         var blockIndex = _workingMap.GetMaterialIdBlockIndex(x, y);
         var alphaIndex = _workingMap.GetAlphaIndex(x, y);
 
-        sb.AppendLine($"Cellule material map : x={x}, y={y}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Cellule material map : x={x}, y={y}"));
         var worldHeight = TerrainCoastTransitionPainter.SampleHeightAtMaterialCell(_project.GameData.TerrainHeightMap, _workingMap, x, y);
         var slope = TerrainCoastTransitionPainter.EstimateLocalSlope(_project.GameData.TerrainHeightMap, _workingMap, x, y);
-        sb.AppendLine($"Hauteur monde GameData : {worldHeight:0.###} | pente locale approx : {slope:0.###}");
-        sb.AppendLine($"Bloc MaterialIDs2 : index={blockIndex}, packed={(blockIndex >= 0 && blockIndex < _workingMap.PackedMaterialIds.Length ? _workingMap.PackedMaterialIds[blockIndex].ToString(CultureInfo.InvariantCulture) : "n/a")}");
-        sb.AppendLine($"Texel MaterialAlphas2 : index={alphaIndex}, packed={(alphaIndex >= 0 && alphaIndex < _workingMap.PackedMaterialAlphas.Length ? _workingMap.PackedMaterialAlphas[alphaIndex].ToString(CultureInfo.InvariantCulture) : "n/a")}");
-        sb.AppendLine($"Slot dominant : {cell.DominantSlot}, Material ID={cell.DominantMaterialId}, poids={cell.DominantWeight}/31");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Hauteur monde GameData : {worldHeight:0.###} | pente locale approx : {slope:0.###}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Bloc MaterialIDs2 : index={blockIndex}, packed={(blockIndex >= 0 && blockIndex < _workingMap.PackedMaterialIds.Length ? _workingMap.PackedMaterialIds[blockIndex].ToString(CultureInfo.InvariantCulture) : "n/a")}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Texel MaterialAlphas2 : index={alphaIndex}, packed={(alphaIndex >= 0 && alphaIndex < _workingMap.PackedMaterialAlphas.Length ? _workingMap.PackedMaterialAlphas[alphaIndex].ToString(CultureInfo.InvariantCulture) : "n/a")}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Slot dominant : {cell.DominantSlot}, Material ID={cell.DominantMaterialId}, poids={cell.DominantWeight}/31"));
         sb.AppendLine();
 
         for (var i = 0; i < TerrainMaterialPackEncoding.SlotCount; i++)
@@ -1490,7 +1547,7 @@ public partial class TerrainMaterialMapWindow : Window
         }
 
         sb.AppendLine();
-        sb.AppendLine("Matériau dominant :");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Matériau dominant :"));
         sb.Append(BuildMaterialDetails(cell.DominantMaterialId));
         return sb.ToString();
     }
@@ -1499,11 +1556,11 @@ public partial class TerrainMaterialMapWindow : Window
     {
         var sb = new StringBuilder();
         sb.AppendLine($"Material ID : {materialId}");
-        sb.AppendLine($"Couleur debug : {ColorToHex(GetMaterialColor(materialId))}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Couleur debug : {ColorToHex(GetMaterialColor(materialId))}"));
 
         if (GetMaterial(materialId) is not { } material)
         {
-            sb.AppendLine("Matériau absent du materialset chargé.");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Matériau absent du materialset chargé."));
             return sb.ToString();
         }
 
@@ -1523,7 +1580,7 @@ public partial class TerrainMaterialMapWindow : Window
     {
         if (GetMaterial(id) is not { } material)
         {
-            return $"Material {id} (inconnu)";
+            return Anno1800IslandTool.Core.Localization.TextCatalog.F($"Material {id} (inconnu)");
         }
 
         return BuildMaterialLabel(material);

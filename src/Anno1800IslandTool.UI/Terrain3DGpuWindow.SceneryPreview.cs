@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Numerics;
 using System.Xml.Linq;
 using System.Windows.Threading;
@@ -21,7 +21,7 @@ public partial class Terrain3DGpuWindow
     private PhongMaterial? _oceanPreviewMaterial,_riverPreviewMaterial;
 
     private static SceneryData ReadPreviewScenery(string root,string[] files,string[] instances,string? gameData,
-        HashSet<string> slotGuids,GamePreviewDdsReader decoder,CancellationToken token)
+        HashSet<string> slotGuids,GamePreviewDdsReader decoder,CancellationToken token,bool enhanceColors)
     {
         var placements=new List<PreviewPlacement>();var missing=new HashSet<string>();
         foreach(var text in instances)
@@ -68,7 +68,7 @@ public partial class Terrain3DGpuWindow
                             texture=decoder.Read(part.Diffuse,1,256);
                             // Binary coverage avoids translucent leaf cards washing out the forest.
                             var pixels=(byte[])texture.Rgba.Clone();
-                            PreviewColor.Enhance(pixels);
+                            if(enhanceColors) PreviewColor.Enhance(pixels);
                             if(part.AlphaRef>0)for(int i=3;i<pixels.Length;i+=4)pixels[i]=pixels[i]<Math.Clamp(part.AlphaRef,.01f,.95f)*255? (byte)0:(byte)255;
                             textures[textureKey]=texture=texture with{Rgba=pixels};
                         }
@@ -192,6 +192,7 @@ public partial class Terrain3DGpuWindow
         {
             _waterAnimationTimer=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(50)};
             _waterAnimationTimer.Tick+=(_,_)=>{
+                if (BusyWork.IsBusy || !IsEnabled || !IsActive) return;
                 float t=(float)(_waterClock.Elapsed.TotalSeconds%3600);
                 if(GamePreviewWater.IsChecked==true && _oceanPreviewMaterial is not null)_oceanPreviewMaterial.UVTransform=new UVTransform(0,Vector2.One,new Vector2(t*.013f,t*.007f));
                 if(PreviewRiversCheck.IsChecked==true && _riverPreviewMaterial is not null)_riverPreviewMaterial.UVTransform=new UVTransform(0,Vector2.One,new Vector2(0,-t*.12f));

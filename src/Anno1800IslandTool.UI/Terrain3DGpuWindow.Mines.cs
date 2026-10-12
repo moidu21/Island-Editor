@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using System.Windows;
 using Anno1800IslandTool.Core.Common;
 using Anno1800IslandTool.Core.Terrain;
@@ -29,11 +29,11 @@ public partial class Terrain3DGpuWindow
             double height = _project.Rd3d.GridHeight > 0 ? _project.Rd3d.GridHeight : mapSize*32;
             var point = new Float3((float)(hit.X/width*mapSize),
                 TerrainHeightEncoding.LegacyFineHeightToWorldHeight(SceneYToDecodedHeight(hit.Y)),(float)(hit.Z/height*mapSize));
-            if (point.Y <= 0) throw new InvalidOperationException("Placez la mine sur un terrain émergé.");
+            if (point.Y <= 0) throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Placez la mine sur un terrain émergé."));
             if (_mineEntrance is null)
             {
                 _mineAsset = MineAssetComboBox.SelectedItem as MineSlotAsset
-                    ?? throw new InvalidOperationException("Choisissez une ressource.");
+                    ?? throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Choisissez une ressource."));
                 // Native entrances are placed at the centre of a gameplay cell.
                 _mineEntrance = new Float3(MathF.Floor(point.X)+.5f,point.Y,MathF.Floor(point.Z)+.5f);
             }
@@ -91,9 +91,9 @@ public partial class Terrain3DGpuWindow
         foreach(var slot in _project.Root.SlotObjects.Where(s=>mineGuids.Contains(s.ObjectGuid)))Cross(slot.Position);
         foreach(var slot in _project.Root.SlotObjects.Where(s=>DepositSlotService.IsDepositGuid(s.ObjectGuid)))
             DepositMarker(slot.Position,slot.ObjectGuid is "100849" or "101062" or "102498");
-        DepositStatusTextBlock.Text=$"En attente : {_pendingDeposits.Count(p=>p.Kind==DepositKind.Clay)} argile, {_pendingDeposits.Count(p=>p.Kind==DepositKind.Oil)} pétrole.";
+        DepositStatusTextBlock.Text=Anno1800IslandTool.Core.Localization.TextCatalog.F($"En attente : {_pendingDeposits.Count(p=>p.Kind==DepositKind.Clay)} argile, {_pendingDeposits.Count(p=>p.Kind==DepositKind.Oil)} pétrole.");
         ExistingMinePreviewModel.Geometry=new LineGeometry3D{Positions=positions,Indices=indices};
         ExistingMinePreviewModel.IsRendering=positions.Count>0;
-        MineStatusTextBlock.Text=$"{_pendingMines.Count} mine(s) en attente. " + (_mineEntrance is null ? "Prochain clic : entrée de la mine." : "Prochain clic : zone de travail dans la montagne.");
+        MineStatusTextBlock.Text=Anno1800IslandTool.Core.Localization.TextCatalog.F($"{_pendingMines.Count} mine(s) en attente. ") + (_mineEntrance is null ? Anno1800IslandTool.Core.Localization.TextCatalog.T("Prochain clic : entrée de la mine.") : Anno1800IslandTool.Core.Localization.TextCatalog.T("Prochain clic : zone de travail dans la montagne."));
     }
 }

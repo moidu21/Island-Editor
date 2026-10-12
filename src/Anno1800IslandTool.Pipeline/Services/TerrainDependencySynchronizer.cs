@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using Anno1800IslandTool.Core.Common;
@@ -33,7 +33,7 @@ public sealed class TerrainDependencySynchronizer
 
         if (heightMap.Width <= 1 || heightMap.Height <= 1 || heightMap.Samples is null || heightMap.Samples.Length == 0)
         {
-            report.Notes.Add("Heightmap vide ou incomplète : synchronisation des dépendances ignorée.");
+            report.Notes.Add(Anno1800IslandTool.Core.Localization.TextCatalog.T("Heightmap vide ou incomplète : synchronisation des dépendances ignorée."));
             return report;
         }
 
@@ -79,8 +79,8 @@ public sealed class TerrainDependencySynchronizer
 
         if (!report.HasAnyPositionUpdate)
         {
-            report.Notes.Add("Aucune position 3D ajustable trouvée dans la zone modifiée. Les grilles RD3D/GameData restent inchangées car l'édition ne change que la hauteur, pas l'emprise X/Z de l'île.");
-            report.Notes.Add("Les hauteurs GameData/NormalMaps sont traitées comme valeurs uint16 encodées; les positions Y sont synchronisées en hauteur décodée monde.");
+            report.Notes.Add(Anno1800IslandTool.Core.Localization.TextCatalog.T("Aucune position 3D ajustable trouvée dans la zone modifiée. Les grilles RD3D/GameData restent inchangées car l'édition ne change que la hauteur, pas l'emprise X/Z de l'île."));
+            report.Notes.Add(Anno1800IslandTool.Core.Localization.TextCatalog.T("Les hauteurs GameData/NormalMaps sont traitées comme valeurs uint16 encodées; les positions Y sont synchronisées en hauteur décodée monde."));
         }
 
         return report;
@@ -92,14 +92,14 @@ public sealed class TerrainDependencySynchronizer
         {
             project.Rd3d.GridWidth = Math.Max(1, heightMap.Width - 1);
             report.Rd3dGridFieldsAdjusted++;
-            report.Notes.Add($"GridWidth RD3D absent : valeur minimale synchronisée à {project.Rd3d.GridWidth}.");
+            report.Notes.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"GridWidth RD3D absent : valeur minimale synchronisée à {project.Rd3d.GridWidth}."));
         }
 
         if (project.Rd3d.GridHeight <= 0)
         {
             project.Rd3d.GridHeight = Math.Max(1, heightMap.Height - 1);
             report.Rd3dGridFieldsAdjusted++;
-            report.Notes.Add($"GridHeight RD3D absent : valeur minimale synchronisée à {project.Rd3d.GridHeight}.");
+            report.Notes.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"GridHeight RD3D absent : valeur minimale synchronisée à {project.Rd3d.GridHeight}."));
         }
     }
 
@@ -408,7 +408,7 @@ public sealed class TerrainDependencySynchronizer
             if (project.Rd3d.MaterialMapWidth > 0 && project.Rd3d.MaterialMapHeight > 0 &&
                 (block.Width != project.Rd3d.MaterialMapWidth || block.Height != project.Rd3d.MaterialMapHeight))
             {
-                report.GameplayGridWarnings.Add($"{pair.Key}: grille {block.Width}x{block.Height}, MaterialMap RD3D {project.Rd3d.MaterialMapWidth}x{project.Rd3d.MaterialMapHeight}.");
+                report.GameplayGridWarnings.Add(Anno1800IslandTool.Core.Localization.TextCatalog.F($"{pair.Key}: grille {block.Width}x{block.Height}, MaterialMap RD3D {project.Rd3d.MaterialMapWidth}x{project.Rd3d.MaterialMapHeight}."));
             }
         }
     }
@@ -444,24 +444,24 @@ public sealed class TerrainDependencySyncReport
     public string ToDisplayText()
     {
         var sb = new StringBuilder();
-        sb.AppendLine("Synchronisation terrain dépendant de la hauteur");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Synchronisation terrain dépendant de la hauteur"));
         sb.AppendLine($"Heightmap : {HeightMapWidth}x{HeightMapHeight}");
         if (DirtySampleBounds is not null)
         {
-            sb.AppendLine($"Zone sample : {DirtySampleBounds}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Zone sample : {DirtySampleBounds}"));
         }
         if (DirtyWorldBounds is not null)
         {
-            sb.AppendLine($"Zone monde : {DirtyWorldBounds}");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Zone monde : {DirtyWorldBounds}"));
         }
-        sb.AppendLine($"RD3D GridWidth/GridHeight corrigés : {Rd3dGridFieldsAdjusted}");
-        sb.AppendLine($"Root SlotObjects repositionnés en Y : {RootSlotPositionsAdjusted}");
-        sb.AppendLine($"GameData SpawnAreaPoints repositionnés en Y : {SpawnPositionsAdjusted}");
-        sb.AppendLine($"RD3D PropGrid positions 3D repositionnées en Y : {Rd3dPropGridPositionsAdjusted}");
-        sb.AppendLine($"Raw Root/GameData/RD3D positions 3D touchées : {RawRootPositionsAdjusted}/{RawGameDataPositionsAdjusted}/{RawRd3dPositionsAdjusted}");
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"RD3D GridWidth/GridHeight corrigés : {Rd3dGridFieldsAdjusted}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Root SlotObjects repositionnés en Y : {RootSlotPositionsAdjusted}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"GameData SpawnAreaPoints repositionnés en Y : {SpawnPositionsAdjusted}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"RD3D PropGrid positions 3D repositionnées en Y : {Rd3dPropGridPositionsAdjusted}"));
+        sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Raw Root/GameData/RD3D positions 3D touchées : {RawRootPositionsAdjusted}/{RawGameDataPositionsAdjusted}/{RawRd3dPositionsAdjusted}"));
         if (GameplayGridWarnings.Count > 0)
         {
-            sb.AppendLine("Avertissements grid/map/area :");
+            sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.T("Avertissements grid/map/area :"));
             foreach (var warning in GameplayGridWarnings.Take(6))
             {
                 sb.AppendLine($"- {warning}");

@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text.Json;
 using System.Xml.Linq;
 using Anno1800IslandTool.Core.Common;
@@ -11,7 +11,7 @@ namespace Anno1800IslandTool.Pipeline.Services;
 public sealed record MineSlotAsset(string Guid, string Label, string Region, string WorkAreaGuid,
     string Container = "GameObject", string WorkAreaContainer = "GameObject")
 {
-    public override string ToString() => $"{Label} — {Region}";
+    public override string ToString() => $"{Anno1800IslandTool.Core.Localization.TextCatalog.T(Label)} — {Anno1800IslandTool.Core.Localization.TextCatalog.T(Region)}";
 }
 public sealed record MineSlotPlacement(MineSlotAsset Asset, Float3 Entrance, Float3 Mountain);
 
@@ -19,7 +19,7 @@ public static class MineSlotService
 {
     private static Stream Resource(string file) => typeof(MineSlotService).Assembly.GetManifestResourceStream(
         "Anno1800IslandTool.Pipeline.Resources.Mines." + file)
-        ?? throw new InvalidOperationException("Ressource de mine absente : " + file);
+        ?? throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Ressource de mine absente : ") + file);
     public static IReadOnlyList<MineSlotAsset> Catalog { get; } = ReadCatalog();
     private static IReadOnlyList<MineSlotAsset> ReadCatalog()
     {
@@ -29,10 +29,10 @@ public static class MineSlotService
     public static Float3 TerrainPoint(IslandProject project, double x, double z)
     {
         if (!double.IsFinite(x) || !double.IsFinite(z) || x < 0 || z < 0 || x >= project.Root.MapSize || z >= project.Root.MapSize)
-            throw new ArgumentException("Le point doit se trouver dans les limites de l’île.");
+            throw new ArgumentException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Le point doit se trouver dans les limites de l’île."));
         var h = project.GameData.TerrainHeightMap;
         if (h.Width < 2 || h.Height < 2 || h.Samples.Length != h.Width * h.Height)
-            throw new InvalidOperationException("Les hauteurs de terrain ne sont pas disponibles.");
+            throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Les hauteurs de terrain ne sont pas disponibles."));
         double hx = x * (h.Width - 1) / project.Root.MapSize, hz = z * (h.Height - 1) / project.Root.MapSize;
         int ix = (int)hx, iz = (int)hz;
         float tx = (float)(hx - ix), tz = (float)(hz - iz);
@@ -42,23 +42,23 @@ public static class MineSlotService
     }
     public static void Validate(IslandProject project, MineSlotPlacement placement)
     {
-        if (!Catalog.Contains(placement.Asset)) throw new ArgumentException("Type de mine inconnu.");
+        if (!Catalog.Contains(placement.Asset)) throw new ArgumentException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Type de mine inconnu."));
         foreach (var p in new[] { placement.Entrance, placement.Mountain })
         {
             _ = TerrainPoint(project, p.X, p.Z);
-            if (!float.IsFinite(p.Y) || p.Y <= 0) throw new ArgumentException("Placer la mine et sa zone de travail au-dessus de l’eau.");
+            if (!float.IsFinite(p.Y) || p.Y <= 0) throw new ArgumentException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Placer la mine et sa zone de travail au-dessus de l’eau."));
         }
         double dx=placement.Entrance.X-placement.Mountain.X, dz=placement.Entrance.Z-placement.Mountain.Z;
-        if (dx*dx+dz*dz < 4) throw new ArgumentException("Éloigner la zone de travail d’au moins 2 cases de l’entrée.");
+        if (dx*dx+dz*dz < 4) throw new ArgumentException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Éloigner la zone de travail d’au moins 2 cases de l’entrée."));
     }
     public static IReadOnlyList<long> Add(IslandProject project, IReadOnlyList<MineSlotPlacement> placements)
     {
         if (placements.Count == 0) return Array.Empty<long>();
         foreach (var placement in placements) Validate(project, placement);
         // Build everything in a separate document before changing the project.
-        var document = XDocument.Parse(project.RawContent.GameDataText ?? throw new InvalidOperationException("GameData absent."));
+        var document = XDocument.Parse(project.RawContent.GameDataText ?? throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("GameData absent.")));
         XElement Container(string type) => document.Descendants(type).Elements("objects").FirstOrDefault()
-            ?? throw new InvalidOperationException($"Le conteneur {type}/objects est absent du GameData.");
+            ?? throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.F($"Le conteneur {type}/objects est absent du GameData."));
         var used = document.Descendants("ID").Select(e => long.TryParse(e.Value, out var id) ? id : 0)
             .Concat(project.Root.SlotObjects.Select(s=>s.ObjectId)).ToHashSet();
         long next = long.MinValue + 7_500_000;
@@ -73,7 +73,7 @@ public static class MineSlotService
             var mine=Object("Mine.xml",mineId,placement.Asset.Guid,a,direction);
             var work=Object("WorkArea.xml",workId,placement.Asset.WorkAreaGuid,b,direction);
             var points=Enumerable.Range(0,9).Select(i => TerrainPoint(project,b.X+(a.X-b.X)*i/8.0,b.Z+(a.Z-b.Z)*i/8.0)).ToArray();
-            if(points.Any(p=>p.Y<=0))throw new ArgumentException("Le trajet entre la mine et la montagne traverse l’eau.");
+            if(points.Any(p=>p.Y<=0))throw new ArgumentException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Le trajet entre la mine et la montagne traverse l’eau."));
             var curve=new XElement("BezierCurve");
             for(int i=0;i<points.Length;i++)
             {

@@ -1,4 +1,4 @@
-﻿namespace Anno1800IslandTool.Core.Validation;
+namespace Anno1800IslandTool.Core.Validation;
 
 public enum ValidationSeverity
 {

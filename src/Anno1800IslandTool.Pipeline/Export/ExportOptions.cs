@@ -1,4 +1,4 @@
-﻿namespace Anno1800IslandTool.Pipeline.Export;
+namespace Anno1800IslandTool.Pipeline.Export;
 
 public sealed class ExportOptions
 {

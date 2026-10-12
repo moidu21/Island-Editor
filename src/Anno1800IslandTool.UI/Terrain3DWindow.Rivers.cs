@@ -36,7 +36,7 @@ public partial class Terrain3DWindow
             IrrigationRadius: (float)river.IrrigationRadius, RiverSlots: slots));
         _project.GeneratedRiverBedDepths[id] = (float)river.BedDepth;
         _preserveDirectRiverMeshWritesOnNextValidation = CommitDirectTerrainMeshWrites(
-            "Rivière : hauteur locale, profondeur fixe, eau superposée aux berges et pages LOD conservées après peinture des matériaux.");
+            Anno1800IslandTool.Core.Localization.TextCatalog.T("Rivière : hauteur locale, profondeur fixe, eau superposée aux berges et pages LOD conservées après peinture des matériaux."));
         if (irrigatedBiome)
             return string.Format(System.Globalization.CultureInfo.CurrentCulture,
                 UiLocalizationManager.T("Rivière africaine créée (ID {0}) : profondeur locale fixe, eau et LOD synchronisés, ponts, irrigation et accroches prêts."), id);
@@ -46,7 +46,7 @@ public partial class Terrain3DWindow
                 : "Rivière créée (ID {0}) : profondeur locale fixe, eau raccordée aux berges, tous les LOD, RiverGrid et WaterFlow synchronisés."), id);
     }
 
-    private bool CommitDirectTerrainMeshWrites(string summary)
+    private bool CommitDirectTerrainMeshWrites(string summary, bool includeEmptyPages = false)
     {
         var touchedKeys = _project.HeightEditState.MeshVerticesTouched.Keys
             .Where(_project.MeshPages.ContainsKey)
@@ -54,7 +54,7 @@ public partial class Terrain3DWindow
         if (touchedKeys.Length == 0) return false;
 
         TerrainMeshNormalRebuilder.Rebuild(_project, touchedKeys);
-        var snapshots = _localRegenerator.SnapshotCurrentMeshPageWrites(_project, touchedKeys);
+        var snapshots = _localRegenerator.SnapshotCurrentMeshPageWrites(_project, touchedKeys, includeEmptyPages);
         if (snapshots.Count == 0) return false;
 
         _project.LocalRegeneration ??= new TerrainLocalRegenerationState

@@ -1,4 +1,4 @@
-﻿<Window x:Class="Anno1800IslandTool.UI.NativeIslandWindow"
+<Window x:Class="Anno1800IslandTool.UI.NativeIslandWindow"
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  Title="Îles du jeu et conversion" Width="960" Height="690" MinWidth="700" MinHeight="520" WindowStartupLocation="CenterOwner">
  <Grid Margin="16">

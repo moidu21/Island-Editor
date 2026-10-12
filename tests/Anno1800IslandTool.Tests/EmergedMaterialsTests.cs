@@ -1,4 +1,4 @@
-﻿using Anno1800IslandTool.Core.Common;
+using Anno1800IslandTool.Core.Common;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;
 using Anno1800IslandTool.Pipeline.Services;
@@ -7,6 +7,27 @@ using Xunit;
 namespace Anno1800IslandTool.Tests;
 public class EmergedMaterialsTests
 {
+    [Fact]
+    public void Imported_Ocean_Must_Be_Committed_Before_Material_Regeneration()
+    {
+        var p=Project();
+        Array.Fill(p.GameData.TerrainHeightMap.Samples,64f);
+        new ProjectTextRegenerator().RegenerateRd3dText(p);
+        var old=p.GameData.TerrainHeightMap;
+        var ocean=new CoarseHeightMap {Width=old.Width,Height=old.Height,
+            SampleEncoding=TerrainHeightSampleEncoding.GameDataRawUInt16,
+            Samples=Enumerable.Repeat((float)TerrainHeightEncoding.WorldHeightToGameDataRaw(-8),old.Samples.Length).ToArray()};
+        var material=p.Rd3d.MaterialMap.Clone();
+        ImportedTerrainMaterials.ResetSubmerged(material,ocean,3,1);
+        var editor=new IslandProjectEditor();
+        // Reproduce the former ordering: material validation sees the original land.
+        editor.ReplaceTerrainMaterialMap(p,material.Clone());
+        Assert.Equal(11,p.Rd3d.MaterialMap.GetDominantMaterialId(10,10));
+        editor.ReplaceCoarseHeightMap(p,ocean);
+        editor.ReplaceTerrainMaterialMap(p,material);
+        new ProjectTextRegenerator().RegenerateRd3dText(p);
+        Assert.Equal(3,p.Rd3d.MaterialMap.GetDominantMaterialId(10,10));
+    }
     public static IslandProject Project(int size=16)
     {
         var p=new IslandProject();IslandCanvasResizer.Resize(p,size);

@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Threading.Tasks;
 
 namespace Anno1800IslandTool.Pipeline.Services;
@@ -21,7 +21,7 @@ public static class DdsDxt1TextureConverter
 
         if (sourceDds is null || sourceDds.Length < 128 || !IsDds(sourceDds))
         {
-            summary = "DDS invalide ou trop court";
+            summary = Anno1800IslandTool.Core.Localization.TextCatalog.T("DDS invalide ou trop court");
             return false;
         }
 
@@ -29,7 +29,7 @@ public static class DdsDxt1TextureConverter
         var height = ReadInt32(sourceDds, 12);
         if (width <= 0 || height <= 0)
         {
-            summary = "Dimensions DDS invalides";
+            summary = Anno1800IslandTool.Core.Localization.TextCatalog.T("Dimensions DDS invalides");
             return false;
         }
 
@@ -42,12 +42,12 @@ public static class DdsDxt1TextureConverter
                 ReadInt32(sourceDds, 28) == 1 &&
                 ReadInt32(sourceDds, 108) == 0x04001000)
             {
-                summary = $"déjà DDS DXT1 classique {width}x{height}";
+                summary = Anno1800IslandTool.Core.Localization.TextCatalog.F($"déjà DDS DXT1 classique {width}x{height}");
                 return true;
             }
 
             // DXT1 valide mais entête différente : on conserve le flux compressé existant.
-            summary = $"DDS DXT1 existant conservé {width}x{height}";
+            summary = Anno1800IslandTool.Core.Localization.TextCatalog.F($"DDS DXT1 existant conservé {width}x{height}");
             return true;
         }
 
@@ -58,7 +58,7 @@ public static class DdsDxt1TextureConverter
         }
 
         normalizedDds = BuildDxt1Dds(width, height, pixels);
-        summary = $"RGB32 -> DDS DXT1 classique {width}x{height}, {sourceDds.Length} -> {normalizedDds.Length} octets";
+        summary = Anno1800IslandTool.Core.Localization.TextCatalog.F($"RGB32 -> DDS DXT1 classique {width}x{height}, {sourceDds.Length} -> {normalizedDds.Length} octets");
         changed = true;
         return true;
     }
@@ -84,14 +84,14 @@ public static class DdsDxt1TextureConverter
         var rgbBitCount = ReadInt32(dds, 88);
         if ((pfFlags & 0x00000040) == 0 || rgbBitCount != 32)
         {
-            summary = $"Format DDS non convertible automatiquement : flags PF=0x{pfFlags:X8}, RGBBits={rgbBitCount}";
+            summary = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Format DDS non convertible automatiquement : flags PF=0x{pfFlags:X8}, RGBBits={rgbBitCount}");
             return false;
         }
 
         var expectedPayload = width * height * 4;
         if (width <= 0 || height <= 0 || dds.Length < 128 + expectedPayload)
         {
-            summary = "DDS RGB32 incomplet";
+            summary = Anno1800IslandTool.Core.Localization.TextCatalog.T("DDS RGB32 incomplet");
             return false;
         }
 
@@ -101,7 +101,7 @@ public static class DdsDxt1TextureConverter
         var aMask = ReadUInt32(dds, 104);
         if (rMask == 0 || gMask == 0 || bMask == 0)
         {
-            summary = "DDS RGB32 sans masques RGB utilisables";
+            summary = Anno1800IslandTool.Core.Localization.TextCatalog.T("DDS RGB32 sans masques RGB utilisables");
             return false;
         }
 
@@ -120,7 +120,7 @@ public static class DdsDxt1TextureConverter
         });
 
         pixelsBgra32 = decodedPixelsBgra32;
-        summary = $"DDS RGB32 décodé {width}x{height}";
+        summary = Anno1800IslandTool.Core.Localization.TextCatalog.F($"DDS RGB32 décodé {width}x{height}");
         return true;
     }
 
