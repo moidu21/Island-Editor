@@ -1,4 +1,4 @@
-using System.Xml.Linq;
+﻿using System.Xml.Linq;
 using Anno1800IslandTool.Core.Common;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;
@@ -12,6 +12,21 @@ namespace Anno1800IslandTool.Tests;
 
 public class MineSlotTests
 {
+    [Theory]
+    [InlineData(0,10.5f,16.5f)]
+    [InlineData(90,16.5f,10.5f)]
+    [InlineData(180,10.5f,4.5f)]
+    [InlineData(270,4.5f,10.5f)]
+    public void OneClickPlacementRotatesWorkAreaAndSnapsEntrance(float angle,float x,float z)
+    {
+        var project=Project();
+        var placement=MineSlotService.OrientedPlacement(project,MineSlotService.Catalog[0],new(10.1f,5,10.9f),angle,6);
+        Assert.Equal(new Float3(10.5f,5,10.5f),placement.Entrance);
+        Assert.InRange(Math.Abs(placement.Mountain.X-x),0,.0001f);
+        Assert.InRange(Math.Abs(placement.Mountain.Z-z),0,.0001f);
+        MineSlotService.Add(project,new[]{placement});
+        Assert.Contains("1000253",project.RawContent.GameDataText);
+    }
     private static IslandProject Project()
     {
         var p = new IslandProject();

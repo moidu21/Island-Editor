@@ -1,4 +1,4 @@
-namespace Anno1800IslandTool.Pipeline.Services;
+﻿namespace Anno1800IslandTool.Pipeline.Services;
 
 /// <summary>Bounded independent FileDB processes; never share mutable interpreter state.</summary>
 public static class NativeConversionBatches

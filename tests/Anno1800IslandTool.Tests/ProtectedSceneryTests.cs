@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Pipeline.Services;
 using Xunit;
@@ -7,6 +7,28 @@ namespace Anno1800IslandTool.Tests;
 
 public class ProtectedSceneryTests
 {
+    [Fact]
+    public void SameResourceCanBePlacedWithBothProtectionSettings()
+    {
+        string root=Path.Combine(Path.GetTempPath(),Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root,"graphics"));
+        try
+        {
+            var original="<Prop><Indestructible>1</></>";
+            File.WriteAllText(Path.Combine(root,"graphics/rock.prp"),original);
+            var project=new IslandProject{RootFilePath="island.xml"};
+            project.RawContent.RootText="<Root><SourceMap>data/islands/test/test.a7me</SourceMap></Root>";
+            project.RawContent.Rd3dText="<Root><PropGrid><FileNames/><Instances/></PropGrid></Root>";
+            ProtectedScenery.Add(project,[new("data/graphics/rock.prp",new(1,2,3),45,2,false),new("data/graphics/rock.prp",new(4,5,6),90,.5f,true)],root);
+            Assert.Equal(2,project.Rd3d.PropGrid.FileNames.Count);
+            Assert.Equal(2,project.Rd3d.PropGrid.Instances.Count);
+            Assert.Contains(">1<",Encoding.UTF8.GetString(project.GeneratedBinaryFileReplacements["_protected_props/data/graphics/rock.prp"]));
+            Assert.Contains(">0<",Encoding.UTF8.GetString(project.GeneratedBinaryFileReplacements["_destructible_props/data/graphics/rock.prp"]));
+            Assert.All(project.Rd3d.PropGrid.FileNames,f=>Assert.Equal("data/graphics/rock.prp",ProtectedScenery.PreviewResource(f)));
+            Assert.Equal(original,File.ReadAllText(Path.Combine(root,"graphics/rock.prp")));
+        }
+        finally{Directory.Delete(root,true);}
+    }
     [Theory]
     [InlineData("<Prop><Indestructible>0</><MeshFileName>a.rdm</></>")]
     [InlineData("<Prop><Indestructible>0</Indestructible><MeshFileName>a.rdm</MeshFileName></Prop>")]

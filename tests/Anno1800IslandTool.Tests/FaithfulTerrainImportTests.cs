@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using System.Text.Json;
 using System.Xml.Linq;
 using Anno1800IslandTool.Core.Common;

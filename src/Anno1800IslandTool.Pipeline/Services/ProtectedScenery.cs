@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Anno1800IslandTool.Core.Models;
@@ -12,17 +12,23 @@ public static class ProtectedScenery
     // Preview the original resource: geometry and textures are unchanged.
     public static string PreviewResource(string file)
     {
-        int at = file.IndexOf("/" + Folder, StringComparison.OrdinalIgnoreCase);
-        return at < 0 ? file : file[(at + Folder.Length + 1)..];
+        foreach (var folder in new[] { Folder, "_destructible_props/" })
+        {
+            int at = file.IndexOf("/" + folder, StringComparison.OrdinalIgnoreCase);
+            if (at >= 0) return file[(at + folder.Length + 1)..];
+        }
+        return file;
     }
 
-    public static byte[] MakeIndestructible(byte[] resource)
+    public static byte[] MakeIndestructible(byte[] resource) => SetIndestructible(resource, true);
+
+    public static byte[] SetIndestructible(byte[] resource, bool indestructible)
     {
         var text = Encoding.UTF8.GetString(resource);
         var field = new Regex(@"(<Indestructible>)[^<]*(</(?:Indestructible)?>)");
         if (field.Matches(text).Count != 1)
             throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Le décor ne possède pas un champ Indestructible unique."));
-        return Encoding.UTF8.GetBytes(field.Replace(text, "${1}1${2}"));
+        return Encoding.UTF8.GetBytes(field.Replace(text, "${1}" + (indestructible ? "1" : "0") + "${2}"));
     }
 
     public static void Add(IslandProject project, IReadOnlyList<SceneryPlacement> placements, string dataRoot)
@@ -43,8 +49,8 @@ public static class ProtectedScenery
             if (!file.StartsWith("data/", StringComparison.OrdinalIgnoreCase) || file.Split('/').Contains("..")
                 || !file.EndsWith(".prp", StringComparison.OrdinalIgnoreCase))
                 throw new ArgumentException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Invalid prop resource."));
-            string relative = Folder + file;
-            files[archiveDirectory + relative] = MakeIndestructible(File.ReadAllBytes(Path.Combine(dataRoot, file[5..])));
+            string relative = (item.Destructible ? "_destructible_props/" : Folder) + file;
+            files[archiveDirectory + relative] = SetIndestructible(File.ReadAllBytes(Path.Combine(dataRoot, file[5..])), !item.Destructible);
             next.Add(item with { File = source[..(slash + 1)] + relative });
         }
         SceneryPlacementService.Add(project, next);

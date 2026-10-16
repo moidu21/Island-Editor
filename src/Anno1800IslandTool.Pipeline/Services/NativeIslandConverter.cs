@@ -1,4 +1,4 @@
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Text.Json;
 
@@ -81,6 +81,14 @@ public sealed class NativeIslandConverter(IslandTools tools, IslandToolProcess p
                 (!relative.Contains('/')&&Path.GetFileNameWithoutExtension(relative).Equals(name,StringComparison.OrdinalIgnoreCase))))continue;
             var target=GameIslandCatalog.SafePath(decoded,relative);Directory.CreateDirectory(Path.GetDirectoryName(target)!);File.Copy(file,target);
         }
+        var surfaceManifest=Path.Combine(source,SurfaceDetailExport.Manifest);
+        if(File.Exists(surfaceManifest))
+        {
+            var manifestTarget=Path.Combine(decoded,SurfaceDetailExport.Manifest);Directory.CreateDirectory(Path.GetDirectoryName(manifestTarget)!);File.Copy(surfaceManifest,manifestTarget,true);
+            for(var ancestor=new DirectoryInfo(source);ancestor is not null;ancestor=ancestor.Parent)
+                if(Directory.Exists(Path.Combine(ancestor.FullName,SurfaceDetailExport.TextureRoot)))
+                {SurfaceDetailExport.CopyAssets(ancestor.FullName,decoded);break;}
+        }
         var bundle=Path.Combine(decoded,name); Directory.CreateDirectory(bundle);
         await process.RdaAsync(decoded,["extract","-f",Path.ChangeExtension(infoPath,"a7m"),"-o",bundle,"--filter",".*","-y","-n"],token);
         foreach(var component in new[]{"rd3d","gamedata"})
@@ -153,11 +161,14 @@ public sealed class NativeIslandConverter(IslandTools tools, IslandToolProcess p
         foreach(var file in Directory.GetFiles(root,"*",SearchOption.AllDirectories))
         {
             var rel=Path.GetRelativePath(root,file).Replace('\\','/');
-            if(rel.StartsWith("_anno1800islandtool/",StringComparison.OrdinalIgnoreCase))continue;
+            if(rel.StartsWith("_anno1800islandtool/",StringComparison.OrdinalIgnoreCase)||SurfaceDetailExport.IsOwned(rel))continue;
             var ext=Path.GetExtension(file).ToLowerInvariant();
             if(ext is not (".tmc" or ".ctt" or ".dds" or ".png" or ".a7me" or ".prp"))continue;
             var target=GameIslandCatalog.SafePath(output,rel);Directory.CreateDirectory(Path.GetDirectoryName(target)!);File.Copy(file,target,true);
         }
+        SurfaceDetailExport.CopyAssets(root,Path.Combine(work,"compiled"),forGame:true);
+        var surfaceManifest=Path.Combine(root,SurfaceDetailExport.Manifest);
+        if(File.Exists(surfaceManifest)){var destination=Path.Combine(output,SurfaceDetailExport.Manifest);Directory.CreateDirectory(Path.GetDirectoryName(destination)!);File.Copy(surfaceManifest,destination,true);}
         foreach(var nameHelper in new[]{"addtoasset.xml","formaptemplate.xml","formaptemplate_filedb.xml"})
         { var helper=Directory.GetFiles(input,nameHelper,SearchOption.AllDirectories).FirstOrDefault();if(helper is not null)File.Copy(helper,Path.Combine(work,"compiled",nameHelper)); }
         var integrationNotes=Directory.GetFiles(input,"integration.txt",SearchOption.AllDirectories)

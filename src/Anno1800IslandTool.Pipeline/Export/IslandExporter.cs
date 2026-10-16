@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Text;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;
@@ -52,11 +52,13 @@ public sealed class IslandExporter : IIslandWriter
 
         using var outputArchive = ZipFile.Open(outputArchivePath, ZipArchiveMode.Create);
 
-        foreach (var core in coreWrites)
+        var surfaceWrites = coreWrites.ToDictionary(c => c.Path, c => Encoding.UTF8.GetBytes(c.Text));
+        SurfaceDetailExport.Overlay(project, surfaceWrites);
+        foreach (var core in surfaceWrites)
         {
-            var entry = outputArchive.CreateEntry(BuildTargetArchivePath(project, core.Path), CompressionLevel.Optimal);
-            using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(false));
-            writer.Write(core.Text);
+            var entry = outputArchive.CreateEntry(BuildTargetArchivePath(project, core.Key), CompressionLevel.Optimal);
+            using var stream = entry.Open();
+            stream.Write(core.Value);
         }
 
         foreach (var write in normalWrites)
@@ -168,12 +170,14 @@ public sealed class IslandExporter : IIslandWriter
     {
         ArgumentNullException.ThrowIfNull(project);
         options ??= new ExportOptions();
+        using var progress = new ExportPreparationProgress(options.Progress);
+        progress.Stage("Préparation : vérification du terrain et des matériaux");
 
         // v42.9.1 : l'export doit valider les textes réellement exportés, pas un
         // ValidationReport potentiellement obsolète calculé avant RegenerateRd3dText().
         // Sinon les HasMeshArray LOD2..LOD8 peuvent être signalés invalides alors que
         // l'exporter les corrige juste après, ce qui annule le ZIP à tort.
-        RefreshGeneratedCoreTextsAndValidation(project);
+        RefreshGeneratedCoreTextsAndValidation(project, progress);
 
         if (options.FailOnValidationErrors && project.ValidationReport.HasErrors)
         {
@@ -200,7 +204,9 @@ public sealed class IslandExporter : IIslandWriter
         using var sourceArchive = ZipFile.OpenRead(project.Metadata.SourceArchivePath);
         using var outputArchive = ZipFile.Open(outputArchivePath, ZipArchiveMode.Create);
 
-        var replacements = CollectReplacementContent(project, options);
+        var replacements = CollectReplacementContent(project, options, progress);
+        progress.Stage("Préparation : fichiers d’intégration et rapports");
+        SurfaceDetailExport.Overlay(project, replacements);
         foreach (var helper in IslandIntegrationTemplates.Create(project))
             replacements[helper.Key] = Encoding.UTF8.GetBytes(helper.Value);
         replacements["_anno1800islandtool/river-beds.json"] = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(project.GeneratedRiverBedDepths);
@@ -210,10 +216,13 @@ public sealed class IslandExporter : IIslandWriter
         }
         var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        progress.Stage("Préparation : écriture de l’archive intermédiaire");
+        int sourceDone=0;
         foreach (var sourceEntry in sourceArchive.Entries)
         {
+            if(sourceDone++ % 64 == 0) progress.Count(sourceDone-1, sourceArchive.Entries.Count);
             var normalizedSourcePath = sourceEntry.FullName.Replace('\\', '/');
-            if (GeneratedExportReports.Contains(normalizedSourcePath) || IsSuppressedTerrainPath(project, normalizedSourcePath))
+            if (SurfaceDetailExport.IsOwned(normalizedSourcePath) || GeneratedExportReports.Contains(normalizedSourcePath) || IsSuppressedTerrainPath(project, normalizedSourcePath))
             {
                 continue;
             }
@@ -242,6 +251,8 @@ public sealed class IslandExporter : IIslandWriter
             }
         }
 
+        progress.Count(sourceArchive.Entries.Count, sourceArchive.Entries.Count);
+        progress.Stage("Préparation : ajout des fichiers générés");
         foreach (var pair in replacements.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
         {
             var targetPath = BuildTargetArchivePath(project, pair.Key);
@@ -275,6 +286,7 @@ public sealed class IslandExporter : IIslandWriter
             }
         }
 
+        progress.Stage("Préparation : rapports et finalisation de l’archive");
         if (options.IncludeValidationReport)
         {
             var path = "_anno1800islandtool/validation-report.txt";
@@ -414,20 +426,24 @@ public sealed class IslandExporter : IIslandWriter
         };
     }
 
-    private static void RefreshGeneratedCoreTextsAndValidation(IslandProject project)
+    private static void RefreshGeneratedCoreTextsAndValidation(IslandProject project, ExportPreparationProgress? progress = null)
     {
         TerrainMaterialMapCoverageSanitizer.EnsureNoZeroCoverageTexels(project.Rd3d.MaterialMap);
 
         var textRegenerator = new ProjectTextRegenerator();
+        progress?.Stage("Préparation : métadonnées de l’île");
         textRegenerator.RegenerateRootText(project);
         textRegenerator.RegenerateAnnoEditorLevelText(project);
+        progress?.Stage("Préparation : données du terrain et des LOD");
         textRegenerator.RegenerateRd3dText(project);
+        progress?.Stage("Préparation : grilles et données de construction");
         textRegenerator.RegenerateGameDataText(project);
         if (project.MaterialSet is not null)
         {
             textRegenerator.RegenerateMaterialSetText(project);
         }
 
+        progress?.Stage("Préparation : validation du projet");
         project.ValidationReport = new IslandValidator().Validate(project);
     }
 
@@ -456,7 +472,7 @@ public sealed class IslandExporter : IIslandWriter
             + suffix;
     }
 
-    private static Dictionary<string, byte[]> CollectReplacementContent(IslandProject project, ExportOptions options)
+    private static Dictionary<string, byte[]> CollectReplacementContent(IslandProject project, ExportOptions options, ExportPreparationProgress progress)
     {
         var replacements = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
 
@@ -467,9 +483,12 @@ public sealed class IslandExporter : IIslandWriter
         TerrainMaterialMapCoverageSanitizer.EnsureNoZeroCoverageTexels(project.Rd3d.MaterialMap);
 
         var textRegenerator = new ProjectTextRegenerator();
+        progress?.Stage("Préparation : métadonnées de l’île");
         textRegenerator.RegenerateRootText(project);
         textRegenerator.RegenerateAnnoEditorLevelText(project);
+        progress?.Stage("Préparation : données du terrain et des LOD");
         textRegenerator.RegenerateRd3dText(project);
+        progress?.Stage("Préparation : grilles et données de construction");
         textRegenerator.RegenerateGameDataText(project);
         if (project.MaterialSet is not null)
         {
@@ -490,7 +509,7 @@ public sealed class IslandExporter : IIslandWriter
             }
         }
 
-        var shouldRegenerateTintMaps = project.EmergedMaterialBounds is not null || project.HeightEditState?.HasGeometryEdits == true ||
+        var shouldRegenerateTintMaps = project.SurfaceDetails?.TintDetails is not null || project.EmergedMaterialBounds is not null || project.HeightEditState?.HasGeometryEdits == true ||
             (project.LocalRegeneration?.GeneratedTintMapWrites.Any(write => write.HasContent) == true);
 
         // Les tintmaps source sont des données dérivées délicates. Une conversion de
@@ -500,6 +519,7 @@ public sealed class IslandExporter : IIslandWriter
         // 1) normalisation DXT1 conservatrice des pages source si nécessaire ;
         // 2) export des GeneratedTintMapWrites de validation ;
         // 3) synchronisation finale MaterialMap -> tintmaps pour les LOD distants.
+        progress.Stage("Préparation : lecture et normalisation des tintmaps");
         foreach (var tintMapPage in shouldRegenerateTintMaps ? project.TintMapPages.Values : Enumerable.Empty<TintMapPage>())
         {
             if (string.IsNullOrWhiteSpace(tintMapPage.OriginalRelativePath) || tintMapPage.RawDdsBytes.Length == 0)
@@ -518,6 +538,7 @@ public sealed class IslandExporter : IIslandWriter
             }
         }
 
+        progress.Stage("Préparation : pages de terrain et normalmaps");
         if (options.AddGeneratedTerrainEntriesWhenMissing)
         {
             foreach (var generatedNormalMap in project.LocalRegeneration?.GeneratedNormalMapWrites ?? Enumerable.Empty<RegeneratedNormalMapWrite>())
@@ -545,10 +566,11 @@ public sealed class IslandExporter : IIslandWriter
             }
         }
 
+        progress.Stage(shouldRegenerateTintMaps ? "Préparation : génération des tintmaps et de leurs LOD" : "Préparation : conservation des tintmaps existantes");
         var tintSyncSummary = Anno1800IslandTool.Core.Localization.TextCatalog.T("Tintmaps source conservées : aucune édition géométrique.");
         var syncedTintMaps = shouldRegenerateTintMaps
             ? TerrainTintMapExportSynchronizer.BuildAllTintMapReplacements(project, out tintSyncSummary,
-                onlyMaterialRepairs: project.EmergedMaterialBounds is not null && project.HeightEditState?.HasGeometryEdits != true &&
+                onlyMaterialRepairs: project.SurfaceDetails?.TintDetails is null && project.EmergedMaterialBounds is not null && project.HeightEditState?.HasGeometryEdits != true &&
                     project.LocalRegeneration?.GeneratedTintMapWrites.Any(w => w.HasContent) != true)
             : new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
         foreach (var pair in syncedTintMaps)

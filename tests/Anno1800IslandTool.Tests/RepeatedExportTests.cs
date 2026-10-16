@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Pipeline.Export;
 using Anno1800IslandTool.Pipeline.Import;

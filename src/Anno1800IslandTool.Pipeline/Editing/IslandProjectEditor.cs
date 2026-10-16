@@ -1,4 +1,4 @@
-using Anno1800IslandTool.Core.Common;
+﻿using Anno1800IslandTool.Core.Common;
 using Anno1800IslandTool.Core.Enums;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;

@@ -1,4 +1,4 @@
-using Xunit;
+﻿using Xunit;
 using Anno1800IslandTool.Pipeline.Services;
 namespace Anno1800IslandTool.Tests;
 public class RdaResourceTests
@@ -29,5 +29,10 @@ public class RdaResourceTests
   Assert.All(names, n => Assert.True(pattern.IsMatch(n)));
   Assert.False(pattern.IsMatch("data/ab.dds"));
   Assert.Empty(RdaGameResources.BuildBatches([]));
+ }
+ [Fact] public void NormalExtractionExcludesOtherTextureChannelsAndEscapingPaths()
+ {
+  var names=RdaGameResources.NormalReferences("<DiffuseFileName>data/diff.psd</DiffuseFileName><NormalFileName>data/rock_norm.psd</NormalFileName><HeightFileName>data/height.psd</HeightFileName><NormalFileName>data/../escape.psd</NormalFileName>");
+  Assert.Equal(new[]{"data/rock_norm_0.dds","data/rock_norm.dds"},names);
  }
 }

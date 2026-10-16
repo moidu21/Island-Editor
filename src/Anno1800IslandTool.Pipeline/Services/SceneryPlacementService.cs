@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Xml.Linq;
 using Anno1800IslandTool.Core.Common;
 using Anno1800IslandTool.Core.Models;
@@ -6,7 +6,7 @@ using Anno1800IslandTool.Pipeline.Editing;
 
 namespace Anno1800IslandTool.Pipeline.Services;
 
-public sealed record SceneryPlacement(string File,Float3 Position,float RotationDegrees,float Scale);
+public sealed record SceneryPlacement(string File,Float3 Position,float RotationDegrees,float Scale,bool Destructible=false);
 public static class SceneryPlacementService
 {
     public static string Serialize(SceneryPlacement item,int index)

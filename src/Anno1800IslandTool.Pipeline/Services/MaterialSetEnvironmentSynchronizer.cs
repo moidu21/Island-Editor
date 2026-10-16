@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Text.RegularExpressions;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;

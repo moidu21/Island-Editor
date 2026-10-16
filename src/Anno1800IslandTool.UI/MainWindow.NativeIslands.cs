@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using Anno1800IslandTool.Core.Performance;
 using Anno1800IslandTool.Pipeline.Import;
 

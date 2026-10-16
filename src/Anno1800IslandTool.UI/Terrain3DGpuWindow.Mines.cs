@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using System.Windows;
 using Anno1800IslandTool.Core.Common;
 using Anno1800IslandTool.Core.Terrain;
@@ -30,20 +30,9 @@ public partial class Terrain3DGpuWindow
             var point = new Float3((float)(hit.X/width*mapSize),
                 TerrainHeightEncoding.LegacyFineHeightToWorldHeight(SceneYToDecodedHeight(hit.Y)),(float)(hit.Z/height*mapSize));
             if (point.Y <= 0) throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Placez la mine sur un terrain émergé."));
-            if (_mineEntrance is null)
-            {
-                _mineAsset = MineAssetComboBox.SelectedItem as MineSlotAsset
-                    ?? throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Choisissez une ressource."));
-                // Native entrances are placed at the centre of a gameplay cell.
-                _mineEntrance = new Float3(MathF.Floor(point.X)+.5f,point.Y,MathF.Floor(point.Z)+.5f);
-            }
-            else
-            {
-                var placement = new MineSlotPlacement(_mineAsset!,_mineEntrance.Value,point);
-                MineSlotService.Validate(_project,placement);
-                _pendingMines.Add(placement);
-                _mineEntrance=null;_mineAsset=null;
-            }
+            var placement = CursorMinePlacement(hit);
+            MineSlotService.Validate(_project,placement);
+            _pendingMines.Add(placement);
             RefreshMinePreview();
         }
         catch(Exception ex) { StatusTextBlock.Text=ex.Message; }
@@ -60,8 +49,8 @@ public partial class Terrain3DGpuWindow
         if(_pendingMines.Count==0)return;
         // Validation has synchronized the edited GPU terrain into the gameplay heights.
         var placements=_pendingMines.Select(m=>m with {
-            Entrance=MineSlotService.TerrainPoint(_project,m.Entrance.X,m.Entrance.Z),
-            Mountain=MineSlotService.TerrainPoint(_project,m.Mountain.X,m.Mountain.Z)}).ToArray();
+            Entrance=OnVisibleTerrain(m.Entrance),
+            Mountain=OnVisibleTerrain(m.Mountain) with { Y=OnVisibleTerrain(m.Mountain).Y+m.WorkAreaGroundOffset }}).ToArray();
         MineSlotService.Add(_project,placements);
         _pendingMines.Clear();RefreshMinePreview();
     }
@@ -94,6 +83,6 @@ public partial class Terrain3DGpuWindow
         DepositStatusTextBlock.Text=Anno1800IslandTool.Core.Localization.TextCatalog.F($"En attente : {_pendingDeposits.Count(p=>p.Kind==DepositKind.Clay)} argile, {_pendingDeposits.Count(p=>p.Kind==DepositKind.Oil)} pétrole.");
         ExistingMinePreviewModel.Geometry=new LineGeometry3D{Positions=positions,Indices=indices};
         ExistingMinePreviewModel.IsRendering=positions.Count>0;
-        MineStatusTextBlock.Text=Anno1800IslandTool.Core.Localization.TextCatalog.F($"{_pendingMines.Count} mine(s) en attente. ") + (_mineEntrance is null ? Anno1800IslandTool.Core.Localization.TextCatalog.T("Prochain clic : entrée de la mine.") : Anno1800IslandTool.Core.Localization.TextCatalog.T("Prochain clic : zone de travail dans la montagne."));
+        MineStatusTextBlock.Text=Anno1800IslandTool.Core.Localization.TextCatalog.F($"{_pendingMines.Count} mine(s) en attente. ") + Anno1800IslandTool.Core.Localization.TextCatalog.T("Molette : rotation. Clic gauche : placer la mine.");
     }
 }

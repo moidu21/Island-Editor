@@ -1,4 +1,4 @@
-using System.Xml.Linq;
+﻿using System.Xml.Linq;
 using Anno1800IslandTool.Core.Models;
 namespace Anno1800IslandTool.Pipeline.Export;
 
@@ -29,6 +29,22 @@ public static class IslandIntegrationTemplates
             new XElement("Rotation90","3"),new XElement("MineSlotMapping"),
             new XElement("RandomIslandConfig",new XElement("value",
                 new XElement("Type",new XElement("id","Normal")),new XElement("Difficulty",new XElement("id","Normal")))));
+        var materialName = (project.Rd3d.MaterialSetFileName ?? project.EffectiveMaterialSetName)
+            .Replace('\\', '/').Split('/').Last();
+        var arctic = materialName.StartsWith("arctic", StringComparison.OrdinalIgnoreCase);
+        var assetText = asset.ToString();
+        var arcticNote = Anno1800IslandTool.Core.Localization.TextCatalog.T("Arctique : conserver Normal par défaut. Pour Starter, remplacer Type/id par Starter et ajouter IslandLabel = starter_island dans Element. Conserver RandomizeFertilities = 1. Les correctifs de fertilités sont fournis dans addtoasset.xml pour Normal et Starter.");
+        if (arctic)
+        {
+            element.Element("Rotation90")!.AddAfterSelf(
+                new XElement("FertilityGuids"), new XElement("RandomizeFertilities", "1"));
+            element.Add(new XComment(arcticNote));
+            // Preserve vanilla eligibility and extend the confirmed pools to large islands.
+            assetText += Environment.NewLine + FertilitySizePatch(
+                "116937,116938,116939,116940,115977,116933,116935,116936,116927,116929,116930,116932", "Small;Large");
+            assetText += Environment.NewLine + FertilitySizePatch(
+                "115967,117055,117056,117060,117061,115969,117063,117064,117065,117066,115970,117067,117068,117069,117070", "Medium;Large");
+        }
         var fixedElement=new XElement(element);
         var mapping=fixedElement.Element("MineSlotMapping")!;
         var unresolved=0;
@@ -65,10 +81,15 @@ public static class IslandIntegrationTemplates
             +Anno1800IslandTool.Core.Localization.TextCatalog.T("Une MineSlotMapping non vide désactive le tirage de tous les gisements. Les régions doivent disposer des bâtiments adaptés aux ressources choisies. ")
             +Anno1800IslandTool.Core.Localization.TextCatalog.T("Le type Normal évite les conditions de libellé propres aux îles Starter d’Enbesa. ")
             +Anno1800IslandTool.Core.Localization.TextCatalog.T("Les ObjectId sont signés Int64 pour a7tinfo. Testez dans une nouvelle partie.");
+        if(arctic) instructions += " " + arcticNote;
         if(unresolved>0) instructions += Anno1800IslandTool.Core.Localization.TextCatalog.F($" ATTENTION : {unresolved} mine(s) sans type concret : le modèle de gisements fixes contient CHANGEME_SLOT_GUID et doit être complété avant compilation. Le modèle tout aléatoire reste prêt à utiliser.");
-        return new Dictionary<string,string>{["addtoasset.xml"]=asset.ToString(),
+        return new Dictionary<string,string>{["addtoasset.xml"]=assetText,
             ["formaptemplate.xml"]=new XElement("TemplateElement",element).ToString(),
             ["formaptemplate_filedb.xml"]=new XElement("TemplateElement",fixedElement).ToString(),
             ["_anno1800islandtool/integration.txt"]=instructions};
     }
+    private static XElement FertilitySizePatch(string guids, string sizes) =>
+        new("ModOp", new XAttribute("Type", "replace"), new XAttribute("GUID", guids),
+            new XAttribute("Path", "/Values/ResourceSetCondition/AllowedIslandSize"),
+            new XElement("AllowedIslandSize", sizes));
 }

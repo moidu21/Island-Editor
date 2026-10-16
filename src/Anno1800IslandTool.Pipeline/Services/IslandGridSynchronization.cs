@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Anno1800IslandTool.Core.Models;

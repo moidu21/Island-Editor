@@ -1,4 +1,4 @@
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:hx="http://helix-toolkit.org/wpf/SharpDX" x:Class="Anno1800IslandTool.UI.Terrain3DGpuWindow" Title="Terrain 3D GPU v46.156" Width="1500" Height="920" MinWidth="1050" MinHeight="680" WindowStartupLocation="CenterOwner">
+﻿<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:hx="http://helix-toolkit.org/wpf/SharpDX" x:Class="Anno1800IslandTool.UI.Terrain3DGpuWindow" Title="Terrain 3D GPU v46.173" Width="1500" Height="920" MinWidth="1050" MinHeight="680" WindowStartupLocation="CenterOwner">
   <Grid Margin="10">
     <Grid.ColumnDefinitions>
       <ColumnDefinition Width="330"/>
@@ -12,6 +12,10 @@
           <Button Height="36" Margin="0,4,0,6" FontWeight="Bold" Click="ValidateEntireTerrainButton_Click">Valider tout le terrain</Button>
           <Button Height="38" Margin="0,4,0,6" FontWeight="Bold" Click="ApplyButton_Click">Valider et fermer — prêt pour export</Button>
           <Button Height="34" Click="CancelButton_Click" ToolTip="Annule uniquement les retouches non validées. Les plages, empreintes et validations déjà appliquées sont conservées.">Fermer sans valider les retouches</Button>
+        </StackPanel>
+        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+          <TextBlock x:Name="RegisteredCoastStatus" Text="Vérification des côtes…" TextWrapping="Wrap"/>
+          <CheckBox x:Name="ShowRegisteredCoasts" Content="Afficher les zones côtières enregistrées" Checked="RegisteredCoastsChanged" Unchecked="RegisteredCoastsChanged" Margin="0,5,0,0" ToolTip="Tracé cyan : côtes constructibles enregistrées dans le projet."/>
         </StackPanel>
         <StackPanel x:Name="EditingNavigationPanel" DockPanel.Dock="Top">
           <GroupBox Header="Outil actif" Margin="0,0,0,10">
@@ -114,9 +118,10 @@
                     <TextBlock Text="Modèle" Margin="0,6,0,0"/>
                     <ComboBox x:Name="SceneryModel" DisplayMemberPath="Label" SelectedValuePath="File" IsTextSearchEnabled="True" MaxDropDownHeight="350" SelectionChanged="SceneryModel_Changed"/>
                     <Button Content="Actualiser la liste des décors" Click="RefreshSceneryCatalog_Click" Margin="0,6,0,6"/>
-                    <TextBlock Text="Rotation (degrés)"/><TextBox x:Name="SceneryRotation" Text="0"/>
-                    <TextBlock Text="Échelle"/><TextBox x:Name="SceneryScale" Text="1"/>
-                    <TextBlock Text="Un clic pose un décor. Valider le terrain enregistre les placements. Ctrl+Z annule le dernier placement." TextWrapping="Wrap" Margin="0,6,0,6"/>
+                    <TextBlock Text="Rotation (degrés)"/><TextBox x:Name="SceneryRotation" Text="0" TextChanged="PlacementSettings_Changed"/>
+                    <TextBlock Text="Échelle"/><TextBox x:Name="SceneryScale" Text="1" TextChanged="PlacementSettings_Changed"/>
+                    <CheckBox x:Name="SceneryDestructible" Content="Décors destructibles en jeu" IsChecked="False" Margin="0,6"/>
+                    <TextBlock Text="Molette : rotation. Ctrl + molette : taille. Clic gauche : placer. Validez le terrain pour enregistrer les placements." TextWrapping="Wrap" Margin="0,6,0,6"/>
                     <TextBlock x:Name="SceneryPlacementStatus" TextWrapping="Wrap"/>
                   </StackPanel>
                 </Expander>
@@ -130,8 +135,10 @@
                 </Expander>
                 <Expander Header="Mines — emplacements de ressource" Margin="0,0,0,10" IsExpanded="False">
                   <StackPanel Margin="8">
-                    <ComboBox x:Name="MineAssetComboBox" Margin="0,0,0,8"/>
-                    <TextBlock Text="Sélectionnez l’outil Mine. Cliquez l’entrée sur un terrain accessible, puis la zone de travail dans la montagne. La ligne indique l’orientation. Choisissez une ressource adaptée à la session ; les ressources DLC nécessitent le DLC correspondant." TextWrapping="Wrap"/>
+                    <ComboBox x:Name="MineAssetComboBox" Margin="0,0,0,8" SelectionChanged="MineAsset_Changed"/>
+                    <TextBlock Text="Molette : orienter la mine et sa zone de travail. Clic gauche : placer. Choisissez une ressource adaptée à la session ; les ressources DLC nécessitent le DLC correspondant." TextWrapping="Wrap"/>
+                    <TextBlock Text="Rotation (degrés)"/><TextBox x:Name="MineRotation" Text="0" TextChanged="PlacementSettings_Changed"/>
+                    <TextBlock Text="Distance de la zone de travail (cases)"/><TextBox x:Name="MineDistance" Text="6" TextChanged="PlacementSettings_Changed"/>
                     <TextBlock x:Name="MineStatusTextBlock" Margin="0,8,0,8" Text="Aucune mine en attente." TextWrapping="Wrap"/>
                     <Button Click="RemoveLastMineButton_Click" Height="30">Retirer le dernier placement</Button>
                     <TextBlock Text="Jaune : nouvelles mines. Gris : emplacements existants. Les ajouts sont enregistrés avec « Valider tout le terrain » ou « Valider et fermer ». Ctrl+Z permet d’annuler avant validation." Margin="0,8,0,0" TextWrapping="Wrap"/>
@@ -354,12 +361,16 @@
           <hx:DirectionalLight3D x:Name="PreviewFillLight" Color="#8090A8" Direction="0.45,-0.2,0.25"/>
           <hx:ShadowMap3D x:Name="PreviewShadowMap" AutoCoverCompleteScene="True" IsSceneDynamic="True" Resolution="2048,2048" Bias="0.002" Intensity="0.45" IsRendering="False"/>
           <hx:MeshGeometryModel3D FrontCounterClockwise="True" x:Name="PreviewOceanModel" IsRendering="False" IsTransparent="True" IsHitTestVisible="False" CullMode="None"/>
+          <hx:GroupModel3D x:Name="WorkAreaCursorGroup" IsHitTestVisible="False" IsRendering="False"/>
+          <hx:GroupModel3D x:Name="PlacementCursorGroup" IsHitTestVisible="False" IsRendering="False"/>
+          <hx:LineGeometryModel3D x:Name="PlacementCursorLine" Color="#FF00DDFF" Thickness="3" IsHitTestVisible="False" IsRendering="False"/>
           <hx:GroupModel3D x:Name="PendingSceneryGroup" IsHitTestVisible="False"/>
           <hx:GroupModel3D x:Name="PreviewSceneryGroup" IsHitTestVisible="False"/>
           <hx:MeshGeometryModel3D x:Name="PreviewRiverWaterModel" IsTransparent="True" IsHitTestVisible="False" CullMode="None" FrontCounterClockwise="True"/>
           <hx:MeshGeometryModel3D FrontCounterClockwise="True" x:Name="TerrainModel" IsThrowingShadow="True" CullMode="None" IsHitTestVisible="True" MouseDown3D="TerrainModel_MouseDown3D"/>
           <hx:MeshGeometryModel3D FrontCounterClockwise="True" x:Name="FootprintHitPlaneModel" CullMode="None" IsHitTestVisible="False" IsTransparent="True" MouseDown3D="TerrainModel_MouseDown3D"/>
           <hx:MeshGeometryModel3D FrontCounterClockwise="True" x:Name="BeachPreviewFillModel" CullMode="None" DepthBias="-146" IsHitTestVisible="False" IsTransparent="True" IsRendering="False"/>
+          <hx:LineGeometryModel3D x:Name="RegisteredCoastsModel" Color="#FF00FFFF" Thickness="6" DepthBias="-165" IsHitTestVisible="False" IsRendering="False"/>
           <hx:LineGeometryModel3D x:Name="BeachPreviewHaloModel" Color="#E8000000" Thickness="18" DepthBias="-148" IsHitTestVisible="False" IsRendering="False"/>
           <hx:LineGeometryModel3D x:Name="BeachPreviewModel" Color="#FFFF7A00" Thickness="11" DepthBias="-152" IsHitTestVisible="False" IsRendering="False"/>
           <hx:LineGeometryModel3D x:Name="BeachStartHandleModel" Color="#FF40FF68" Thickness="14" DepthBias="-158" IsHitTestVisible="False" IsRendering="False"/>

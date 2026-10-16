@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -75,6 +75,56 @@ public sealed class RdaGameResources(IslandToolProcess process)
             yield return stem + ".dds";
         }
         if (name.EndsWith("_lod0.rdm", StringComparison.OrdinalIgnoreCase)) yield return name[..^9] + "_lod2.rdm";
+    }
+    public static string[] NormalReferences(string materialXml)
+        => Regex.Matches(materialXml,@"(?i)<NormalFileName>\s*([^<\r\n]+)").Select(m=>m.Groups[1].Value.Trim())
+            .SelectMany(ReferenceCandidates).Where(p=>p.EndsWith(".dds",StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+
+    /// <summary>Extract only the requested material XML and its source normal DDS.
+    /// Separate completion markers avoid treating a partial cache as full metadata.</summary>
+    public async Task<string> PrepareNormalsAsync(string gameFolder,string cache,IEnumerable<string> materials,IProgress<string>? progress,CancellationToken token)
+    {
+        var archives=GameIslandCatalog.Archives(gameFolder);
+        var target=Path.Combine(Path.GetFullPath(cache),Signature(archives));
+        var names=materials.SelectMany(ReferenceCandidates).Where(p=>p.EndsWith(".xml",StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if(names.Length==0)throw new InvalidDataException("No material XML references");
+        await Gate.WaitAsync(token);
+        try {
+            Directory.CreateDirectory(target);
+            var manifest=Path.Combine(target,"normal-resources-v1.txt");
+            var completed=File.Exists(manifest)?File.ReadAllLines(manifest).ToHashSet(StringComparer.OrdinalIgnoreCase):new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            async Task ExtractMissing(string[] paths,string phase) {
+                var missing=paths.Where(p=>(!completed.Contains(p)&&!completed.Contains("missing:"+p)) || (completed.Contains(p)&&!File.Exists(GameIslandCatalog.SafePath(target,p)))).ToArray();
+                // Record negative alternatives separately from successfully extracted files.
+                // Deleted cached files are repaired without rescanning absent alternatives.
+                foreach(var batch in BuildBatches(missing)) {
+                    await ExtractAsync(archives,target,batch.Filter,progress,token,phase);
+                    token.ThrowIfCancellationRequested();
+                    foreach(var name in batch.Names){completed.Remove(name);completed.Remove("missing:"+name);completed.Add(File.Exists(GameIslandCatalog.SafePath(target,name))?name:"missing:"+name);}
+                    File.WriteAllLines(manifest+".tmp",completed.Order(StringComparer.OrdinalIgnoreCase));File.Move(manifest+".tmp",manifest,true);
+                }
+            }
+            await ExtractMissing(names,Anno1800IslandTool.Core.Localization.TextCatalog.T("Matériaux nécessaires"));
+            var normals=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach(var name in names) {
+                var path=GameIslandCatalog.SafePath(target,name);
+                if(!File.Exists(path))throw new FileNotFoundException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Matériau introuvable dans les archives : ")+name);
+                var references=NormalReferences(File.ReadAllText(path));
+                if(references.Length==0)throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Normalmap source introuvable.")+" "+name);
+                normals.UnionWith(references);
+            }
+            await ExtractMissing(normals.ToArray(),Anno1800IslandTool.Core.Localization.TextCatalog.T("Normalmaps nécessaires"));
+            var root=Path.Combine(target,"data");
+            // Texture resolver recognises a data root by this directory. No engine
+            // metadata is extracted or marked complete by this narrow operation.
+            Directory.CreateDirectory(Path.Combine(root,"config","engine","material_sets"));
+            foreach(var name in names) {
+                GameDataTextureResolver.TryResolveTerrainTextures(root,new(){FileName=name},out _,out var normal);
+                if(normal is null)throw new FileNotFoundException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Normalmap source introuvable.")+" "+name);
+            }
+            progress?.Report(Anno1800IslandTool.Core.Localization.TextCatalog.T("Normalmaps prêtes — cache réutilisable."));
+            return root;
+        } finally {Gate.Release();}
     }
     public async Task EnsureAsync(string gameFolder, string root, IEnumerable<string> references, IProgress<string>? progress, CancellationToken token)
     {

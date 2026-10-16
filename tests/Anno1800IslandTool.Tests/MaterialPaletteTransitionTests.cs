@@ -1,4 +1,4 @@
-using Anno1800IslandTool.Core.Models;
+﻿using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;
 using Anno1800IslandTool.Formats.Readers;
 using Anno1800IslandTool.Pipeline.Editing;

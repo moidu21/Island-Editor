@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using Anno1800IslandTool.Core.Common;
 var text=string.Concat(Enumerable.Repeat("-32768 2147483647 ",1000000));

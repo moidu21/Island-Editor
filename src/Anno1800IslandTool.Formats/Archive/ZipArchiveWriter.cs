@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 
 namespace Anno1800IslandTool.Formats.Archive;
 

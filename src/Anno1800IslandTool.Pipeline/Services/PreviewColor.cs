@@ -1,4 +1,4 @@
-namespace Anno1800IslandTool.Pipeline.Services;
+﻿namespace Anno1800IslandTool.Pipeline.Services;
 
 /// <summary>Small display-only colour adjustment. Never applied to exported textures.</summary>
 public static class PreviewColor

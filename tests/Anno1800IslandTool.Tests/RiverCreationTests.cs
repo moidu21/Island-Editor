@@ -1,4 +1,4 @@
-using System.Xml.Linq;
+﻿using System.Xml.Linq;
 using System.Numerics;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Pipeline.Services;

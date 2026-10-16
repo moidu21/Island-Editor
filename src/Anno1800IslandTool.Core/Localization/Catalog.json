@@ -1520,8 +1520,8 @@
     "Spielvorschau aktivieren"
   ],
   "Choisir le dossier data extrait": [
-    "Select the extracted data folder",
-    "Extrahierten data-Ordner wählen"
+    "Choose the extracted data folder",
+    "Entpackten data-Ordner auswählen"
   ],
   "Qualité des textures": [
     "Texture quality",
@@ -8151,5 +8151,478 @@
   "Minerai DLC12 2": [
     "DLC12 ore 2",
     "DLC12-Erz 2"
+  ],
+  "Décors destructibles en jeu": [
+    "Scenery can be destroyed in game",
+    "Dekorationen im Spiel zerstörbar"
+  ],
+  "Molette : rotation. Ctrl + molette : taille. Clic gauche : placer. Validez le terrain pour enregistrer les placements.": [
+    "Mouse wheel: rotate. Ctrl + wheel: scale. Left click: place. Validate the terrain to save placements.",
+    "Mausrad: drehen. Strg + Mausrad: Größe ändern. Linksklick: platzieren. Gelände bestätigen, um Platzierungen zu speichern."
+  ],
+  "Molette : orienter la mine et sa zone de travail. Clic gauche : placer. Choisissez une ressource adaptée à la session ; les ressources DLC nécessitent le DLC correspondant.": [
+    "Mouse wheel: rotate the mine and its work area. Left click: place. Choose a resource suited to the session; DLC resources require the corresponding DLC.",
+    "Mausrad: Mine und Arbeitsbereich drehen. Linksklick: platzieren. Eine zur Sitzung passende Ressource wählen; DLC-Ressourcen benötigen den entsprechenden DLC."
+  ],
+  "Distance de la zone de travail (cases)": [
+    "Work area distance (tiles)",
+    "Abstand zum Arbeitsbereich (Felder)"
+  ],
+  "Distance de travail : 2 à 64 cases. Rotation : nombre de degrés.": [
+    "Work distance: 2 to 64 tiles. Rotation: number of degrees.",
+    "Arbeitsabstand: 2 bis 64 Felder. Drehung: Gradzahl."
+  ],
+  "Modèle de mine indisponible : la ligne indique son orientation.": [
+    "Mine model unavailable: the line shows its orientation.",
+    "Minenmodell nicht verfügbar: Die Linie zeigt die Ausrichtung."
+  ],
+  "Aperçu du modèle indisponible. Vérifiez les ressources du jeu.": [
+    "Model preview unavailable. Check the game resources.",
+    "Modellvorschau nicht verfügbar. Spielressourcen prüfen."
+  ],
+  "Molette : rotation. Clic gauche : placer la mine.": [
+    "Mouse wheel: rotate. Left click: place the mine.",
+    "Mausrad: drehen. Linksklick: Mine platzieren."
+  ],
+  "Aucun terrain sous la zone de travail. Déplacez ou tournez la mine.": [
+    "No terrain beneath the work area. Move or rotate the mine.",
+    "Kein Gelände unter dem Arbeitsbereich. Mine verschieben oder drehen."
+  ],
+  "Modèle de zone de travail indisponible : seul le repère est affiché.": [
+    "Work area model unavailable: only the marker is shown.",
+    "Modell des Arbeitsbereichs nicht verfügbar: Nur die Markierung wird angezeigt."
+  ],
+  "Arctique : conserver Normal par défaut. Pour Starter, remplacer Type/id par Starter et ajouter IslandLabel = starter_island dans Element. Conserver RandomizeFertilities = 1. Les correctifs de fertilités sont fournis dans addtoasset.xml pour Normal et Starter.": [
+    "Arctic: keep Normal by default. For Starter, replace Type/id with Starter and add IslandLabel = starter_island to Element. Keep RandomizeFertilities = 1. Fertility patches for Normal and Starter are included in addtoasset.xml.",
+    "Arktis: Normal standardmäßig beibehalten. Für Starter Type/id durch Starter ersetzen und IslandLabel = starter_island zu Element hinzufügen. RandomizeFertilities = 1 beibehalten. Die Fruchtbarkeitskorrekturen für Normal und Starter sind in addtoasset.xml enthalten."
+  ],
+  "Renforcer les détails rocheux": [
+    "Enhance rock surface detail",
+    "Felsoberflächen stärker detaillieren"
+  ],
+  "Mélange de textures sur les pentes, sans modifier le relief. Décocher puis recalculer pour retirer cet effet.": [
+    "Blend textures on slopes without changing the terrain shape. Uncheck and recalculate to remove this effect.",
+    "Texturen an Hängen mischen, ohne die Geländeform zu verändern. Zum Entfernen deaktivieren und neu berechnen."
+  ],
+  "Intensité des détails rocheux": [
+    "Rock detail strength",
+    "Stärke der Felsdetails"
+  ],
+  "Détails rocheux : ID {0}, intensité {1}/31. Mélange de matériaux uniquement.": [
+    "Rock detail: ID {0}, strength {1}/31. Material blending only.",
+    "Felsdetails: ID {0}, Stärke {1}/31. Nur Materialmischung."
+  ],
+  "Détails de surface rocheuse": [
+    "Rock surface detail",
+    "Felsoberflächendetails"
+  ],
+  "Détails de surface rocheuse…": [
+    "Rock surface detail…",
+    "Felsoberflächendetails…"
+  ],
+  "Activer les détails de surface à l’export": [
+    "Enable surface detail on export",
+    "Oberflächendetails beim Export aktivieren"
+  ],
+  "Ajouter de légères variations de couleur": [
+    "Add subtle colour variations",
+    "Dezente Farbvariationen hinzufügen"
+  ],
+  "Matériau à détailler": [
+    "Material to enhance",
+    "Zu verfeinerndes Material"
+  ],
+  "Intensité du relief apparent": [
+    "Apparent relief strength",
+    "Stärke des scheinbaren Reliefs"
+  ],
+  "Fréquence des détails": [
+    "Detail frequency",
+    "Detailfrequenz"
+  ],
+  "Direction des strates (degrés)": [
+    "Strata direction (degrees)",
+    "Schichtrichtung (Grad)"
+  ],
+  "Graine": [
+    "Seed",
+    "Startwert"
+  ],
+  "Choisir les données extraites (facultatif)": [
+    "Choose extracted data (optional)",
+    "Extrahierte Daten auswählen (optional)"
+  ],
+  "Dossier data invalide.": [
+    "Invalid data folder.",
+    "Ungültiger data-Ordner."
+  ],
+  "Générer l’aperçu": [
+    "Generate preview",
+    "Vorschau erzeugen"
+  ],
+  "Aperçu de texture éclairée, pas du terrain. Les grandes formes de la montagne restent inchangées.": [
+    "Lit texture preview, not terrain. The large mountain shapes remain unchanged.",
+    "Beleuchtete Texturvorschau, keine Geländeansicht. Die großen Bergformen bleiben unverändert."
+  ],
+  "Les textures privées seront ajoutées dans le dossier data de l’export compilé. Copiez aussi ce dossier dans votre mod.": [
+    "Private textures will be included in the compiled export’s data folder. Copy this folder into your mod as well.",
+    "Eigene Texturen werden im data-Ordner des kompilierten Exports gespeichert. Kopieren Sie auch diesen Ordner in Ihre Mod."
+  ],
+  "Avant": [
+    "Before",
+    "Vorher"
+  ],
+  "Après": [
+    "After",
+    "Nachher"
+  ],
+  "Générez l’aperçu pour vérifier ces réglages.": [
+    "Generate the preview to check these settings.",
+    "Erzeugen Sie die Vorschau, um diese Einstellungen zu prüfen."
+  ],
+  "La graine doit être un nombre entier.": [
+    "The seed must be an integer.",
+    "Der Startwert muss eine ganze Zahl sein."
+  ],
+  "Textures de couleur ou de normales introuvables pour ce matériau.": [
+    "Colour or normal textures were not found for this material.",
+    "Farb- oder Normalentexturen für dieses Material wurden nicht gefunden."
+  ],
+  "Les dimensions des textures de couleur et de normales doivent correspondre.": [
+    "Colour and normal texture dimensions must match.",
+    "Die Abmessungen der Farb- und Normalentexturen müssen übereinstimmen."
+  ],
+  "Aperçu prêt. Appliquer enregistre ce matériau pour l’export.": [
+    "Preview ready. Apply saves this material for export.",
+    "Vorschau bereit. Anwenden speichert dieses Material für den Export."
+  ],
+  "Générez l’aperçu avant d’appliquer.": [
+    "Generate the preview before applying.",
+    "Erzeugen Sie vor dem Anwenden eine Vorschau."
+  ],
+  "Référence de texture absente du matériau.": [
+    "Texture reference is missing from the material.",
+    "Die Texturreferenz fehlt im Material."
+  ],
+  "Tintmaps détaillées...": [
+    "Detailed tintmaps...",
+    "Detaillierte Tintmaps..."
+  ],
+  "Tintmaps détaillées": [
+    "Detailed tintmaps",
+    "Detaillierte Tintmaps"
+  ],
+  "Générer des tintmaps détaillées à l’export": [
+    "Generate detailed tintmaps on export",
+    "Detaillierte Tintmaps beim Export erzeugen"
+  ],
+  "Intensité du contraste": [
+    "Contrast strength",
+    "Kontraststärke"
+  ],
+  "Échelle des motifs (cases)": [
+    "Pattern scale (tiles)",
+    "Mustergröße (Felder)"
+  ],
+  "La graine doit être un entier.": [
+    "The seed must be an integer.",
+    "Der Startwert muss eine ganze Zahl sein."
+  ],
+  "Terrain indisponible.": [
+    "Terrain unavailable.",
+    "Gelände nicht verfügbar."
+  ],
+  "Aperçu du contraste sur une zone de relief. Ce n’est pas le rendu du jeu.": [
+    "Contrast preview on a terrain region. This is not the game rendering.",
+    "Kontrastvorschau eines Geländeabschnitts. Dies ist nicht die Spielgrafik."
+  ],
+  "Fissures et ruissellement visuels sur les matériaux rocheux. Les hauteurs, le maillage et les textures des matériaux restent inchangés.": [
+    "Visual cracks and runoff on rock materials. Heights, mesh and material textures remain unchanged.",
+    "Sichtbare Risse und Abflussspuren auf Felsmaterialien. Höhen, Netz und Materialtexturen bleiben unverändert."
+  ],
+  "L’export recalcule les tintmaps à tous les LOD. Désactiver l’option rétablit les tintmaps simples générées par l’éditeur.": [
+    "Export recalculates tintmaps at every LOD. Disabling this option restores the simple tintmaps generated by the editor.",
+    "Der Export berechnet Tintmaps für alle LODs neu. Beim Deaktivieren werden die einfachen, vom Editor erzeugten Tintmaps wiederhergestellt."
+  ],
+  "Arctique — référence colony03_a01_05": [
+    "Arctic — colony03_a01_05 reference",
+    "Arktis — Referenz colony03_a01_05"
+  ],
+  "Tintmap de toute l’île : même génération que l’export, affichée en une seule image. Les textures des matériaux ne sont pas affichées.": [
+    "Whole-island tintmap: same generation as export, displayed as one image. Material textures are not shown.",
+    "Tintmap der gesamten Insel: gleiche Erzeugung wie beim Export, als ein Bild. Materialtexturen werden nicht angezeigt."
+  ],
+  "Détails de teinte sur tous les matériaux émergés : roche, herbe, terre, sable ou neige. Les hauteurs et le maillage restent inchangés.": [
+    "Tint details on all above-water materials: rock, grass, soil, sand or snow. Heights and mesh remain unchanged.",
+    "Farbdetails auf allen Materialien über Wasser: Fels, Gras, Erde, Sand oder Schnee. Höhen und Netz bleiben unverändert."
+  ],
+  "Après ces réglages, cliquez sur Appliquer au projet dans la fenêtre Matériaux pour générer les tintmaps et les voir dans l’aperçu en jeu. L’export utilise la même génération.": [
+    "After these settings, click Apply to project in the Materials window to generate tintmaps and see them in the game preview. Export uses the same generation.",
+    "Danach im Materialfenster Auf Projekt anwenden anklicken, um Tintmaps zu erzeugen und in der Spielvorschau zu sehen. Der Export verwendet dieselbe Erzeugung."
+  ],
+  "Activer les tintmaps détaillées": [
+    "Enable detailed tintmaps",
+    "Detaillierte Tintmaps aktivieren"
+  ],
+  "Préparation : vérification du terrain et des matériaux": [
+    "Preparing: checking terrain and materials",
+    "Vorbereitung: Gelände und Materialien prüfen"
+  ],
+  "Préparation : métadonnées de l’île": [
+    "Preparing: island metadata",
+    "Vorbereitung: Inselmetadaten"
+  ],
+  "Préparation : données du terrain et des LOD": [
+    "Preparing: terrain and LOD data",
+    "Vorbereitung: Gelände- und LOD-Daten"
+  ],
+  "Préparation : grilles et données de construction": [
+    "Preparing: construction grids and data",
+    "Vorbereitung: Bauraster und Baudaten"
+  ],
+  "Préparation : validation du projet": [
+    "Preparing: validating the project",
+    "Vorbereitung: Projekt prüfen"
+  ],
+  "Préparation : fichiers d’intégration et rapports": [
+    "Preparing: integration files and reports",
+    "Vorbereitung: Integrationsdateien und Berichte"
+  ],
+  "Préparation : écriture de l’archive intermédiaire": [
+    "Preparing: writing intermediate archive",
+    "Vorbereitung: Zwischenarchiv schreiben"
+  ],
+  "Préparation : ajout des fichiers générés": [
+    "Preparing: adding generated files",
+    "Vorbereitung: erzeugte Dateien hinzufügen"
+  ],
+  "Préparation : rapports et finalisation de l’archive": [
+    "Preparing: reports and archive finalization",
+    "Vorbereitung: Berichte und Archivabschluss"
+  ],
+  "Préparation : lecture et normalisation des tintmaps": [
+    "Preparing: reading and normalizing tintmaps",
+    "Vorbereitung: Tintmaps lesen und normalisieren"
+  ],
+  "Préparation : pages de terrain et normalmaps": [
+    "Preparing: terrain pages and normalmaps",
+    "Vorbereitung: Geländeseiten und Normalmaps"
+  ],
+  "Préparation : génération des tintmaps et de leurs LOD": [
+    "Preparing: generating tintmaps and their LODs",
+    "Vorbereitung: Tintmaps und ihre LODs erzeugen"
+  ],
+  "Préparation : conservation des tintmaps existantes": [
+    "Preparing: preserving existing tintmaps",
+    "Vorbereitung: vorhandene Tintmaps beibehalten"
+  ],
+  "Préparation terminée : début du réencodage des fichiers du jeu.": [
+    "Preparation complete: starting game file encoding.",
+    "Vorbereitung abgeschlossen: Spieldateien werden kodiert."
+  ],
+  "{0} — {1}/{2} fichiers": [
+    "{0} — {1}/{2} files",
+    "{0} — {1}/{2} Dateien"
+  ],
+  "{0} — toujours en cours, {1} s pour cette étape": [
+    "{0} — still working, {1} s on this step",
+    "{0} — weiterhin aktiv, {1} s für diesen Schritt"
+  ],
+  "Relief rocheux…": [
+    "Rock relief…",
+    "Felsrelief…"
+  ],
+  "Relief rocheux": [
+    "Rock relief",
+    "Felsrelief"
+  ],
+  "Atténuer les motifs de a_hill_12 pour cette île": [
+    "Reduce a_hill_12 patterns for this island",
+    "a_hill_12-Muster für diese Insel abschwächen"
+  ],
+  "Intensité du relief : 0 = plat, 1 = original": [
+    "Relief strength: 0 = flat, 1 = original",
+    "Reliefstärke: 0 = flach, 1 = Original"
+  ],
+  "Ce jeu de matériaux ne contient pas a_hill_12.": [
+    "This material set does not contain a_hill_12.",
+    "Dieses Materialset enthält kein a_hill_12."
+  ],
+  "Choisissez les données extraites du jeu pour générer la texture.": [
+    "Choose the extracted game data to generate the texture.",
+    "Wählen Sie die entpackten Spieldaten zum Erzeugen der Textur."
+  ],
+  "Normalmap source introuvable.": [
+    "Source normalmap not found.",
+    "Quell-Normalmap nicht gefunden."
+  ],
+  "Appliquez à nouveau le réglage de relief rocheux avant l’export.": [
+    "Apply the rock relief setting again before exporting.",
+    "Wenden Sie die Felsrelief-Einstellung vor dem Export erneut an."
+  ],
+  "Texture propre à cette île, incluse dans le dossier data de l’export. Copiez aussi ce dossier dans votre mod. Les hauteurs et le maillage restent inchangés. Ce réglage concerne l’export ; l’aperçu en jeu de l’éditeur ne l’affiche pas encore.": [
+    "An island-specific texture is included in the export data folder. Copy that folder into your mod too. Heights and mesh remain unchanged. This setting affects export; the editor game preview does not display it yet.",
+    "Eine inselspezifische Textur wird im data-Ordner des Exports gespeichert. Kopieren Sie auch diesen Ordner in Ihren Mod. Höhen und Mesh bleiben unverändert. Diese Einstellung betrifft den Export; die Spielvorschau des Editors zeigt sie noch nicht an."
+  ],
+  "Détails fins + tintmaps…": [
+    "Fine details + tintmaps…",
+    "Feine Details + Tintmaps…"
+  ],
+  "Détails fins + tintmaps": [
+    "Fine details + tintmaps",
+    "Feine Details + Tintmaps"
+  ],
+  "Activer les normalmaps fines par matériau": [
+    "Enable fine normal maps per material",
+    "Feine Normalmaps pro Material aktivieren"
+  ],
+  "Intensité des détails fins": [
+    "Fine detail strength",
+    "Stärke der feinen Details"
+  ],
+  "Activer aussi les tintmaps adaptées au relief": [
+    "Also enable terrain-aware tintmaps",
+    "Auch geländeangepasste Tintmaps aktivieren"
+  ],
+  "Matériaux actuellement peints": [
+    "Currently painted materials",
+    "Aktuell aufgetragene Materialien"
+  ],
+  "Aucun matériau peint à détailler.": [
+    "No painted material to detail.",
+    "Keine aufgetragenen Materialien für Details vorhanden."
+  ],
+  "Régénérez les détails fins après modification du relief rocheux.": [
+    "Regenerate fine details after changing rock relief.",
+    "Nach Änderung des Felsreliefs die feinen Details neu erzeugen."
+  ],
+  "Appliquez à nouveau les détails de surface avant l’export.": [
+    "Apply the surface details again before exporting.",
+    "Die Oberflächendetails vor dem Export erneut anwenden."
+  ],
+  "Roche : grain et microfissures. Herbe et terre : irrégularités fines. Sable et neige : détails plus doux. Les tintmaps ajoutent les variations de teinte liées aux pentes, aux creux et au ruissellement.": [
+    "Rock: grain and tiny cracks. Grass and soil: fine irregularities. Sand and snow: softer detail. Tintmaps add colour variations related to slopes, hollows and runoff.",
+    "Fels: Körnung und kleine Risse. Gras und Erde: feine Unebenheiten. Sand und Schnee: weichere Details. Tintmaps ergänzen Farbvariationen durch Hänge, Vertiefungen und Wasserabfluss."
+  ],
+  "Les normalmaps privées sont incluses dans le dossier data de l’export. Les textures restent répétées, avec un motif différent par matériau. Aucun shader, hauteur, maillage ou mélange de matériaux n’est modifié. L’aperçu de l’éditeur affiche les tintmaps, mais pas encore ces nouvelles normalmaps.": [
+    "Private normal maps are included in the export’s data folder. Textures still repeat, with a different pattern per material. No shader, heights, mesh or material blending is changed. The editor preview displays tintmaps but not yet these new normal maps.",
+    "Private Normalmaps sind im data-Ordner des Exports enthalten. Die Texturen wiederholen sich weiterhin, mit einem eigenen Muster pro Material. Shader, Höhen, Mesh und Materialmischungen bleiben unverändert. Die Editor-Vorschau zeigt die Tintmaps, aber noch nicht diese neuen Normalmaps."
+  ],
+  "Rock": [
+    "Rock",
+    "Fels",
+    "Roche"
+  ],
+  "Grass": [
+    "Grass",
+    "Gras",
+    "Herbe"
+  ],
+  "Soil": [
+    "Soil",
+    "Erde",
+    "Terre"
+  ],
+  "Sand": [
+    "Sand",
+    "Sand",
+    "Sable"
+  ],
+  "Snow": [
+    "Snow",
+    "Schnee",
+    "Neige"
+  ],
+  "Les matériaux peints ont changé. Appliquez à nouveau les détails fins avant l’export.": [
+    "The painted materials have changed. Apply fine details again before exporting.",
+    "Die aufgetragenen Materialien wurden geändert. Feine Details vor dem Export erneut anwenden."
+  ],
+  "Matériaux nécessaires": [
+    "Required materials",
+    "Benötigte Materialien"
+  ],
+  "Normalmaps nécessaires": [
+    "Required normal maps",
+    "Benötigte Normalmaps"
+  ],
+  "Matériau introuvable dans les archives : ": [
+    "Material not found in archives: ",
+    "Material nicht in den Archiven gefunden: "
+  ],
+  "Normalmaps prêtes — cache réutilisable.": [
+    "Normal maps ready — cache available for reuse.",
+    "Normalmaps bereit — Cache kann wiederverwendet werden."
+  ],
+  "Choisir le dossier du jeu — extraction ciblée": [
+    "Choose game folder — targeted extraction",
+    "Spielordner wählen — gezielte Extraktion"
+  ],
+  "Appliquer au projet extrait automatiquement les seules normalmaps nécessaires depuis les archives du jeu. Le dossier du jeu est mémorisé et les fichiers sont réutilisés depuis le cache.": [
+    "Apply to project automatically extracts only the required normal maps from the game archives. The game folder is remembered and cached files are reused.",
+    "Auf Projekt anwenden extrahiert automatisch nur die benötigten Normalmaps aus den Spielarchiven. Der Spielordner wird gespeichert und Dateien aus dem Cache werden wiederverwendet."
+  ],
+  "Fissures rocheuses à plusieurs échelles (expérimental)": [
+    "Rock fissures at multiple scales (experimental)",
+    "Felsrisse in mehreren Größen (experimentell)"
+  ],
+  "Remplace le grain ajouté aux roches par des fissures étirées et irrégulières. Leur orientation suit les textures ; seules les tintmaps suivent le relief de l’île. Les silhouettes et les facettes du terrain restent inchangées.": [
+    "Replaces added rock grain with elongated, irregular fissures. Their orientation follows the textures; only tintmaps follow the island terrain. Terrain silhouettes and facets remain unchanged.",
+    "Ersetzt zusätzliches Felskorn durch längliche, unregelmäßige Risse. Ihre Ausrichtung folgt den Texturen; nur Tintmaps folgen dem Inselgelände. Silhouetten und Gelände-Facetten bleiben unverändert."
+  ],
+  "Aspect naturel du terrain": [
+    "Natural terrain appearance",
+    "Natürliches Geländeaussehen"
+  ],
+  "Aspect naturel du terrain…": [
+    "Natural terrain appearance…",
+    "Natürliches Geländeaussehen…"
+  ],
+  "Activer l’aspect naturel du terrain": [
+    "Enable natural terrain appearance",
+    "Natürliches Geländeaussehen aktivieren"
+  ],
+  "Une seule option combine les fissures rocheuses renforcées, les détails fins et les tintmaps adaptées au relief. Les sommets rocheux élevés sont blanchis uniquement en biome moderate. Les hauteurs et le maillage restent inchangés.": [
+    "One option combines stronger rock fissures, fine details and terrain-aware tintmaps. High rocky summits are whitened only in the moderate biome. Heights and mesh remain unchanged.",
+    "Eine Option kombiniert stärkere Felsrisse, feine Details und geländeangepasste Tintmaps. Hohe felsige Gipfel werden nur im moderate-Biom aufgehellt. Höhen und Mesh bleiben unverändert."
+  ],
+  "Afficher les zones côtières enregistrées": [
+    "Show registered coastal zones",
+    "Gespeicherte Küstenzonen anzeigen"
+  ],
+  "Vérification des côtes…": [
+    "Checking coasts…",
+    "Küsten werden geprüft…"
+  ],
+  "Aucune zone côtière enregistrée.": [
+    "No registered coastal zones.",
+    "Keine Küstenzonen gespeichert."
+  ],
+  "Zones côtières enregistrées : {0}": [
+    "Registered coastal zones: {0}",
+    "Gespeicherte Küstenzonen: {0}"
+  ],
+  "Zones côtières : données illisibles.": [
+    "Coastal zones: unreadable data.",
+    "Küstenzonen: Daten nicht lesbar."
+  ],
+  "Tracé cyan : côtes constructibles enregistrées dans le projet.": [
+    "Cyan lines: buildable coasts registered in the project.",
+    "Türkise Linien: im Projekt gespeicherte bebaubare Küsten."
+  ],
+  "Zones côtières absentes": [
+    "No coastal zones",
+    "Keine Küstenzonen"
+  ],
+  "Vérification des côtes": [
+    "Coast check",
+    "Küstenprüfung"
+  ],
+  "Impossible de vérifier les zones côtières : les données du projet sont illisibles. Exporter quand même ?": [
+    "Cannot check coastal zones: project data is unreadable. Export anyway?",
+    "Küstenzonen können nicht geprüft werden: Projektdaten sind nicht lesbar. Trotzdem exportieren?"
+  ],
+  "Aucune zone côtière constructible n’est enregistrée dans cette île. Les comptoirs et bâtiments côtiers risquent de ne pas pouvoir être placés.\n\nAjoutez une côte constructible dans la vue GPU 3D. Voulez-vous exporter quand même ?": [
+    "No buildable coastal zone is registered on this island. Trading posts and coastal buildings may not be placeable.\n\nAdd a buildable coast in the GPU 3D view. Export anyway?",
+    "Auf dieser Insel ist keine bebaubare Küstenzone gespeichert. Kontore und Küstengebäude können möglicherweise nicht platziert werden.\n\nFügen Sie in der GPU-3D-Ansicht eine bebaubare Küste hinzu. Trotzdem exportieren?"
   ]
 }

@@ -1,4 +1,4 @@
-using Anno1800IslandTool.Core.Terrain;
+﻿using Anno1800IslandTool.Core.Terrain;
 namespace Anno1800IslandTool.Pipeline.Services;
 
 /// <summary>Native-depth vertical closures at cluster borders, without moving the surface.</summary>

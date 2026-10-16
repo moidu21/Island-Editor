@@ -1,4 +1,4 @@
-namespace Anno1800IslandTool.Core.Terrain;
+﻿namespace Anno1800IslandTool.Core.Terrain;
 
 /// <summary>
 /// Height operations shared by a terrain surface vertex and its vertical connector

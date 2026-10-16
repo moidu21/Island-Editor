@@ -1,4 +1,4 @@
-namespace Anno1800IslandTool.Core.Performance;
+﻿namespace Anno1800IslandTool.Core.Performance;
 
 /// <summary>
 /// Résumé léger des capacités de calcul v40. Le backend GPU de calcul est

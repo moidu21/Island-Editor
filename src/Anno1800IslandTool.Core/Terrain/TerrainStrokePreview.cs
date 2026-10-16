@@ -1,4 +1,4 @@
-namespace Anno1800IslandTool.Core.Terrain;
+﻿namespace Anno1800IslandTool.Core.Terrain;
 
 /// <summary>Uncommitted heights for a live brush stroke. Source vertices remain untouched.</summary>
 public sealed class TerrainStrokePreview

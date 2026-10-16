@@ -1,4 +1,4 @@
-using Anno1800IslandTool.Core.Terrain;
+﻿using Anno1800IslandTool.Core.Terrain;
 using Anno1800IslandTool.Formats.Readers;
 using Anno1800IslandTool.Pipeline.Services;
 foreach(var (name,setName) in new[]{("moderate_l_10","terra_01.xml"),("colony01_l_03","south_america_01.xml"),("colony02_l_05","colony02_01.xml")})

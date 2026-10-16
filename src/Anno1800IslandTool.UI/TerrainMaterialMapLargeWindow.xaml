@@ -1,4 +1,4 @@
-﻿<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering" xmlns:hx="http://helix-toolkit.org/wpf/SharpDX" x:Class="Anno1800IslandTool.UI.TerrainMaterialMapLargeWindow" Title="Anno1800IslandTool v46.156" Height="1000" Width="1780" WindowStartupLocation="CenterOwner">
+﻿<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering" xmlns:hx="http://helix-toolkit.org/wpf/SharpDX" x:Class="Anno1800IslandTool.UI.TerrainMaterialMapLargeWindow" Title="Anno1800IslandTool v46.173" Height="1000" Width="1780" WindowStartupLocation="CenterOwner">
   <Grid Margin="10">
     <Grid.ColumnDefinitions>
       <ColumnDefinition Width="390"/>
@@ -124,6 +124,14 @@
                     <TextBlock x:Name="TopologyProfileTextBlock" TextWrapping="Wrap" FontWeight="SemiBold" Margin="0,0,0,5"/>
           <CheckBox x:Name="NativeCellsCheckBox" Content="Cellules multicouches du biome" IsChecked="True" ToolTip="Mélanges calibrés sur les îles d’origine : transitions progressives et variations naturelles. Les choix manuels restent prioritaires."/>
           <CheckBox x:Name="EmergedOnlyCheckBox" Content="Limiter aux terres émergées" IsChecked="True"/>
+          
+
+
+          <StackPanel Visibility="Collapsed">
+            <CheckBox x:Name="RockDetailCheckBox" IsChecked="False"/>
+            <ComboBox x:Name="RockDetailMaterialComboBox"/>
+            <Slider x:Name="RockDetailStrengthSlider" Minimum="0" Maximum="31" Value="24"/>
+          </StackPanel>
           <CheckBox x:Name="TopologyPreserveWaterBeachCheckBox" Content="Exclure les cellules uniquement eau / plage" ToolTip="Décocher pour repeindre aussi les anciennes plages et les fonds marins aplatis. Une sous-couche de sable sous de l’herbe ne bloque pas la peinture." IsChecked="False" Margin="0,4,0,0"/>
                     
                     <Button x:Name="ResetTopologyProfileButton" Height="30" Margin="0,8,0,0" Click="ResetTopologyProfileButton_Click" Content="Réglages conseillés du biome"/>
@@ -138,6 +146,7 @@
           <TabItem Header="Réglages">
             <ScrollViewer VerticalScrollBarVisibility="Auto" PreviewMouseWheel="MenuScrollViewer_PreviewMouseWheel">
               <StackPanel>
+                <Button Content="Aspect naturel du terrain…" Click="FineNormalsButton_Click" Margin="0,8,0,6"/>
                 <Expander Header="Rendu avec les données du jeu" IsExpanded="False" Margin="0,10,0,0">
                   <StackPanel Margin="0,6,0,0">
                     <TextBlock Text="Les matériaux et textures sont chargés depuis les archives RDA du jeu. Les archives au numéro supérieur sont prioritaires." TextWrapping="Wrap" Foreground="#315D31"/>

@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using SharpGLTF.Schema2;
 
 namespace Anno1800IslandTool.Pipeline.Services;

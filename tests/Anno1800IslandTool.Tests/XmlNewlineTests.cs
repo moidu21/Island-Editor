@@ -1,4 +1,4 @@
-using Anno1800IslandTool.Pipeline.Editing;
+﻿using Anno1800IslandTool.Pipeline.Editing;
 using Xunit;
 namespace Anno1800IslandTool.Tests;
 public class XmlNewlineTests

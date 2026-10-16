@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 
 namespace Anno1800IslandTool.Pipeline.Services;
 

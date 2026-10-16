@@ -1,4 +1,4 @@
-namespace Anno1800IslandTool.Core.Terrain;
+﻿namespace Anno1800IslandTool.Core.Terrain;
 
 /// <summary>
 /// Règles de peinture basées uniquement sur les variations locales du relief.
@@ -11,6 +11,9 @@ public sealed class TerrainTopologyMaterialOptions
     public bool OnlyEmergedLand { get; set; }
     public bool UseNativeCells { get; set; } = true;
     public Dictionary<TerrainTopologyRole, TopologyCellRecipe> CellRecipes { get; } = new();
+    public bool RockDetailEnabled { get; set; }
+    public int RockDetailMaterialId { get; set; } = 16;
+    public int RockDetailStrength { get; set; } = 24;
     public int FlatMaterialId { get; set; } = 2;
     public bool FlatTilingEnabled { get; set; }
     public int FlatTilingMaterialId { get; set; } = 2;
@@ -36,6 +39,8 @@ public sealed class TerrainTopologyMaterialOptions
 
     public void Normalize()
     {
+        RockDetailStrength = Math.Clamp(RockDetailStrength, 0, 31);
+        RockDetailMaterialId = TerrainMaterialPackEncoding.ClampSlot(RockDetailMaterialId);
         FlatTileSize = Math.Clamp(FlatTileSize, 2, 128);
         FlatTileContrast = Math.Clamp(FlatTileContrast, 0, 31);
         FlatTilingMaterialId = TerrainMaterialPackEncoding.ClampSlot(FlatTilingMaterialId);

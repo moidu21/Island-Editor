@@ -1,4 +1,4 @@
-
+﻿
 namespace Anno1800IslandTool.Pipeline.Editing;
 
 public sealed class ApplyRawTextResult

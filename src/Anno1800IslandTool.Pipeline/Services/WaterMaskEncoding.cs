@@ -1,4 +1,4 @@
-using System.Xml.Linq;
+﻿using System.Xml.Linq;
 using System.Globalization;
 namespace Anno1800IslandTool.Pipeline.Services;
 

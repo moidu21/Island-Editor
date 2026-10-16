@@ -1,4 +1,4 @@
-namespace Anno1800IslandTool.Core.Performance;
+﻿namespace Anno1800IslandTool.Core.Performance;
 
 /// <summary>
 /// Paramètres globaux d'exécution pour les traitements terrain lourds.

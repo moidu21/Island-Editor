@@ -1,4 +1,4 @@
-namespace Anno1800IslandTool.Pipeline.Services;
+﻿namespace Anno1800IslandTool.Pipeline.Services;
 
 public sealed class DimensionInferenceService
 {

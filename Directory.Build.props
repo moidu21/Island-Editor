@@ -1,7 +1,7 @@
-<Project>
+﻿<Project>
   <PropertyGroup>
     <LangVersion>latest</LangVersion>
-    <Version>46.156.0</Version>
+    <Version>46.173.0</Version>
     <Nullable>disable</Nullable>
     <TieredPGO>true</TieredPGO>
     <Platforms>AnyCPU;x64</Platforms>

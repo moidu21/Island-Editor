@@ -1,4 +1,4 @@
-namespace Anno1800IslandTool.Core.Terrain;
+﻿namespace Anno1800IslandTool.Core.Terrain;
 
 public sealed class TerrainMaterialBrushOptions
 {

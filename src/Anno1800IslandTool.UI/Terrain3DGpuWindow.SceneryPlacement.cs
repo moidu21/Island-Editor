@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Numerics;
 using System.Windows;
 using System.Windows.Controls;
@@ -41,7 +41,12 @@ public partial class Terrain3DGpuWindow
     private void SceneryCategory_Changed(object sender,SelectionChangedEventArgs e)
     {if(!_initializing && SceneryModel is not null)BindSceneryCatalog();}
     private void SceneryModel_Changed(object sender,SelectionChangedEventArgs e)
-    {if(!_bindingScenery && SceneryModel.SelectedItem is SceneryChoice choice)_selectedScenery=choice.File;}
+    {
+        if (_bindingScenery || _initializing) return;
+        _selectedScenery=(SceneryModel.SelectedItem as SceneryChoice)?.File;
+        if (_selectedScenery is not null) BrushToolListBox.SelectedIndex=14;
+        _ = LoadPlacementCursorAsync();
+    }
     private void BindSceneryCatalog()
     {
         _bindingScenery=true;
@@ -53,6 +58,7 @@ public partial class Terrain3DGpuWindow
             _selectedScenery=(SceneryModel.SelectedItem as SceneryChoice)?.File;
         }
         finally{_bindingScenery=false;}
+        _ = LoadPlacementCursorAsync();
     }
     private void AddSceneryPoint(Vector3 hit)
     {
@@ -64,7 +70,7 @@ public partial class Terrain3DGpuWindow
             float size=Math.Max(1,_project.Root.MapSize);
             var position=new Float3(hit.X/Math.Max(1,_project.Rd3d.GridWidth)*size,
                 TerrainHeightEncoding.LegacyFineHeightToWorldHeight(SceneYToDecodedHeight(hit.Y)),hit.Z/Math.Max(1,_project.Rd3d.GridHeight)*size);
-            _pendingScenery.Add(new(choice.File,position,angle,scale));
+            _pendingScenery.Add(new(choice.File,position,angle,scale,SceneryDestructible.IsChecked==true));
             _ = RefreshPendingSceneryAsync();
         }
         catch(Exception ex){SceneryPlacementStatus.Text=ex.Message;}

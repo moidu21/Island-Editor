@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 
 namespace Anno1800IslandTool.Core.Terrain;
 

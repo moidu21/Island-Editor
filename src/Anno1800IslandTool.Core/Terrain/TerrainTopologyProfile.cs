@@ -1,4 +1,4 @@
-using Anno1800IslandTool.Core.Models;
+﻿using Anno1800IslandTool.Core.Models;
 namespace Anno1800IslandTool.Core.Terrain;
 
 public sealed record TopologyCellLayer(int MaterialId, int Minimum, int Maximum, bool FadeOnSlope = false);
@@ -33,15 +33,15 @@ public sealed class TerrainTopologyProfile
             int[] order={arcticRock,snow,dune1,dune2,rocky,dune4};
             if (!order.Select(id=>Array.FindIndex(materials,m=>m.Id==id)).SequenceEqual(order.Select(id=>Array.FindIndex(materials,m=>m.Id==id)).Order())) return Fallback();
             options.OpaqueBaseMaterialId=null;
-            options.FlatMaterialId=dune1;options.GentleSlopeMaterialId=snow;options.SteepSlopeMaterialId=arcticRock;
-            options.RidgeMaterialId=arcticRock;options.HollowMaterialId=dune1;
+            options.FlatMaterialId=dune2;options.GentleSlopeMaterialId=dune1;options.SteepSlopeMaterialId=arcticRock;
+            options.RidgeMaterialId=arcticRock;options.HollowMaterialId=dune2;
             options.SteepSlopeMinimum=1.15f;
-            options.CellRecipes[TerrainTopologyRole.Flat]=new(dune1,new[]{new TopologyCellLayer(arcticRock,31,31),new(dune2,3,16),new(dune4,2,11)});
-            options.CellRecipes[TerrainTopologyRole.GentleSlope]=new(snow,new[]{new TopologyCellLayer(arcticRock,31,31),new(dune1,12,26,true),new(dune2,0,8,true)},20,31);
+            options.CellRecipes[TerrainTopologyRole.Flat]=new(dune2,new[]{new TopologyCellLayer(arcticRock,31,31),new(dune1,8,20),new(dune4,0,5)},24,31);
+            options.CellRecipes[TerrainTopologyRole.GentleSlope]=new(dune1,new[]{new TopologyCellLayer(arcticRock,31,31),new(snow,8,20,true),new(dune2,3,12,true)},12,26);
             options.CellRecipes[TerrainTopologyRole.SteepSlope]=new(arcticRock,new[]{new TopologyCellLayer(snow,5,20),new(rocky,0,5)});
             options.CellRecipes[TerrainTopologyRole.Ridge]=new(arcticRock,new[]{new TopologyCellLayer(snow,8,24),new(rocky,0,5)});
-            options.CellRecipes[TerrainTopologyRole.Hollow]=new(dune1,new[]{new TopologyCellLayer(arcticRock,31,31),new(dune2,3,16),new(dune4,2,11)});
-            return new(){Label=Anno1800IslandTool.Core.Localization.TextCatalog.T("Arctique — colony03_a01_01 / colony03_a02_01"),HasNativeReference=true,Options=options};
+            options.CellRecipes[TerrainTopologyRole.Hollow]=options.CellRecipes[TerrainTopologyRole.Flat];
+            return new(){Label=Anno1800IslandTool.Core.Localization.TextCatalog.T("Arctique — référence colony03_a01_05"),HasNativeReference=true,Options=options};
         }
         // The scenario material set uses dry gray soils rather than regular Enbesa grassland.
         if (Exact("dlc10_scenario02_mud_05_grayish.xml") is int gray
@@ -64,8 +64,8 @@ public sealed class TerrainTopologyProfile
             return new(){Label=Anno1800IslandTool.Core.Localization.TextCatalog.T("Scénario Enbesa — scenario02_l_01"),HasNativeReference=true,Options=options};
         }
         string label;string[] names;int foundation=31;
-        if(Exact("m_mountain_01.xml") is not null) {label=Anno1800IslandTool.Core.Localization.TextCatalog.T("Tempéré / Cap Trelawney — références vanilla"); names=new[]{"m_beach_01.xml","m_mountain_01.xml","m_mud_01.xml","m_gras_02.xml","d_grass_03.xml","a_hill_01.xml"};}
-        else if(Exact("tropical_mountain_04.xml") is not null) {label=Anno1800IslandTool.Core.Localization.TextCatalog.T("Nouveau Monde — références vanilla");names=new[]{"s_beach_06.xml","tropical_mountain_04.xml","b_mud_07.xml","d_grass_07.xml","d_grass_08.xml","tropical_mountain_02.xml"};}
+        if(Exact("m_mountain_01.xml") is not null) {label=Anno1800IslandTool.Core.Localization.TextCatalog.T("Tempéré / Cap Trelawney — références vanilla"); names=new[]{"m_beach_01.xml","m_mountain_01.xml","b_mud_03.xml","m_gras_02.xml","d_grass_03.xml","a_hill_12.xml"};}
+        else if(Exact("tropical_mountain_04.xml") is not null) {label=Anno1800IslandTool.Core.Localization.TextCatalog.T("Nouveau Monde — références vanilla");names=new[]{"s_beach_06.xml","tropical_mountain_04.xml","b_mud_08.xml","d_grass_07.xml","d_grass_08.xml","tropical_mountain_02.xml"};}
         else if(Exact("colony02_mountain_01.xml") is not null) {label=Anno1800IslandTool.Core.Localization.TextCatalog.T("Enbesa — références vanilla");names=new[]{"colony02_beach_06.xml","colony02_mountain_01.xml","colony02_mud_03.xml","colony02_grass_07.xml","colony02_grass_08.xml","colony02_rock_01.xml"};foundation=20;}
         else return Fallback();
         var resolved=names.Select(Exact).ToArray();
@@ -73,7 +73,7 @@ public sealed class TerrainTopologyProfile
         int beach=resolved[0]!.Value,mountain=resolved[1]!.Value,soil=resolved[2]!.Value,grass=resolved[3]!.Value,accent=resolved[4]!.Value,detail=resolved[5]!.Value;
         // These recipes depend on native layer order. Do not apply them to an incompatible custom shader order.
         int Rank(int id)=>Array.FindIndex(materials,m=>m.Id==id);
-        if(Rank(beach)>Rank(mountain)||Rank(mountain)>Rank(soil)||Rank(soil)>Rank(grass)||Rank(grass)>Rank(accent))return Fallback();
+        if(Rank(beach)>Rank(mountain)||Rank(mountain)>Rank(soil)||(Exact("tropical_mountain_04.xml") is null && Rank(soil)>Rank(grass))||Rank(grass)>Rank(accent))return Fallback();
         options.FlatMaterialId=grass;options.GentleSlopeMaterialId=mountain;options.SteepSlopeMaterialId=mountain;options.RidgeMaterialId=mountain;options.HollowMaterialId=soil;
         options.SteepSlopeMinimum=foundation==20 ? .45f : Anno1800IslandTool.Core.Localization.TextCatalog.SourceOf(label).StartsWith("Nouveau", StringComparison.Ordinal) ? .42f : .65f;
         options.FlatTilingMaterialId=accent;options.FlatTileContrast=12;options.OpaqueBaseMaterialId=beach;
@@ -87,6 +87,22 @@ public sealed class TerrainTopologyProfile
             ?new[]{new TopologyCellLayer(soil,10,18),new(detail,2,8)}:new[]{new TopologyCellLayer(detail,0,tropical?14:18)});
         options.CellRecipes[TerrainTopologyRole.Ridge]=new(mountain,new[]{new TopologyCellLayer(detail,0,foundation==20?6:16),new(grass,6,18,true)});
         options.CellRecipes[TerrainTopologyRole.Hollow]=new(soil,new[]{new TopologyCellLayer(mountain,31,31),new(grass,12,24,true)});
+        // 46.173: four supplied native references. Keep six IDs per shared palette.
+        if(Exact("m_mountain_01.xml") is not null)
+        {
+            options.GentleSlopeMaterialId=detail;options.RidgeMaterialId=detail;
+            options.CellRecipes[TerrainTopologyRole.GentleSlope]=new(detail,new[]{new TopologyCellLayer(mountain,31,31),new(grass,8,18,true),new(soil,0,5)},12,24);
+            options.CellRecipes[TerrainTopologyRole.Ridge]=new(detail,new[]{new TopologyCellLayer(mountain,31,31),new(grass,0,6,true)},12,26);
+            options.CellRecipes[TerrainTopologyRole.Hollow]=new(soil,new[]{new TopologyCellLayer(mountain,31,31),new(detail,2,10),new(grass,6,16,true)},14,26);
+        }
+        if(tropical)
+        {
+            // b_mud_08 is above grass in shader order: use a light overlay on plains.
+            options.CellRecipes[TerrainTopologyRole.Flat]=new(grass,new[]{new TopologyCellLayer(mountain,26,31),new(soil,0,7),new(accent,0,10)},22,31);
+            options.CellRecipes[TerrainTopologyRole.GentleSlope]=new(mountain,new[]{new TopologyCellLayer(soil,4,12),new(grass,8,18,true),new(detail,0,8)});
+            options.CellRecipes[TerrainTopologyRole.SteepSlope]=new(mountain,new[]{new TopologyCellLayer(soil,2,10),new(detail,6,18)});
+            options.CellRecipes[TerrainTopologyRole.Hollow]=new(soil,new[]{new TopologyCellLayer(mountain,31,31),new(grass,4,12,true)},14,24);
+        }
         if (foundation==20 && Exact("colony02_grass_07_novegetation.xml") is not null)
         {
             label=Anno1800IslandTool.Core.Localization.TextCatalog.T("Enbesa histoire — colony02_storyisland_03");

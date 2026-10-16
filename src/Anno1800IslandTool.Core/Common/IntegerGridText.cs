@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 namespace Anno1800IslandTool.Core.Common;
 
 /// <summary>Read fixed-size whitespace-delimited grids without allocating per token.</summary>

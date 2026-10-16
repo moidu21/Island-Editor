@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Diagnostics;
 using Anno1800IslandTool.UI.Rendering;
 using Anno1800IslandTool.Formats.Readers;

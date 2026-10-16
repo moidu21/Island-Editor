@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Anno1800IslandTool.Core.Terrain;
 var xml="<Vertices>"+string.Concat(Enumerable.Repeat("-1 2.5 3.2 4 5 6 7 8 ",200000))+"</Vertices>";

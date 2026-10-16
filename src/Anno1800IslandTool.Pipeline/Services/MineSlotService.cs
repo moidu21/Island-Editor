@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.Json;
 using System.Xml.Linq;
 using Anno1800IslandTool.Core.Common;
@@ -13,10 +13,19 @@ public sealed record MineSlotAsset(string Guid, string Label, string Region, str
 {
     public override string ToString() => $"{Anno1800IslandTool.Core.Localization.TextCatalog.T(Label)} — {Anno1800IslandTool.Core.Localization.TextCatalog.T(Region)}";
 }
-public sealed record MineSlotPlacement(MineSlotAsset Asset, Float3 Entrance, Float3 Mountain);
+public sealed record MineSlotPlacement(MineSlotAsset Asset, Float3 Entrance, Float3 Mountain, float WorkAreaGroundOffset=0);
 
 public static class MineSlotService
 {
+    public static MineSlotPlacement OrientedPlacement(IslandProject project, MineSlotAsset asset, Float3 point, float degrees, float distance)
+    {
+        if (!float.IsFinite(degrees) || !float.IsFinite(distance) || distance < 2 || distance > 64)
+            throw new ArgumentOutOfRangeException(nameof(distance));
+        var entrance = new Float3(MathF.Floor(point.X) + .5f, point.Y, MathF.Floor(point.Z) + .5f);
+        float angle = degrees * MathF.PI / 180;
+        var mountain = TerrainPoint(project, entrance.X + MathF.Sin(angle) * distance, entrance.Z + MathF.Cos(angle) * distance);
+        return new(asset, entrance, mountain);
+    }
     private static Stream Resource(string file) => typeof(MineSlotService).Assembly.GetManifestResourceStream(
         "Anno1800IslandTool.Pipeline.Resources.Mines." + file)
         ?? throw new InvalidOperationException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Ressource de mine absente : ") + file);

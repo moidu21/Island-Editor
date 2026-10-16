@@ -390,6 +390,8 @@ public partial class TerrainMaterialMapLargeWindow
         _materialSceneMax = new Vector3(map.Width * scale, _ownerWindow.GetMapSizeForLargeWindow() * .22f, map.Height * scale);
     }
 
+    internal void InvalidateTintPreview() => _decodedTintCache.Clear();
+
     private TintPreviewSampler? BuildTintPreviewSampler(TerrainMaterialMap map)
     {
         var project = _ownerWindow.GetProjectForLargeWindow();

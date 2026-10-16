@@ -1,4 +1,4 @@
-using Anno1800IslandTool.Pipeline.Services;
+﻿using Anno1800IslandTool.Pipeline.Services;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;

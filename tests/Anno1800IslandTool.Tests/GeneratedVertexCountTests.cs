@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using Anno1800IslandTool.Core.Terrain;
 using Xunit;
 namespace Anno1800IslandTool.Tests;

@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 namespace Anno1800IslandTool.UI;
 internal static class TerrainMemoryTrace

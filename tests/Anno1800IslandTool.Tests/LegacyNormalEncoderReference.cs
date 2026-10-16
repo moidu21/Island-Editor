@@ -1,4 +1,4 @@
-namespace Anno1800IslandTool.Core.Terrain;
+﻿namespace Anno1800IslandTool.Core.Terrain;
 
 /// <summary>Samples the fixed page lattice at texel centres, including its gutter.
 /// Page bounds must not be rounded to the gameplay grid or shortened at the island edge.</summary>

@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Threading;
 using Anno1800IslandTool.UI;
 namespace Anno1800IslandTool.UI { public static class UiLocalizationManager { public static string T(string s)=>s; } }

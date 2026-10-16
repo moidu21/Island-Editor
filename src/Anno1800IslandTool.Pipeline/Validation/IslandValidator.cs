@@ -1,4 +1,4 @@
-using Anno1800IslandTool.Core.Models;
+﻿using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Validation;
 
 namespace Anno1800IslandTool.Pipeline.Validation;

@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Threading.Tasks;
 
 namespace Anno1800IslandTool.Pipeline.Services;

@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Text;
 using Anno1800IslandTool.Core.Common;
 using Anno1800IslandTool.Core.Models;

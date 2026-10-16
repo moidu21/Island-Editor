@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;
 using Anno1800IslandTool.Core.Validation;

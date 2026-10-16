@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Xml.Linq;
 using Anno1800IslandTool.Pipeline.Services;
 using Xunit;

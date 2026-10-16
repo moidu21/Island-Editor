@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 namespace Anno1800IslandTool.UI;
 public sealed record AreaObjectEdit(int ContainerIndex, string RawXml);
 internal sealed record AreaObjectBlock(string RawXml);

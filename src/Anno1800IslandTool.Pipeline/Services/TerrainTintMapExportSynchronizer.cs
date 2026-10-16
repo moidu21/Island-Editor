@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Text;
 using Anno1800IslandTool.Core.Common;
 using Anno1800IslandTool.Core.Models;
@@ -66,14 +66,22 @@ public static class TerrainTintMapExportSynchronizer
             return replacements;
         }
 
+        TintDetailAtlas? detailAtlas=null;
+        if(project.SurfaceDetails?.TintDetails is {Enabled:true} detailOptions)
+        {
+            var hm=project.GameData.TerrainHeightMap;
+            double world=Math.Max(1,project.Root.MapSize);
+            detailAtlas=new TintDetailAtlas(world,(x,z)=>TerrainHeightEncoding.SampleCoarseHeightMapWorld(hm,
+                Math.Clamp(x/world*(hm.Width-1),0,hm.Width-1),Math.Clamp(z/world*(hm.Height-1),0,hm.Height-1)),detailOptions);
+        }
         var rebuiltByLod = new ConcurrentDictionary<int, int>();
         Parallel.ForEach(targets, new ParallelOptions { MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount, 1, 2) },
             () => new TintBuffers(), (target, loop, buffers) =>
         {
-            var pixels = BuildTintPixelsForPage(project, target.SampleBounds, target.Width, target.Height, buffers.Pixels);
+            var pixels = BuildTintPixelsForPage(project, target.SampleBounds, target.Width, target.Height, buffers.Pixels, target.Key, detailAtlas);
             buffers.Pixels = pixels;
             var repaired = project.EmergedTintPages.Contains(target.Key);
-            if (!repaired && TryDecodeDxt1DdsToBgra32(target.ReferenceDdsBytes, out var refWidth, out var refHeight, out var referencePixels, buffers.Reference))
+            if (project.SurfaceDetails?.TintDetails is null && !repaired && TryDecodeDxt1DdsToBgra32(target.ReferenceDdsBytes, out var refWidth, out var refHeight, out var referencePixels, buffers.Reference))
             {
                 buffers.Reference = referencePixels;
                 var syntheticWeight = target.AlreadyExists ? 0.72f : 0.64f;
@@ -101,6 +109,10 @@ public static class TerrainTintMapExportSynchronizer
             sb.AppendLine(Anno1800IslandTool.Core.Localization.TextCatalog.F($"- LOD {pair.Key} : {pair.Value} page(s)"));
         }
 
+        if(project.SurfaceDetails?.TintDetails is not null)
+        {
+            sb.AppendLine("TintDetails: global world-space field, filtered LOD pyramid; reference-page blending disabled.");
+        }
         summary = sb.ToString().TrimEnd();
         return replacements;
     }
@@ -298,9 +310,37 @@ public static class TerrainTintMapExportSynchronizer
         };
     }
 
-    private static byte[] BuildTintPixelsForPage(IslandProject project, RectI sampleBounds, int width, int height, byte[] reusable)
+    public static byte[] BuildOverview(IslandProject project, TintDetailOptions options, TerrainMaterialMap map, int size=1024)
     {
-        var materialMap = project.Rd3d.MaterialMap;
+        var hm=project.GameData.TerrainHeightMap;
+        if(hm.Width<2 || hm.Height<2 || !map.HasAnyData)throw new InvalidOperationException("Terrain / MaterialMap unavailable");
+        double world=Math.Max(1,project.Root.MapSize);
+        var atlas=options.Enabled ? new TintDetailAtlas(world,(x,z)=>TerrainHeightEncoding.SampleCoarseHeightMapWorld(hm,
+            Math.Clamp(x/world*(hm.Width-1),0,hm.Width-1),Math.Clamp(z/world*(hm.Height-1),0,hm.Height-1)),options) : null;
+        var encoded=BuildTintPixelsForPage(project,new RectI(0,0,hm.Width-1,hm.Height-1),size,size,Array.Empty<byte>(),new TerrainPageKey(0,0,0),atlas,true,options,map);
+        var dds=BuildDxt1Dds(size,size,encoded);
+        if(!TerrainTintPreviewDecoder.TryDecode(dds,out _,out _,out var decoded))throw new InvalidDataException("Tint overview decode failed");
+        return decoded;
+    }
+
+    public static int ApplyToProject(IslandProject project)
+    {
+        if(project.SurfaceDetails?.TintDetails is null)return 0;
+        var files=BuildAllTintMapReplacements(project,out _);
+        foreach(var pair in files)
+        {
+            var match=System.Text.RegularExpressions.Regex.Match(pair.Key,@"/tintmaps/(\d+)/(\d+)x(\d+)\.dds$",System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if(!match.Success)throw new InvalidDataException("Tintmap path: "+pair.Key);
+            var key=new TerrainPageKey(int.Parse(match.Groups[1].Value),int.Parse(match.Groups[2].Value),int.Parse(match.Groups[3].Value));
+            project.TintMapPages[key]=new TintMapPage{Key=key,OriginalRelativePath=pair.Key,RawDdsBytes=pair.Value,
+                Width=BitConverter.ToInt32(pair.Value,16),Height=BitConverter.ToInt32(pair.Value,12),DdsFormat="DXT1",MipMapCount=1};
+        }
+        project.IsModified=true;project.ModifiedSections.Add("TintMaps");return files.Count;
+    }
+
+    private static byte[] BuildTintPixelsForPage(IslandProject project, RectI sampleBounds, int width, int height, byte[] reusable, TerrainPageKey key, TintDetailAtlas? detailAtlas, bool overview=false, TintDetailOptions? overrideOptions=null, TerrainMaterialMap? overrideMap=null)
+    {
+        var materialMap = overrideMap ?? project.Rd3d.MaterialMap;
         var heightMap = project.GameData.TerrainHeightMap;
         var length = Math.Max(1, width) * Math.Max(1, height) * 4;
         var pixels = reusable.Length == length ? reusable : new byte[length];
@@ -310,12 +350,38 @@ public static class TerrainTintMapExportSynchronizer
         var sampleWidthMinusOne = Math.Max(1, heightMap.Width - 1);
         var sampleHeightMinusOne = Math.Max(1, heightMap.Height - 1);
 
+        var options = overrideOptions ?? project.SurfaceDetails?.TintDetails;
+
+        
+
+        double worldWidth = Math.Max(1, project.Root.MapSize);
+
+        double worldPerSample = worldWidth / sampleWidthMinusOne;
+
+        double pageWorldSpan = overview ? worldWidth : 512.0 * (1 << Math.Clamp(key.Lod,0,20)) * worldWidth / Math.Max(1,project.Rd3d.GridWidth);
+
+        double footprint = pageWorldSpan / Math.Min(width,height);
+        bool snow=options is {Enabled:true,WhitenSummits:true} && SummitWhitening.IsModerate(project.EffectiveMaterialSetName);
+        var rockIds=(project.MaterialSet?.Materials ?? new()).Where(m=>MaterialFineNormals.Family(m.FileName??"")==FineNormalFamily.Rock).Select(m=>m.Id).ToHashSet();
+
+
         Parallel.For(0, height, CpuParallelOptions, y =>
+
         {
             for (var x = 0; x < width; x++)
             {
                 var sampleX = sampleBounds.Left + (((x + 0.5) / width) * spanX);
                 var sampleY = sampleBounds.Top + (((y + 0.5) / height) * spanY);
+                if(options is not null)
+
+                {
+
+                    sampleX = (key.X + (x + .5) / width) * pageWorldSpan / worldPerSample;
+
+                    sampleY = (key.Y + (y + .5) / height) * pageWorldSpan / worldPerSample;
+
+                }
+
                 sampleX = Math.Clamp(sampleX, 0.0, sampleWidthMinusOne);
                 sampleY = Math.Clamp(sampleY, 0.0, sampleHeightMinusOne);
 
@@ -332,6 +398,34 @@ public static class TerrainTintMapExportSynchronizer
                 uint ids = materialMap.PackedMaterialIds.Length == 0 ? 0 : materialMap.PackedMaterialIds[materialMap.GetMaterialIdBlockIndex(materialX, materialY)];
                 uint weights = materialMap.PackedMaterialAlphas.Length == 0 ? 0 : materialMap.PackedMaterialAlphas[materialMap.GetAlphaIndex(materialX, materialY)];
                 var tint = ComputeTintFromMaterialCell(ids, weights, h, slope, sampleX, sampleY);
+                if(options is not null)
+
+                {
+
+                    // Details apply to every emerged material, including snow, soil and grass.
+                    // A neutral base leaves the material's own colour intact in every biome.
+                    double mask=Math.Clamp((h+.1)/1.5,0,1);
+                    double factor=detailAtlas?.Sample(sampleX*worldPerSample,sampleY*worldPerSample,footprint)??1;
+                    // Continuous shore fade; no material-ID or texture-name restriction.
+
+                    tint=((float)(tint.R*(1-mask)+128*factor*mask),
+
+                          (float)(tint.G*(1-mask)+128*factor*mask),
+
+                          (float)(tint.B*(1-mask)+128*factor*mask));
+
+                }
+
+                if(snow && detailAtlas is not null)
+                {
+                    double total=0,rock=0;
+                    for(int slot=0;slot<6;slot++){int w=(int)((weights>>(slot*5))&31),id=(int)((ids>>(slot*5))&31);total+=w;if(rockIds.Contains(id))rock+=w;}
+                    double worldSlope=Math.Sqrt(Math.Pow((hR-hL)/(2*worldPerSample),2)+Math.Pow((hB-hT)/(2*worldPerSample),2));
+                    double white=SummitWhitening.Mask(h,detailAtlas.MaximumHeight,worldSlope,sampleX*worldPerSample,sampleY*worldPerSample)*(total>0?rock/total:0);
+                    // Lift tint toward a pale summit while retaining the existing relief contrast.
+                    double f=detailAtlas.Sample(sampleX*worldPerSample,sampleY*worldPerSample,footprint);
+                    tint=((float)(tint.R*(1-white)+222*f*white),(float)(tint.G*(1-white)+225*f*white),(float)(tint.B*(1-white)+230*f*white));
+                }
                 var encodedTint = EncodeTintColorForDds(tint.R, tint.G, tint.B);
 
                 var pixel = ((y * width) + x) * 4;

@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Runtime.InteropServices;
 using SharpDX;
 using SharpDX.D3DCompiler;
@@ -43,11 +43,12 @@ internal sealed class GamePreviewDdsReader : IDisposable
         else format=four switch {0x31545844=>Format.BC1_UNorm,0x33545844=>Format.BC2_UNorm,0x35545844=>Format.BC3_UNorm,_=>Format.Unknown};
         // Keep encoded colour values; the preview blend uses the same colour convention throughout.
         format=format switch {Format.BC1_UNorm_SRgb=>Format.BC1_UNorm,Format.BC2_UNorm_SRgb=>Format.BC2_UNorm,Format.BC3_UNorm_SRgb=>Format.BC3_UNorm,Format.BC7_UNorm_SRgb=>Format.BC7_UNorm,_=>format};
-        int block=format switch {Format.BC1_UNorm=>8,Format.BC2_UNorm or Format.BC3_UNorm or Format.BC7_UNorm=>16,_=>throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Unsupported DDS format: ")+format)};
+        bool raw=format==Format.R8G8B8A8_UNorm;
+        int block=format switch {Format.R8G8B8A8_UNorm=>4,Format.BC1_UNorm=>8,Format.BC2_UNorm or Format.BC3_UNorm or Format.BC7_UNorm=>16,_=>throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Unsupported DDS format: ")+format)};
         for(int mip=0;mip<mips-1 && Math.Max(w,h)>maxSize;mip++)
-        {file.Position+=((w+3)/4)*((h+3)/4)*block;w=Math.Max(1,w/2);h=Math.Max(1,h/2);}
+        {file.Position+=raw?w*h*4:((w+3)/4)*((h+3)/4)*block;w=Math.Max(1,w/2);h=Math.Max(1,h/2);}
         if(Math.Max(w,h)>maxSize)throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("DDS has no small mip level: ")+path);
-        int pitch=((w+3)/4)*block,count=pitch*((h+3)/4);
+        int pitch=raw?w*4:((w+3)/4)*block,count=pitch*(raw?h:((h+3)/4));
         var data=reader.ReadBytes(count);if(data.Length!=count)throw new InvalidDataException(Anno1800IslandTool.Core.Localization.TextCatalog.T("Truncated DDS mip."));
         var pin=GCHandle.Alloc(data,GCHandleType.Pinned);
         Texture2D source;

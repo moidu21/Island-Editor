@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Security.Cryptography;
 using Anno1800IslandTool.Core.Terrain;
 using Anno1800IslandTool.Formats.Readers;

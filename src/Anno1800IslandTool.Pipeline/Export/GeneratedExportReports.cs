@@ -1,4 +1,4 @@
-namespace Anno1800IslandTool.Pipeline.Export;
+﻿namespace Anno1800IslandTool.Pipeline.Export;
 
 // Reports describe the current export and must never be copied from an older ZIP.
 // Keep native-a7m, river-beds.json and all other project data untouched.

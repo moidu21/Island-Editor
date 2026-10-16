@@ -1,4 +1,4 @@
-using System.Buffers;
+﻿using System.Buffers;
 namespace Anno1800IslandTool.Core.Terrain;
 
 /// <summary>Samples the fixed page lattice at texel centres, including its gutter.

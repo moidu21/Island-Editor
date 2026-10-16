@@ -1,4 +1,4 @@
-using Anno1800IslandTool.Core.Models;
+﻿using Anno1800IslandTool.Core.Models;
 using Anno1800IslandTool.Core.Terrain;
 using Anno1800IslandTool.Formats.Readers;
 using Anno1800IslandTool.Pipeline.Services;
@@ -156,7 +156,7 @@ public class TopologyBiomeTests
     {
         Assert.Equal("data/dlc03/config/engine/material_sets/arctic_01.xml",EmbeddedMaterialSetLibrary.GetGamePath("arctic_01.xml"));
         var set=Set("arctic_01.xml");var o=TerrainTopologyProfile.Create(set).Options;
-        Assert.Equal(11,o.FlatMaterialId);Assert.Null(o.OpaqueBaseMaterialId);
+        Assert.Equal(12,o.FlatMaterialId);Assert.Null(o.OpaqueBaseMaterialId);
         Assert.DoesNotContain(set.Materials,m=>(m.FileName??"").Contains("test_data"));
         Assert.NotEqual(o.FlatMaterialId,TerrainTopologyProfile.Create(Set("arctic_01_test.xml")).Options.FlatMaterialId);
     }

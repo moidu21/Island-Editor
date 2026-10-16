@@ -1,4 +1,4 @@
-﻿<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering" x:Class="Anno1800IslandTool.UI.TerrainMaterialMapWindow" Title="Anno1800IslandTool v46.156" Height="1080" Width="1520" WindowStartupLocation="CenterOwner">
+﻿<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering" x:Class="Anno1800IslandTool.UI.TerrainMaterialMapWindow" Title="Anno1800IslandTool v46.173" Height="1080" Width="1520" WindowStartupLocation="CenterOwner">
   <Grid Margin="12">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto"/>
@@ -196,6 +196,15 @@
           <CheckBox x:Name="NativeCellsCheckBox" Content="Cellules multicouches du biome" IsChecked="True" ToolTip="Mélanges calibrés sur les îles d’origine : transitions progressives et variations naturelles. Les choix manuels restent prioritaires."/>
           <CheckBox x:Name="EmergedOnlyCheckBox" Content="Limiter aux terres émergées" IsChecked="True"/>
           <Button Content="Réglages conseillés du biome" Click="ResetTopologyProfileButton_Click" Margin="0,4,0,5"/>
+          
+
+
+          <Button Content="Aspect naturel du terrain…" Click="FineNormalsButton_Click" Margin="0,8,0,6"/>
+          <StackPanel Visibility="Collapsed">
+            <CheckBox x:Name="RockDetailCheckBox" IsChecked="False"/>
+            <ComboBox x:Name="RockDetailMaterialComboBox"/>
+            <Slider x:Name="RockDetailStrengthSlider" Minimum="0" Maximum="31" Value="24"/>
+          </StackPanel>
           <CheckBox x:Name="TopologyPreserveWaterBeachCheckBox" Content="Exclure les cellules uniquement eau / plage" ToolTip="Décocher pour repeindre aussi les anciennes plages et les fonds marins aplatis. Une sous-couche de sable sous de l’herbe ne bloque pas la peinture." IsChecked="False"/>
           
           <DockPanel Margin="0,6,0,0">

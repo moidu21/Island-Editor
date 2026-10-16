@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Windows;
@@ -17,6 +17,25 @@ namespace Anno1800IslandTool.UI;
 
 public partial class TerrainMaterialMapWindow : Window
 {
+    internal void OpenRockNormals(Window owner)
+    {
+        if(_project is null || _workingMaterialSet is null)return;
+        new RockNormalWindow(_project,_workingMaterialSet){Owner=owner}.ShowDialog();
+    }
+    internal void OpenFineNormals(Window owner)
+    {
+        if(_workingMaterialSet is null)return;
+        new FineNormalWindow(_project,_workingMaterialSet,_workingMap){Owner=owner}.ShowDialog();
+    }
+    private void FineNormalsButton_Click(object sender,RoutedEventArgs e)=>OpenFineNormals(this);
+    private void RockNormalButton_Click(object sender,RoutedEventArgs e)=>OpenRockNormals(this);
+    internal void OpenSurfaceDetails(Window owner)
+    {
+        if(_workingMaterialSet is null)return;
+        new SurfaceDetailWindow(_project,_workingMaterialSet,_workingMap){Owner=owner}.ShowDialog();
+    }
+    private void SurfaceDetailButton_Click(object sender,RoutedEventArgs e)=>OpenSurfaceDetails(this);
+
     public bool ProtectBeachAreas { get => _project.ProtectBeachMaterial; set => _project.ProtectBeachMaterial = value; }
     private readonly IslandProject _project;
     private readonly IslandProjectEditor _editor;
@@ -511,6 +530,7 @@ public partial class TerrainMaterialMapWindow : Window
             usedBitsPages = BusyWork.Run(this, () => {
                 _editor.ReplaceTerrainMaterialMap(_project, _workingMap.Clone(), _editState);
                 var pages = _editor.ResynchronizeMeshUsedMaterialBitsFromMaterialMap(_project);
+                TerrainTintMapExportSynchronizer.ApplyToProject(_project);
                 IslandPreviewImages.Refresh(_project);
                 return pages;
             });
@@ -519,6 +539,7 @@ public partial class TerrainMaterialMapWindow : Window
             InvalidateCoastTransitionBase();
             SummaryTextBox.Text = BuildSummaryText(_project, _workingMap, _editState);
             PaintStatusTextBlock.Text = Anno1800IslandTool.Core.Localization.TextCatalog.F($"Peinture appliquée au projet. L'export ZIP remplacera rd3d.xml avec MaterialIDs2 / MaterialAlphas2, puis régénérera les tintmaps depuis cette MaterialMap. UsedMaterialBits resynchronisés sur {usedBitsPages} page(s) mesh. Texels sans coverage corrigés : {fixedZeroCoverage}.");
+            _largeWindow?.InvalidateTintPreview();
             _largeWindow?.RefreshFromParentData(refreshPalette: false);
             if (_largeWindow is not null) await _largeWindow.CompletePendingRefreshAsync();
             });
@@ -1222,6 +1243,8 @@ public partial class TerrainMaterialMapWindow : Window
         SetCoastComboItems(TopologySteepMaterialComboBox, rows, rows.FirstOrDefault(r=>r.Id==defaults.SteepSlopeMaterialId));
         SetCoastComboItems(TopologyRidgeMaterialComboBox, rows, rows.FirstOrDefault(r=>r.Id==defaults.RidgeMaterialId));
         SetCoastComboItems(TopologyHollowMaterialComboBox, rows, rows.FirstOrDefault(r=>r.Id==defaults.HollowMaterialId));
+        defaults.RockDetailMaterialId=defaults.SteepSlopeMaterialId;
+        SetCoastComboItems(RockDetailMaterialComboBox, rows, rows.FirstOrDefault(r=>r.Id==defaults.RockDetailMaterialId));
         defaults.OnlyEmergedLand=true;
         SetTopologyControls(defaults);
         TopologyProfileTextBlock.Text=profile.Label;
@@ -1248,11 +1271,14 @@ public partial class TerrainMaterialMapWindow : Window
 
     private void SetTopologyControls(TerrainTopologyMaterialOptions options)
     {
+        SetCoastComboById(RockDetailMaterialComboBox, options.RockDetailMaterialId);
         SetCoastComboById(TopologyFlatMaterialComboBox, options.FlatMaterialId);
         SetCoastComboById(TopologyGentleMaterialComboBox, options.GentleSlopeMaterialId);
         SetCoastComboById(TopologySteepMaterialComboBox, options.SteepSlopeMaterialId);
         SetCoastComboById(TopologyRidgeMaterialComboBox, options.RidgeMaterialId);
         SetCoastComboById(TopologyHollowMaterialComboBox, options.HollowMaterialId);
+        RockDetailCheckBox.IsChecked=options.RockDetailEnabled;
+        RockDetailStrengthSlider.Value=options.RockDetailStrength;
         NativeCellsCheckBox.IsChecked=options.UseNativeCells;
         EmergedOnlyCheckBox.IsChecked=options.OnlyEmergedLand;
         TopologyFlatSlopeTextBox.Text = options.FlatSlopeMaximum.ToString("0.###", CultureInfo.InvariantCulture);
@@ -1273,6 +1299,9 @@ public partial class TerrainMaterialMapWindow : Window
         var options = new TerrainTopologyMaterialOptions
         {
             FlatTilingEnabled=false, UseBlend=false, Strength=31,
+            RockDetailEnabled=false,
+            RockDetailMaterialId=SelectedCoastMaterialId(RockDetailMaterialComboBox,16),
+            RockDetailStrength=(int)RockDetailStrengthSlider.Value,
             UseNativeCells=NativeCellsCheckBox.IsChecked==true,
             OnlyEmergedLand=EmergedOnlyCheckBox.IsChecked==true,
             FlatMaterialId = SelectedCoastMaterialId(TopologyFlatMaterialComboBox, 2),
@@ -1382,6 +1411,8 @@ public partial class TerrainMaterialMapWindow : Window
         sb.AppendLine(FormatTopologyText(Anno1800IslandTool.Core.Localization.TextCatalog.T("Crête convexe : ID {0} | courbure >= {1:0.###}"), options.RidgeMaterialId, options.CurvatureSensitivity));
         sb.AppendLine(FormatTopologyText(Anno1800IslandTool.Core.Localization.TextCatalog.T("Creux concave : ID {0} | courbure <= -{1:0.###}"), options.HollowMaterialId, options.CurvatureSensitivity));
         sb.AppendLine(FormatTopologyText(Anno1800IslandTool.Core.Localization.TextCatalog.T("Rayon d’analyse : {0} | force={1}/31 | eau/plages préservées={2}"), options.AnalysisRadius, options.ClampedStrength, UiLocalizationManager.T(options.PreserveExistingWaterAndBeach ? "oui" : "non")));
+        if(options.RockDetailEnabled)
+            sb.AppendLine(FormatTopologyText(Anno1800IslandTool.Core.Localization.TextCatalog.T("Détails rocheux : ID {0}, intensité {1}/31. Mélange de matériaux uniquement."), options.RockDetailMaterialId, options.RockDetailStrength));
         sb.AppendLine(BuildTopologyStatsText(stats));
         sb.AppendLine(FormatTopologyText(Anno1800IslandTool.Core.Localization.TextCatalog.T("Cellules changées : {0}, blocs MaterialIDs2 changés : {1}"), result.CellsChanged, result.BlocksChanged));
         foreach (var message in result.Messages)

@@ -1,4 +1,4 @@
-using Anno1800IslandTool.Pipeline.Services;
+﻿using Anno1800IslandTool.Pipeline.Services;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -14,6 +14,10 @@ namespace Anno1800IslandTool.UI;
 
 public partial class TerrainMaterialMapLargeWindow : Window
 {
+    private void FineNormalsButton_Click(object sender,RoutedEventArgs e)=>_ownerWindow.OpenFineNormals(this);
+    private void RockNormalButton_Click(object sender,RoutedEventArgs e)=>_ownerWindow.OpenRockNormals(this);
+    private void SurfaceDetailButton_Click(object sender,RoutedEventArgs e)=>_ownerWindow.OpenSurfaceDetails(this);
+
     private readonly TerrainMaterialMapWindow _ownerWindow;
     private TerrainMaterialCellPattern? _pickedCellPattern;
     private bool _isPainting;
@@ -206,11 +210,14 @@ public partial class TerrainMaterialMapLargeWindow : Window
     {
         var rows = _ownerWindow.GetTerrainMaterialPaletteRows().ToList();
         var options = _ownerWindow.GetTopologyOptionsForLargeWindow();
+        SetCoastComboItems(RockDetailMaterialComboBox, rows, options.RockDetailMaterialId);
         SetCoastComboItems(TopologyFlatMaterialComboBox, rows, options.FlatMaterialId);
         SetCoastComboItems(TopologyGentleMaterialComboBox, rows, options.GentleSlopeMaterialId);
         SetCoastComboItems(TopologySteepMaterialComboBox, rows, options.SteepSlopeMaterialId);
         SetCoastComboItems(TopologyRidgeMaterialComboBox, rows, options.RidgeMaterialId);
         SetCoastComboItems(TopologyHollowMaterialComboBox, rows, options.HollowMaterialId);
+        RockDetailCheckBox.IsChecked=options.RockDetailEnabled;
+        RockDetailStrengthSlider.Value=options.RockDetailStrength;
         NativeCellsCheckBox.IsChecked=options.UseNativeCells;
         EmergedOnlyCheckBox.IsChecked=options.OnlyEmergedLand;
         TopologyProfileTextBlock.Text=_ownerWindow.TopologyProfileLabel;
@@ -962,6 +969,9 @@ public partial class TerrainMaterialMapLargeWindow : Window
         var options = new TerrainTopologyMaterialOptions
         {
             FlatTilingEnabled=false, UseBlend=false, Strength=31,
+            RockDetailEnabled=false,
+            RockDetailMaterialId=SelectedCoastMaterialId(RockDetailMaterialComboBox,16),
+            RockDetailStrength=(int)RockDetailStrengthSlider.Value,
             UseNativeCells=NativeCellsCheckBox.IsChecked==true,
             OnlyEmergedLand=EmergedOnlyCheckBox.IsChecked==true,
             FlatMaterialId = SelectedCoastMaterialId(TopologyFlatMaterialComboBox, 2),

@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.RegularExpressions;
 using Anno1800IslandTool.Core.Enums;
 using Anno1800IslandTool.Core.Models;
@@ -101,10 +101,23 @@ public sealed class IslandImporter : IIslandReader
             project.RawContent.AnnoEditorLevelText = archive.ReadEntryText(discovered.AnnoEditorLevelPath);
         }
 
+        var surfaceEntry=entries.FirstOrDefault(e=>e.RelativePath==SurfaceDetailExport.Manifest);
+        if(surfaceEntry is not null)
+        {
+            var state=System.Text.Json.JsonSerializer.Deserialize<SurfaceDetailState>(archive.ReadEntryText(surfaceEntry.RelativePath)) ?? throw new InvalidDataException("Surface detail manifest");
+            using var surfaceZip=System.IO.Compression.ZipFile.OpenRead(archivePath);
+            foreach(var path in state.FilePaths)
+            {
+                if(!path.StartsWith(SurfaceDetailExport.TextureRoot+state.Key+"/",StringComparison.Ordinal)||path.Contains(".."))throw new InvalidDataException("Surface detail path");
+                using var stream=(surfaceZip.GetEntry(path)??throw new InvalidDataException("Missing surface texture")).Open();
+                using var buffer=new MemoryStream();stream.CopyTo(buffer);state.Files[path]=buffer.ToArray();
+            }
+            SurfaceDetailExport.Restore(project,state);
+        }
         project.EffectiveMaterialSetName = _materialResolver.ResolveEffectiveName(project.Rd3d);
         project.Metadata.UsesDefaultMaterialSet = string.IsNullOrWhiteSpace(project.Rd3d.MaterialSetFileName);
 
-        LoadMaterialSet(project, archivePath, archive, entries, discovered, options);
+        if(project.SurfaceDetails is null) LoadMaterialSet(project, archivePath, archive, entries, discovered, options);
         LoadMeshPages(project, archive, discovered.MeshPagePaths, options);
         LoadNormalMapPages(project, archive, discovered.NormalMapPagePaths, options);
         LoadTintMapPages(project, archive, discovered.TintMapPagePaths);

@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.IO.Compression;
 using System.Windows;
 using System.Windows.Controls;
@@ -84,6 +84,7 @@ public partial class NativeIslandWindow : Window
     {
         var choice=Islands.SelectedItem as GameIslandChoice;
         if(_project is null&&choice is null&&localInfo is null)return;
+        if (_project is not null && !CoastExportWarning.Confirm(this, _project)) return;
         var automaticImport = _project is null && localInfo is null;
         string destination;
         if (automaticImport)
@@ -122,7 +123,8 @@ public partial class NativeIslandWindow : Window
                 else
                 {
                     var intermediate=Path.Combine(work,"edited.zip");
-                    await Task.Run(()=>new IslandExporter().Export(_project,intermediate,new ExportOptions()),token);
+                    await Task.Run(()=>new IslandExporter().Export(_project,intermediate,new ExportOptions { Progress=progress }),token);
+                    progress.Report(UiLocalizationManager.T("Préparation terminée : début du réencodage des fichiers du jeu."));
                     zip=await converter.EncodeAsync(intermediate,work,progress,token);
                 }
                 token.ThrowIfCancellationRequested();

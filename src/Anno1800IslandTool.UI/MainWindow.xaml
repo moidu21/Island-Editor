@@ -1,8 +1,8 @@
-<Window x:Class="Anno1800IslandTool.UI.MainWindow"
+﻿<Window x:Class="Anno1800IslandTool.UI.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:rendering="clr-namespace:Anno1800IslandTool.UI.Rendering"
-        Title="Anno1800IslandTool v46.156"
+        Title="Anno1800IslandTool v46.173"
         Height="980"
         Width="1760"
         WindowStartupLocation="CenterScreen">
@@ -39,7 +39,7 @@
                       ToolTip="v46.5 : décode directement les valeurs, limite les lots et évite les copies texte/binaires inutiles des pages. Décoche pour un compromis vitesse/RAM."
                       VerticalAlignment="Center"/>
             <TextBlock Margin="16,8,0,0"
-                       Text="v46.156 : bords libres et redimensionnement des cartes avec conservation du relief."
+                       Text="v46.173 : bords libres et redimensionnement des cartes avec conservation du relief."
                        FontWeight="SemiBold"/>
             <TextBlock Margin="16,8,0,0"
                        x:Name="LanguageSelectorLabel" Visibility="Collapsed" Text="Langue"

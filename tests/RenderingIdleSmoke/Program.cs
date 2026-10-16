@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using Anno1800IslandTool.UI.Rendering;
 class Probe : DirectX11Surface
 {

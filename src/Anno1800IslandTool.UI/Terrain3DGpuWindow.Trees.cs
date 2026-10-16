@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using System.Windows;
 using Anno1800IslandTool.Core.Terrain;
 using HelixToolkit;

@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.IO;
@@ -180,6 +180,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (!CoastExportWarning.Confirm(this, _currentProject)) return;
         var defaultName = IOPath.GetFileNameWithoutExtension(_currentProject.Metadata.SourceArchivePath) + "_edited.zip";
         var dialog = new SaveFileDialog
         {

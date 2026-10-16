@@ -1,7 +1,8 @@
-namespace Anno1800IslandTool.Pipeline.Export;
+﻿namespace Anno1800IslandTool.Pipeline.Export;
 
 public sealed class ExportOptions
 {
+    public IProgress<string>? Progress { get; set; }
     public bool FailOnValidationErrors { get; set; } = true;
     public bool IncludeValidationReport { get; set; } = true;
     public bool IncludeProjectSummary { get; set; } = true;

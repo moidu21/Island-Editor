@@ -1,4 +1,4 @@
-using Anno1800IslandTool.Core.Common;
+﻿using Anno1800IslandTool.Core.Common;
 using Xunit;
 namespace Anno1800IslandTool.Tests;
 public class IntegerGridTextTests

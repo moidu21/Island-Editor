@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
@@ -92,7 +92,7 @@ internal static class Program
   Check(project.GeneratedBinaryFileReplacements.Keys.Count(k=>k.EndsWith(".dds"))==3,"All three DDS previews regenerated");
   var mainWindow = new MainWindow();
   UiLocalizationManager.ApplyTo(mainWindow);
-  Check(mainWindow.Title=="Anno1800IslandTool v46.156","Window title ends at version");
+  Check(mainWindow.Title=="Anno1800IslandTool v46.173","Window title ends at version");
   var switchLabel = new TextBlock{Text="Outil actif"};
   var dynamicLabel = new TextBlock{Text=Anno1800IslandTool.Core.Localization.TextCatalog.F($"Hauteur cible : {123.5:0.00}")};
   foreach(var lang in new[]{UiLanguage.English,UiLanguage.German,UiLanguage.French})
@@ -102,7 +102,85 @@ internal static class Program
    Check(switchLabel.Text==UiLocalizationManager.T("Outil actif"),"Static label switches repeatedly");
    Check(dynamicLabel.Text.StartsWith(lang==UiLanguage.English?"Target height":lang==UiLanguage.German?"Zielhöhe":"Hauteur cible"),"Dynamic label switches repeatedly");
   }
+  var placementProject=new Anno1800IslandTool.Core.Models.IslandProject();
+  placementProject.Root.MapSize=64;
+  placementProject.Rd3d.GridWidth=2048;placementProject.Rd3d.GridHeight=2048;
+  placementProject.GameData.TerrainHeightMap=new Anno1800IslandTool.Core.Terrain.CoarseHeightMap{Width=129,Height=129,SampleEncoding=Anno1800IslandTool.Core.Terrain.TerrainHeightSampleEncoding.WorldUnits,Samples=Enumerable.Repeat(5f,129*129).ToArray()};
+  var gpu=new Terrain3DGpuWindow(placementProject,0);
+  var gpuType=typeof(Terrain3DGpuWindow);
+  gpuType.GetField("_initializing",flags)!.SetValue(gpu,true); // No resource dialogs in this control test.
+  var tools=(ComboBox)gpu.FindName("BrushToolListBox");
+  var wheel=gpuType.GetMethod("HandlePlacementWheel",flags)!;
+  tools.SelectedIndex=11;
+  var rotation=(TextBox)gpu.FindName("MineRotation");rotation.Text="0";
+  var wheelEvent=new System.Windows.Input.MouseWheelEventArgs(System.Windows.Input.Mouse.PrimaryDevice,0,120){RoutedEvent=System.Windows.Input.Mouse.PreviewMouseWheelEvent};
+  Check((bool)wheel.Invoke(gpu,new object[]{wheelEvent})! && wheelEvent.Handled && rotation.Text=="15","Mine wheel changes rotation");
+  rotation.Text="90";
+  var sceneY=(float)gpuType.GetMethod("WorldHeightToSceneY",flags)!.Invoke(gpu,new object[]{5d})!;
+  var point=new System.Numerics.Vector3(10.5f*32,sceneY,10.5f*32);
+  gpuType.GetMethod("AddMinePoint",flags)!.Invoke(gpu,new object[]{point});
+  var pendingMines=(System.Collections.IList)gpuType.GetField("_pendingMines",flags)!.GetValue(gpu)!;
+  Check(pendingMines.Count==1,"One click adds a complete mine");
+  var minePlacement=(Anno1800IslandTool.Pipeline.Services.MineSlotPlacement)pendingMines[0]!;
+  Check(Math.Abs(minePlacement.Mountain.X-16.5f)<.001f,"Wheel orientation determines mine work area");
+  foreach(var tool in new[]{12,13})
+  {
+   tools.SelectedIndex=tool;
+   var unchangedWheel=new System.Windows.Input.MouseWheelEventArgs(System.Windows.Input.Mouse.PrimaryDevice,0,120){RoutedEvent=System.Windows.Input.Mouse.PreviewMouseWheelEvent};
+   Check(!(bool)wheel.Invoke(gpu,new object[]{unchangedWheel})! && !unchangedWheel.Handled,"Clay/oil wheel remains camera zoom");
+  }
+  tools.SelectedIndex=14;
+  var adjustWheel=gpuType.GetMethod("AdjustPlacementWheel",flags)!;
+  var sceneryScale=(TextBox)gpu.FindName("SceneryScale");
+  var sceneryAngle=(TextBox)gpu.FindName("SceneryRotation");
+  sceneryScale.Text="1";sceneryAngle.Text="45";
+  adjustWheel.Invoke(gpu,new object[]{120,true});
+  Check(sceneryScale.Text=="1.1" && sceneryAngle.Text=="45","Ctrl wheel scales scenery without rotation");
+  adjustWheel.Invoke(gpu,new object[]{120,false});
+  Check(sceneryAngle.Text=="60" && sceneryScale.Text=="1.1","Wheel rotates scenery without scaling");
+  sceneryScale.Text="20";adjustWheel.Invoke(gpu,new object[]{120,true});
+  Check(sceneryScale.Text=="20","Scale remains within supported limits");
+  var choiceType=gpuType.GetNestedType("SceneryChoice",System.Reflection.BindingFlags.NonPublic)!;
+  var sceneryChoice=Activator.CreateInstance(choiceType,new object[]{"data/graphics/test.prp","test",0})!;
+  var models=(ComboBox)gpu.FindName("SceneryModel");models.ItemsSource=new[]{sceneryChoice};models.SelectedIndex=0;
+  var destructible=(CheckBox)gpu.FindName("SceneryDestructible");
+  Check(destructible.IsChecked==false,"New scenery remains protected by default");
+  destructible.IsChecked=true;
+  gpuType.GetMethod("AddSceneryPoint",flags)!.Invoke(gpu,new object[]{point});
+  destructible.IsChecked=false;
+  gpuType.GetMethod("AddSceneryPoint",flags)!.Invoke(gpu,new object[]{point});
+  var pendingProps=(System.Collections.Generic.List<Anno1800IslandTool.Pipeline.Services.SceneryPlacement>)gpuType.GetField("_pendingScenery",flags)!.GetValue(gpu)!;
+  Check(pendingProps.Count==2 && pendingProps[0].Destructible && !pendingProps[1].Destructible,"Protection is captured per placement");
+  tools.SelectedIndex=11;
+  var elevatedY=(float)gpuType.GetMethod("WorldHeightToSceneY",flags)!.Invoke(gpu,new object[]{12d})!;
+  var vertices=new[]{new System.Numerics.Vector3(0,elevatedY,0),new System.Numerics.Vector3(2048,elevatedY,0),new System.Numerics.Vector3(0,elevatedY,2048),new System.Numerics.Vector3(2048,elevatedY,2048)};
+  var triangles=new[]{0,1,2,1,3,2};
+  var mesh=new HelixToolkit.SharpDX.MeshGeometry3D{Positions=new HelixToolkit.Vector3Collection(vertices),Indices=new HelixToolkit.IntCollection(triangles)};
+  gpuType.GetField("_geometry",flags)!.SetValue(gpu,mesh);
+  var rayType=gpuType.Assembly.GetType("Anno1800IslandTool.UI.TerrainRayIndex")!;
+  var rayIndex=rayType.GetMethod("Build")!.Invoke(null,new object[]{vertices,triangles});
+  gpuType.GetField("_terrainRayIndex",flags)!.SetValue(gpu,rayIndex);
+  gpuType.GetField("_workSupportPoints",flags)!.SetValue(gpu,new[]{new System.Numerics.Vector3(0,-2,0),new System.Numerics.Vector3(1,-2,1)});
+  var supported=(Anno1800IslandTool.Pipeline.Services.MineSlotPlacement)gpuType.GetMethod("CursorMinePlacement",flags)!.Invoke(gpu,new object[]{point})!;
+  Check(Math.Abs(supported.Entrance.Y-12)<.01f,"Mine uses visible fine terrain rather than stale coarse height 5");
+  Check(Math.Abs(supported.Mountain.Y-14)<.01f,"Work model lower edge rests above visible terrain");
+  Check(Math.Abs(supported.WorkAreaGroundOffset-2)<.01f,"Support offset survives placement for validation");
+  pendingProps.Clear();pendingMines.Clear();gpu.Close();
+  var detailCheck=(CheckBox)materialWindow.FindName("RockDetailCheckBox");
+  var detailSlider=(Slider)materialWindow.FindName("RockDetailStrengthSlider");
+  Check(detailCheck.IsChecked==false,"Rock detail is opt-in");
+  detailCheck.IsChecked=true;detailSlider.Value=19;
+  var detailOptions=(Anno1800IslandTool.Core.Terrain.TerrainTopologyMaterialOptions)typeof(TerrainMaterialMapWindow).GetMethod("ReadTopologyOptions",flags)!.Invoke(materialWindow,null)!;
+  Check(!detailOptions.RockDetailEnabled && ((FrameworkElement)detailCheck.Parent).Visibility==Visibility.Collapsed,"Legacy material mixing is disabled and hidden");
+  foreach(var lang in new[]{UiLanguage.French,UiLanguage.English,UiLanguage.German})
+  {
+    UiLocalizationManager.SetStartupPreference(lang,save:false);UiLocalizationManager.ApplyTo(materialWindow);
+    var surface=new SurfaceDetailWindow(project,new Anno1800IslandTool.Core.Models.MaterialSetDefinition{Materials=new(){new(){Id=30,FileName="data/mountain.xml"}}});
+    var enable=(CheckBox)typeof(SurfaceDetailWindow).GetField("enabled",flags)!.GetValue(surface)!;
+    Check(enable.Content.ToString()==Anno1800IslandTool.Core.Localization.TextCatalog.T("Activer les tintmaps détaillées"),"Translated surface detail option");surface.Close();
+  }
   Console.WriteLine($"PASS: {checks} WPF selection/localization checks (FR/EN/DE), no window opened.");
  }
 }
+
 

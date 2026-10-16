@@ -1,4 +1,4 @@
-namespace Anno1800IslandTool.Core.Terrain;
+﻿namespace Anno1800IslandTool.Core.Terrain;
 
 /// <summary>
 /// Codec haut niveau pour MaterialIDs2 / MaterialAlphas2.

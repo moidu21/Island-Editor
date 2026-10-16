@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 
 namespace Anno1800IslandTool.Core.Performance;

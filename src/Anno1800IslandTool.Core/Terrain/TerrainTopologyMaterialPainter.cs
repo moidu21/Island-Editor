@@ -109,6 +109,10 @@ public static class TerrainTopologyMaterialPainter
             if(options.OpaqueBaseMaterialId is int baseId)Add(baseId);
             for(int y=by*blockSize;y<Math.Min((by+1)*blockSize,materialMap.Height);y++)
             for(int x=bx*blockSize;x<Math.Min((bx+1)*blockSize,materialMap.Width);x++)Add(decisions[y*materialMap.Width+x].MaterialId);
+            if(options.RockDetailEnabled && options.RockDetailStrength>0)
+                for(int y=by*blockSize;y<Math.Min((by+1)*blockSize,materialMap.Height);y++)
+                for(int x=bx*blockSize;x<Math.Min((bx+1)*blockSize,materialMap.Width);x++)
+                    if(decisions[y*materialMap.Width+x].Slope>Math.Max(.25f,options.FlatSlopeMaximum))Add(options.RockDetailMaterialId);
             for(int y=by*blockSize;y<Math.Min((by+1)*blockSize,materialMap.Height);y++)
             for(int x=bx*blockSize;x<Math.Min((bx+1)*blockSize,materialMap.Width);x++)
             {
@@ -210,6 +214,13 @@ public static class TerrainTopologyMaterialPainter
                         materialMap.SetCellAlphaWeights(x,y,weights);
                         result.AffectedMaterialIds.Add(options.FlatTilingMaterialId);
                     }
+                }
+                if (options.RockDetailEnabled && options.RockDetailStrength > 0)
+                {
+                    float height = TerrainHeightEncoding.SampleCoarseHeightMapWorld(heightMap,
+                        (x+.5)/materialMap.Width*(heightMap.Width-1), (y+.5)/materialMap.Height*(heightMap.Height-1));
+                    if (ApplyRockDetail(materialMap,x,y,decision.Slope,height,options))
+                        result.AffectedMaterialIds.Add(options.RockDetailMaterialId);
                 }
                 if (options.OpaqueBaseMaterialId is int baseId)
                     TerrainMaterialUnderlay.EnsureCell(materialMap, x, y, baseId);
@@ -381,6 +392,32 @@ public static class TerrainTopologyMaterialPainter
             alphas|=(uint)Math.Clamp((int)Math.Round(weights[id]),0,31)<<(slot*5);
         }
         map.PackedMaterialAlphas[map.GetAlphaIndex(x,y)]=alphas;
+    }
+
+    // Material weights only: height is read for the surface mask, never written.
+    private static bool ApplyRockDetail(TerrainMaterialMap map,int x,int y,float slope,float height,TerrainTopologyMaterialOptions options)
+    {
+        float gate=Smooth(Math.Max(.25f,options.FlatSlopeMaximum),Math.Max(.5f,options.SteepSlopeMinimum),slope)
+            *Smooth(1f,4f,height);
+        if(gate<=0)return false;
+        var ids=map.GetMaterialIdBlock(x/map.MaterialIdBlockSize,y/map.MaterialIdBlockSize);
+        int target=Array.IndexOf(ids,options.RockDetailMaterialId);
+        if(target<0)return false; // Never evict a neighbouring cell's material.
+        double wx=(x+.5)/map.Width*(options.WorldWidth>0?options.WorldWidth:map.Width);
+        double wy=(y+.5)/map.Height*(options.WorldHeight>0?options.WorldHeight:map.Height);
+        // Warped, multi-scale surface variation avoids straight stripes and tile seams.
+        double warp=SurfaceVariation(wx/19,wy/19)*3;
+        double pattern=.65*SurfaceVariation(wx/4+warp,wy/4+height/7)
+            +.35*SurfaceVariation(wx/11-height/13,wy/11+warp);
+        double mix=gate*(options.RockDetailStrength/31.0)*(.35+.65*pattern);
+        var weights=map.GetCellAlphaWeights(x,y);
+        for(int i=0;i<weights.Length;i++)
+        {
+            if(i==target)weights[i]=(int)Math.Round(weights[i]+(31-weights[i])*mix);
+            else if(options.OpaqueBaseMaterialId!=ids[i])weights[i]=(int)Math.Round(weights[i]*(1-mix));
+        }
+        map.SetCellAlphaWeights(x,y,weights);
+        return true;
     }
 
     private static bool TryAddLayer(TerrainMaterialMap map,int x,int y,int id,int weight)

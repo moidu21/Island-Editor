@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
 using System.Runtime.InteropServices;
@@ -486,6 +486,7 @@ public partial class Terrain3DGpuWindow : Window
             TerrainMemoryTrace.Write("GPU buffers ready");
             RefreshGamePreviewGeometry();
             if (GamePreviewCheck.IsChecked == true) await BuildGamePreviewAsync();
+            RefreshRegisteredCoasts();
             UpdateFootprintHitPlane();
             UpdateFootprintPreview();
             stopwatch.Stop();
@@ -847,6 +848,7 @@ public partial class Terrain3DGpuWindow : Window
     {
         if (GetBrushMode() == GpuBrushMode.Navigation)
         {
+            HidePlacementCursor();
             HideBrushOverlay();
             return;
         }
@@ -856,12 +858,14 @@ public partial class Terrain3DGpuWindow : Window
         var hit = FindEditableSurfaceHit(pointer);
         if (hit is null)
         {
+            HidePlacementCursor();
             QueueBrushHoverRefresh();
             return;
         }
         _lastBrushPoint = hit.PointHit;
         _hasLastBrushPoint = true;
         UpdateBrushOverlay(pointer, _lastBrushPoint);
+        UpdatePlacementCursor(_lastBrushPoint);
 
         if (IsBeachMode() && _beachDragMode != BeachDragMode.None && e.LeftButton == MouseButtonState.Pressed)
         {
@@ -1023,6 +1027,7 @@ public partial class Terrain3DGpuWindow : Window
 
     private void GpuViewport_MouseLeave(object sender, MouseEventArgs e)
     {
+        HidePlacementCursor();
         // Le contrôle DirectX SwapChain peut produire un MouseLeave transitoire
         // pendant une capture. Le temporisateur décide depuis le vrai curseur Windows.
     }
@@ -1074,6 +1079,7 @@ public partial class Terrain3DGpuWindow : Window
         _lastBrushPoint = hit.PointHit;
         _hasLastBrushPoint = true;
         UpdateBrushOverlay(pointer, _lastBrushPoint);
+        UpdatePlacementCursor(_lastBrushPoint);
     }
 
     private void QueueBrushHoverRefresh()
@@ -1092,6 +1098,7 @@ public partial class Terrain3DGpuWindow : Window
             _lastBrushPoint = hit.PointHit;
             _hasLastBrushPoint = true;
             UpdateBrushOverlay(pointer, _lastBrushPoint);
+        UpdatePlacementCursor(_lastBrushPoint);
         }), System.Windows.Threading.DispatcherPriority.Render);
     }
 
@@ -1112,6 +1119,7 @@ public partial class Terrain3DGpuWindow : Window
     {
         if (GetBrushMode() == GpuBrushMode.Navigation)
         {
+            HidePlacementCursor();
             HideBrushOverlay();
             return;
         }
@@ -1394,6 +1402,8 @@ public partial class Terrain3DGpuWindow : Window
         RefreshActiveToolUi();
         if (GpuToolTabs is null) return;
         var mode=GetBrushMode();
+        HidePlacementCursor();
+        _ = LoadPlacementCursorAsync();
         if(mode==GpuBrushMode.Scenery && _sceneryCatalog.Count==0)_ = RefreshSceneryCatalogAsync();
         GpuToolTabs.SelectedIndex=mode is GpuBrushMode.Scenery or GpuBrushMode.Clay or GpuBrushMode.Oil or GpuBrushMode.Mine or GpuBrushMode.Trees or GpuBrushMode.River or GpuBrushMode.Beach or GpuBrushMode.MeshBeach ? 1
             : mode is GpuBrushMode.AddFootprint or GpuBrushMode.RemoveFootprint ? 2 : 0;
@@ -1456,8 +1466,8 @@ public partial class Terrain3DGpuWindow : Window
             GpuBrushMode.MeshBeach => Anno1800IslandTool.Core.Localization.TextCatalog.T("Côte constructible : sélectionnez le rivage existant. Le relief et les matériaux ne sont pas modifiés."),
             GpuBrushMode.Clay => Anno1800IslandTool.Core.Localization.TextCatalog.T("Argile : cliquez sur un terrain émergé pour ajouter un puits."),
             GpuBrushMode.Oil => Anno1800IslandTool.Core.Localization.TextCatalog.T("Pétrole : cliquez pour ajouter un puits ; répétez pour former un gisement."),
-            GpuBrushMode.Scenery => Anno1800IslandTool.Core.Localization.TextCatalog.T("Décors : choisissez un modèle puis cliquez sur le terrain pour le poser."),
-            GpuBrushMode.Mine => Anno1800IslandTool.Core.Localization.TextCatalog.T("Mine : cliquez l’entrée, puis la montagne. Les deux points définissent l’orientation et la zone de travail."),
+            GpuBrushMode.Scenery => Anno1800IslandTool.Core.Localization.TextCatalog.T("Molette : rotation. Ctrl + molette : taille. Clic gauche : placer. Validez le terrain pour enregistrer les placements."),
+            GpuBrushMode.Mine => Anno1800IslandTool.Core.Localization.TextCatalog.T("Molette : rotation. Clic gauche : placer la mine."),
             GpuBrushMode.River => Anno1800IslandTool.Core.Localization.TextCatalog.T("Rivière : cliquez les points dans l’ordre de l’écoulement. L’aperçu arrondit automatiquement les changements de direction."),
             _ => Anno1800IslandTool.Core.Localization.TextCatalog.T("Déplacer : bouton gauche ou droit pour tourner, molette maintenue pour déplacer, roulette pour zoomer.")
         };
@@ -2195,6 +2205,7 @@ public partial class Terrain3DGpuWindow : Window
 
     private void GpuViewport_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
+        if (HandlePlacementWheel(e)) return;
         if (GpuViewport.Camera is not HxPerspectiveCamera camera)
         {
             return;
